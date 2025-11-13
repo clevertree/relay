@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -70,6 +71,25 @@ impl Default for ConfigPaths {
     }
 }
 
+fn apply_env_overrides(cfg: &mut Config) {
+    if let Ok(v) = env::var("RELAY_MASTER_ENDPOINT") {
+        if !v.is_empty() { cfg.master_endpoint = v; }
+    }
+    if let Ok(v) = env::var("RELAY_DATA_PATH") {
+        if !v.is_empty() { cfg.data_path = v; }
+    }
+    if let Ok(v) = env::var("RELAY_HTTP_PORT") {
+        if let Ok(p) = v.parse::<u16>() { cfg.http.port = p; }
+    }
+    if let Ok(v) = env::var("RELAY_GIT_PORT") {
+        if let Ok(p) = v.parse::<u16>() { cfg.git.port = p; }
+    }
+    if let Ok(v) = env::var("RELAY_WEB_ONLY") {
+        let vlow = v.to_ascii_lowercase();
+        cfg.features.web_only = matches!(vlow.as_str(), "1" | "true" | "yes");
+    }
+}
+
 pub fn load_config(paths: Option<&ConfigPaths>) -> Result<Config> {
     let paths = paths.cloned().unwrap_or_default();
     if !paths.config_path.exists() {
@@ -80,7 +100,8 @@ pub fn load_config(paths: Option<&ConfigPaths>) -> Result<Config> {
                 parent.display()
             ))?;
         }
-        let cfg = Config::default();
+        let mut cfg = Config::default();
+        apply_env_overrides(&mut cfg);
         save_config(&cfg, Some(&paths))?;
         return Ok(cfg);
     }
@@ -91,7 +112,8 @@ pub fn load_config(paths: Option<&ConfigPaths>) -> Result<Config> {
             paths.config_path.display()
         )
     })?;
-    let cfg: Config = toml::from_str(&content).with_context(|| "Failed to parse TOML config")?;
+    let mut cfg: Config = toml::from_str(&content).with_context(|| "Failed to parse TOML config")?;
+    apply_env_overrides(&mut cfg);
     Ok(cfg)
 }
 

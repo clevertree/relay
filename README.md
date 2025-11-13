@@ -22,7 +22,7 @@ After the initial scaffold (Milestone M1), you will be able to:
 
 1. Clone the repo and install prerequisites (Rust 1.91+, Node 20+).
 2. Build Rust workspace: `cargo build`.
-3. Run the web app (dev): `cd apps/web && npm install && npm run dev`.
+3. Install JS deps and start dev pipeline (Turborepo): `pnpm install && pnpm dev`.
 4. Create a sample repository: `cargo run -p relay-cli -- init --repo movies --template movies --path ./host/repos`.
 5. Start host mode: `cargo run -p relay-cli -- host start --port 8080 --root ./host` (also starts the git protocol server on port 9418 by default).
 6. Clone from another client via git protocol: `cargo run -p relay-cli -- git clone git://localhost:9418/movies ./movies`.
@@ -50,7 +50,7 @@ See `docs/PLAN.md` for the full target layout. High-level overview:
 - Scripts in `scripts/` for dev/CI
 ### Core Components
 
-- **relay-core**: Shared Rust library with crypto, IPFS, git protocol server/client (via mygit, default port 9418), and HTTP server/client.
+- **relay-core**: Shared Rust library with crypto, IPFS, git protocol server/client (via mygit, default port 9418, feature-gated), and HTTP server/client.
 - **relay-cli**: Command-line interface for host mode operations
 - **relay-wasm**: WebAssembly build for browser-only mode
 - **UI (Next.js)**: Universal frontend (static export for Tauri + web)

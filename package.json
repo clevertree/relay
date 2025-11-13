@@ -1,0 +1,20 @@
+{
+  "name": "relay-monorepo",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "turbo run format",
+    "build:rust": "cargo build",
+    "test:rust": "cargo test",
+    "lint:rust": "cargo clippy -- -D warnings",
+    "format:rust": "cargo fmt",
+    "dev:host": "cargo run -p relay-cli -- host start --port 8080 --root ./host"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.12"
+  }
+}

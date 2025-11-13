@@ -1,7 +1,9 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use relay_core::{load_config, save_config, Config, ConfigPaths};
-use std::path::PathBuf;
+use relay_core::{load_config, save_config, quick_validate_repo, validate_repo, ValidationReport, Config, ConfigPaths, start_git_server};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::io::Write;
 
 #[derive(Parser, Debug)]
 #[command(name = "relay")] 
@@ -42,6 +44,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: GitCmd,
     },
+    /// Git hook management
+    Hooks {
+        #[command(subcommand)]
+        cmd: HooksCmd,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -69,9 +76,9 @@ enum HostCmd {
 
 #[derive(Subcommand, Debug)]
 enum RepoCmd {
-    /// Validate repository at path (stub)
-    Validate { path: String },
-    /// List repositories under root (stub)
+    /// Validate repository at path
+    Validate { path: String, #[arg(long)] json: bool },
+    /// List repositories under root
     List { root: String },
 }
 
@@ -97,6 +104,14 @@ enum GitCmd {
     Commit { #[arg(short, long)] message: String },
 }
 
+#[derive(Subcommand, Debug)]
+enum HooksCmd {
+    /// Install git hooks into the given repository
+    Install { path: String },
+    /// Run a validation as hooks would, for testing
+    Test { path: String, #[arg(long)] json: bool },
+}
+
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
@@ -112,6 +127,7 @@ fn main() -> Result<()> {
         Commands::Repo { cmd } => handle_repo(cmd)?,
         Commands::Ipfs { cmd } => handle_ipfs(cmd)?,
         Commands::Git { cmd } => handle_git(cmd)?,
+        Commands::Hooks { cmd } => handle_hooks(cmd)?,
     }
     Ok(())
 }
@@ -165,17 +181,38 @@ fn handle_config(cmd: ConfigCmd, paths: ConfigPaths) -> Result<()> {
     Ok(())
 }
 
-fn handle_host(cmd: HostCmd, _paths: ConfigPaths) -> Result<()> {
+fn handle_host(cmd: HostCmd, paths: ConfigPaths) -> Result<()> {
     match cmd {
         HostCmd::Start { port, root } => {
+            // Load config (to get git.port and others)
+            let cfg = load(&paths)?;
+            let repos_root = std::path::Path::new(&root).join("repos");
+            if !repos_root.exists() {
+                std::fs::create_dir_all(&repos_root).with_context(|| format!(
+                    "Failed to create repos root at {}",
+                    repos_root.display()
+                ))?;
+            }
+
             println!(
-                "[stub] Starting host HTTP server on port {} with root {} (and git server on {} if enabled)",
-                port, root, 9418
+                "Starting host HTTP server on port {} with root {}",
+                port, root
             );
-            // TODO: call into relay_core http + git servers.
+
+            // Start git protocol server using relay-core (feature-gated)
+            let git_port = cfg.git.port;
+            let handle = start_git_server(git_port, &repos_root)?;
+            println!(
+                "Git server running on git://localhost:{}/ — serving {}",
+                handle.port,
+                handle.repos_root.display()
+            );
+
+            // TODO: Start HTTP server here (to be implemented in M4). For now, block or exit.
+            println!("HTTP server not yet implemented; exiting after starting git scaffold.");
         }
         HostCmd::Stop => {
-            println!("[stub] Stopping host server (not implemented yet)");
+            println!("Stopping host server: not implemented yet");
         }
     }
     Ok(())
@@ -183,11 +220,46 @@ fn handle_host(cmd: HostCmd, _paths: ConfigPaths) -> Result<()> {
 
 fn handle_repo(cmd: RepoCmd) -> Result<()> {
     match cmd {
-        RepoCmd::Validate { path } => {
-            println!("[stub] Validating repo at {}", path);
+        RepoCmd::Validate { path, json } => {
+            // Run full validator
+            match validate_repo(&path) {
+                Ok(report) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    } else {
+                        if report.passed {
+                            println!("Validation PASSED for {}", path);
+                        } else {
+                            eprintln!("Validation FAILED for {}:", path);
+                            for err in &report.errors {
+                                eprintln!("- [{}] {} — {}", err.code, err.path, err.message);
+                            }
+                        }
+                    }
+                    if !report.passed {
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Validation error: {}", e);
+                    std::process::exit(2);
+                }
+            }
         }
         RepoCmd::List { root } => {
-            println!("[stub] Listing repos under {}", root);
+            // Simple listing of immediate child directories under root as repos
+            let root_path = std::path::Path::new(&root);
+            if root_path.is_dir() {
+                for entry in std::fs::read_dir(root_path)? {
+                    let entry = entry?;
+                    if entry.file_type()?.is_dir() {
+                        println!("{}", entry.file_name().to_string_lossy());
+                    }
+                }
+            } else {
+                eprintln!("Not a directory: {}", root);
+                std::process::exit(1);
+            }
         }
     }
     Ok(())
@@ -210,4 +282,84 @@ fn handle_git(cmd: GitCmd) -> Result<()> {
         GitCmd::Commit { message } => println!("[stub] git commit -m {}", message),
     }
     Ok(())
+}
+
+fn handle_hooks(cmd: HooksCmd) -> Result<()> {
+    match cmd {
+        HooksCmd::Install { path } => {
+            let repo_root = Path::new(&path);
+            let git_hooks = repo_root.join(".git").join("hooks");
+            if !git_hooks.exists() {
+                eprintln!(
+                    "Git hooks directory not found at {}. Is this a git repository?",
+                    git_hooks.display()
+                );
+                std::fs::create_dir_all(&git_hooks).with_context(|| format!(
+                    "Failed to create hooks directory at {}",
+                    git_hooks.display()
+                ))?;
+            }
+            // Pre-commit hook (sh)
+            let pre_commit = git_hooks.join("pre-commit");
+            let script = make_sh_hook_script(&repo_root);
+            fs::write(&pre_commit, script).with_context(|| format!(
+                "Failed to write pre-commit at {}",
+                pre_commit.display()
+            ))?;
+            // Pre-receive hook (sh)
+            let pre_receive = git_hooks.join("pre-receive");
+            let pre_receive_body = make_sh_hook_script(&repo_root);
+            fs::write(&pre_receive, pre_receive_body).with_context(|| format!(
+                "Failed to write pre-receive at {}",
+                pre_receive.display()
+            ))?;
+            // Try to set executable bits on Unix (no-op on Windows)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = 0o755;
+                fs::set_permissions(&pre_commit, fs::Permissions::from_mode(mode))?;
+                fs::set_permissions(&pre_receive, fs::Permissions::from_mode(mode))?;
+            }
+            println!("Installed hooks to {}", git_hooks.display());
+        }
+        HooksCmd::Test { path, json } => {
+            match validate_repo(&path) {
+                Ok(report) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    } else if report.passed {
+                        println!("Hooks test: PASSED for {}", path);
+                    } else {
+                        eprintln!("Hooks test: FAILED for {}:", path);
+                        for err in &report.errors {
+                            eprintln!("- [{}] {} — {}", err.code, err.path, err.message);
+                        }
+                    }
+                    if !report.passed { std::process::exit(1); }
+                }
+                Err(e) => {
+                    eprintln!("Hook validation error: {}", e);
+                    std::process::exit(2);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn make_sh_hook_script(repo_root: &Path) -> String {
+    let abs = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    let path_str = abs.to_string_lossy().to_string();
+    format!(r"#!/bin/sh
+# Auto-generated by relay hooks install
+if command -v relay >/dev/null 2>&1; then
+  relay repo validate --path "{path}"
+elif command -v relay-cli >/dev/null 2>&1; then
+  relay-cli repo validate --path "{path}"
+else
+  echo 'relay (or relay-cli) not found in PATH' 1>&2
+  exit 1
+fi
+", path = path_str)
 }

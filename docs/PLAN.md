@@ -80,7 +80,8 @@ Notes:
 ### 3.1 relay-core (Rust)
 - Crypto utilities (keys, signatures; pluggable KMS later)
 - Repository management (init, open, validate)
-- Git protocol server/client using mygit
+- Git protocol server/client using mygit (feature-gated)
+  - Cargo feature `git` enabled by default for native builds; disabled in WASM targets
   - Default server port `9418` (configurable)
   - Start/stop lifecycle controlled by host mode
   - Advertise refs; support clone/fetch/pull/push

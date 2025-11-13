@@ -5,10 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9e3cf762-2300-415a-8e0d-88ab47406eda" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.toml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/template/movies/.relay/schema.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/template/movies/.relay/schema.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/crates/relay-cli/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-cli/src/main.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/crates/relay-core/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-core/Cargo.toml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/crates/relay-core/src/config.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-core/src/config.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/crates/relay-core/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-core/src/lib.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/PLAN.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/PLAN.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -102,7 +106,8 @@
       <workItem from="1762900632602" duration="7966000" />
       <workItem from="1762948355906" duration="293000" />
       <workItem from="1762970782778" duration="322000" />
-      <workItem from="1763062531192" duration="6559000" />
+      <workItem from="1763062531192" duration="9254000" />
+      <workItem from="1763071952761" duration="966000" />
     </task>
     <servers />
   </component>

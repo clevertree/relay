@@ -8,11 +8,18 @@ license = "MIT OR Apache-2.0"
 name = "relay_core"
 path = "src/lib.rs"
 
+[features]
+# Git integration via mygit (to be added). Enabled by default for native builds.
+default = ["git"]
+git = []
+
 [dependencies]
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 toml = { workspace = true }
 directories = { workspace = true }
 log = { workspace = true }
+glob = { workspace = true }
