@@ -1,0 +1,70 @@
+version: 1
+
+title: Movie repository schema
+
+description: >
+  Defines the file layout and JSON schemas for a movie repository.
+  Each movie has a metadata file under data/<year>/<title_trimmed>/meta.json.
+  Index files live under /byDirector/<director>/<movie>.json and
+  /byGenre/<genre>/<movie>.json and point to the movie folder using
+  the '<year>/<title_trimmed>' relative path.
+
+patterns:
+  - type: primary
+    path: "data/{year:[0-9]{4}}/{title_trimmed}/meta.json"
+    description: "Primary movie metadata file stored under data/<year>/<title_trimmed>/meta.json"
+    schema:
+      type: object
+      required:
+        - title
+        - imdb
+        - ipfs
+      properties:
+        title:
+          type: string
+          description: "Official movie title (human readable)"
+        imdb:
+          type: string
+          pattern: "^tt\\d+$"
+          description: "IMDB id (e.g. tt0111161)"
+        ipfs:
+          type: string
+          description: "IPFS CID pointing to the movie assets or metadata"
+
+  - type: index
+    path: "byDirector/{director}/{movie}.json"
+    description: "Index by director. The 'movie' field contains '<year>/<title_trimmed>' pointing at the movie data folder."
+    schema:
+      type: object
+      required:
+        - movie
+      properties:
+        movie:
+          type: string
+          pattern: "^[0-9]{4}/[a-z0-9\\-]+$"
+          description: "Relative pointer to movie folder in /data, format '<year>/<title_trimmed>'"
+
+  - type: index
+    path: "byGenre/{genre}/{movie}.json"
+    description: "Index by genre. Same shape as byDirector entries."
+    schema:
+      type: object
+      required:
+        - movie
+      properties:
+        movie:
+          type: string
+          pattern: "^[0-9]{4}/[a-z0-9\\-]+$"
+          description: "Relative pointer to movie folder in /data, format '<year>/<title_trimmed>'"
+
+metadata:
+  title_trim_rules: >
+    The <title_trimmed> segment should be a filesystem-safe, lowercase
+    representation of the movie title.
+    Recommended transform:
+    - Trim leading/trailing whitespace
+    - Convert to lower-case
+    - Replace spaces and sequences of non-alphanumeric characters with single hyphens
+    - Remove characters not safe for filenames
+    Example: "The Lord of the Rings: The Fellowship of the Ring" ->
+    "the-lord-of-the-rings-the-fellowship-of-the-ring"
