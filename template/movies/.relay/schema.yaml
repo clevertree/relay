@@ -9,27 +9,27 @@ description: >
   /byGenre/<genre>/<movie>.json and point to the movie folder using
   the '<year>/<title_trimmed>' relative path.
 
-patterns:
+interface: "movie-browser"
+
+database:
   - type: primary
-    path: "data/{year:[0-9]{4}}/{title_trimmed}/meta.json"
+    path: "data/{year:[0-9]{4}}/{title_trimmed}"
     description: "Primary movie metadata file stored under data/<year>/<title_trimmed>/meta.json"
-    schema:
-      type: object
-      required:
-        - title
-        - imdb
-        - ipfs
-      properties:
-        title:
-          type: string
-          description: "Official movie title (human readable)"
-        imdb:
-          type: string
-          pattern: "^tt\\d+$"
-          description: "IMDB id (e.g. tt0111161)"
-        ipfs:
-          type: string
-          description: "IPFS CID pointing to the movie assets or metadata"
+    meta:
+      path: 'meta.json'
+      title:
+        type: string
+        description: "Official movie title (human readable)"
+      imdb:
+        type: string
+        pattern: "^tt\\d+$"
+        description: "IMDB id (e.g. tt0111161)"
+      ipfs:
+        type: string
+        description: "IPFS CID pointing to the movie assets or metadata"
+    assets:
+      path: "assets/{asset:[\w_-]+}.{ext:mp4|jpg|png}" # TODO: alphanumeric asset names + underscore
+      description: "Folder containing movie assets"
 
   - type: index
     path: "byDirector/{director}/{movie}.json"

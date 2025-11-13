@@ -1,10 +1,12 @@
 # Relay - Decentralized FileShare
 
-A decentralized content distribution platform built on git protocl,featuring IPFS content sharing, and dual-mode client support (desktop + web).
+A decentralized content distribution platform built on git protocol, 
+featuring IPFS content sharing, and dual-mode client support (desktop + web).
 
 ## Overview
 
-Relay enables community-driven content repositories (movies, TV shows, games, voting) with distributed file sharing via IPFS. The platform features:
+Relay enables community-driven content repositories (movies, TV shows, games, voting) 
+with distributed file sharing via IPFS. The platform features:
 
 - **Dual-mode clients**: Desktop (Tauri) and Web (static export + WebAssembly)
 - **Shared core library**: `relay-core` powers both CLI and UI clients
@@ -13,11 +15,12 @@ Relay enables community-driven content repositories (movies, TV shows, games, vo
 - **Docker support**: Containerized host mode deployment
 
 ## Quick Start
+TBD
 
 ### Prerequisites
 
-- Rust 1.70+ and Cargo
-- Node.js 18+ and npm
+- Rust 1.91+ and Cargo
+- Node.js 20+ and npm
 - Docker (optional, for containerized deployment)
 
 ## Architecture Overview
@@ -26,7 +29,7 @@ Relay enables community-driven content repositories (movies, TV shows, games, vo
  TBD 
 ### Core Components
 
-- **relay-core**: Shared Rust library with crypto, IPFS, blockchain state management
+- **relay-core**: Shared Rust library with crypto, IPFS, git repository server/client, and http server/client.
 - **relay-cli**: Command-line interface for host mode operations
 - **relay-wasm**: WebAssembly build for browser-only mode
 - **UI (Next.js)**: Universal frontend (static export for Tauri + web)
@@ -35,11 +38,19 @@ Relay enables community-driven content repositories (movies, TV shows, games, vo
 
 Shared Configuration
 --------------------
-The CLI and UI share a single on-disk configuration file (`~/.relay/config.toml` by default). Configuration options include the RPC endpoint, default wallet, and data path. The UI provides a settings page to edit configuration values; changes are saved to disk immediately and update the CLI behavior (for example, the SQLite state DB location). 
+The CLI and UI share a single on-disk configuration file (`~/.relay/config.toml` by default).
+Configuration options include the Default master node endpoint `node1.relaynet.online` and default data path. 
+The UI provides a settings page to edit configuration values; config changes are saved to disk immediately and affect the CLI behavior 
 
 Default Client Behavior
 -----------------------
-By default the client does not download git repository data. Browsing channels initially connects to a master peer server (a host-mode client running the Rust static http frontend). A local git clone is created only when a user explicitly chooses to download a channel repository via the UI or the CLI. This keeps the default client lightweight and network-driven while allowing offline/offloading via optional local storage when requested.
+By default, the client does not download git repository data. 
+Browsing channels initially connects to a master peer server 
+(a host-mode client running the Rust static http frontend). 
+A local git clone is created only when a user explicitly chooses to 
+download a channel repository via the UI or the CLI. 
+This keeps the default client lightweight and network-driven
+while allowing offline/offloading via optional local storage when requested.
 
 ## Key Features
 
@@ -76,7 +87,7 @@ By default the client does not download git repository data. Browsing channels i
 
 **Flow:**
 ```
-Blockchain IPFS Hash → DHT Search → Peer Connection → Download/Stream
+IPFS Hash → DHT Search → Peer Connection → Download/Stream
 ```
 
 ### 4. Repository Schema + Browser UI
@@ -88,18 +99,25 @@ Blockchain IPFS Hash → DHT Search → Peer Connection → Download/Stream
 - Large content viewing area with real-time search
 - Repository browser works with any git repository in host mode. In default non-host mode, a client needs to make an HTTP call to a master peer node in order to download repository files. 
 - Specialized UIs (e.g., Movie Browser) defined in repository interface. 
+- `relay-core` provides an http client that requests files from a master peer server following the schema rules.
+- By default, the only files that a repo browser are allowed to load within it's own UI are:
+   .md, .css, .png, .jpg, .jpeg, .gif, .svg, .json, .wasm, .html, .txt, .xml, .pdf
+- Client UI is never allowed to load any insecure files from the host directory, like javascript.
 
+### 5. Host file structure
+- clients in 'host' mode host a static file http server on a port defined in config
+- Client 'host' mode static http server hosts all files in <app dir>/host/* including repository files
+- Clients in 'web' mode connect to the same server via http GET call, and can cache requests. 
 
 ## Technology Stack
 
 ### Backend (Rust)
-- **relay-core** - Shared library (crypto, IPFS, blockchain state)
+- **relay-core** - Shared library (crypto, IPFS, repository state)
 - **relay-cli** - Command-line interface
 - **relay-wasm** - WebAssembly bindings for browser
 - **Tokio** - Async runtime
 - **Tauri** - Desktop framework
 - **WebIPFS** - IPFS protocol implementation
-- **SQLite** - Local blockchain state storage
 
 ### Frontend (Next.js + TypeScript + MUI)
 - **Next.js 14** - Framework with static export
@@ -131,29 +149,14 @@ TBD
 ## Use Cases
 
 ### Use Case 1: Initiate new Repository
-1. Client initializes a new repository 'movies' in <appdir>/repos/<repo-name> using `movies` template which creates default repo files.
-2. 
-
-### Use Case 1: Look up channels for a wallet/account id
-1. Connect to RPC server (testnet/mainnet, defaulting to testnet)
-2. Once connected list the known wallets associated with the server in the same UI. 
-These are wallet ids where the public key is known, including local wallets. 
-Distinguish between local and remote wallets (without phrases/keys). 
-3. Clicking on 'Open' opens the WalletBrowser which lists the wallet's channels which are defined by contracts.
-TBD: determine best way of listing contracts per wallet. 
-4. Each channel has a 'Browse' button which opens the ChannelBrowser for that server/wallet/channel==contract
-5. The channel browser provides a default UI for browsing transactions based on a primary key defined by the wallet.
-All entries are listed by primary key with stat columns defined by the contract. There is a search feature. 
-
-### Use Case 2: Contribute Content
-1. Generate/import NEAR wallet identity for testnet
-2. Connect to NEAR RPC (testnet or mainnet)
-3. Navigate to Movies channel. Click option to download entire blockchain offline.
-3b. Download entire movie blockchain and store the state in sqlite.
-4. Create new movie entry with metadata and IPFS hash
-5. Submit modification requests to fix errors via blockchain transaction
-6. Rate movies with 1-5 star reviews via blockchain transaction
-7. Validate entry was made on blockchain.
+1. Client initializes a new repository 'movies' in <appdir>/host/repos/<repo-name> using `movies` template which creates default repo files.
+2. Client adds a movie entry with metadata and IPFS hash and attempts to commit the change.
+3. Client receives error message due to missing schema rules and the commit is rejected.
+4. Client corrects the schema and commits the change which is accepted by the git server.
+5. Client initiates 'host' mode, which runs the static http server in the background.
+6. 2nd Client spins up in a separate directory and connects to the socket of the first client.
+7. 2nd Client browses first client which shows the host directory, and a list of repos. 
+8. 2nd Client browses /repos/movies and sees the new movie entry.
 
 ## Development Guidelines
 
@@ -169,14 +172,11 @@ All entries are listed by primary key with stat columns defined by the contract.
 
 1. **Add to shared library** (`crates/relay-core/src/`)
 2. **Add CLI command** (`crates/relay-cli/src/main.rs`)
-3. **Add Tauri command** (`ui/src-tauri/src/main.rs`)
-4. **Add React component** (`ui/src/components/`)
-5. **Add API route** (if needed in host mode: `ui/src/pages/api/`)
-6. **Write tests** (Rust unit, React component, Cypress E2E)
+3. **Write tests** (Rust unit, React component, Cypress E2E)
 
 ### Key Conventions
 
-- **Naming**: Use `snake_case` for Rust, `camelCase` for TypeScript/React
+- **Naming**: Use `camelCase` for TypeScript/React
 - **Error handling**: Always use `Result<T, E>` in Rust, try/catch in TypeScript
 - **Async patterns**: Use `async/await` in both Rust and TypeScript
 - **State management**: Zustand for React, no global mutable state in Rust
@@ -185,38 +185,7 @@ All entries are listed by primary key with stat columns defined by the contract.
 
 ## Testing Strategy
 
-
-### Rust Tests
-
-```bash
-# Test all workspace crates
-cargo test --workspace
-
-# Test specific crate
-cargo test -p relay-core
-
-# Test with logging
-RUST_LOG=debug cargo test
-
-# Integration tests
-cargo test --test '*'
-```
-
-### Frontend Tests
-
-```bash
-# Component tests (Vitest)
-npm run test:unit
-
-# Component tests (Cypress)
-npm run test:component
-
-# E2E tests (Cypress)
-npm run test:e2e
-
-# All tests
-npm test
-```
+TBD
 
 ### Desktop Application Tests
 
@@ -281,23 +250,16 @@ npm run test:tauri
 - [ ] OS keychain integration for secure key storage
 - [ ] Additional channels (TV shows, games, voting)
 - [ ] Advanced IPFS features (streaming, resume)
-- [ ] Real-time blockchain event subscriptions
-- [ ] Transactions monitor improvements
 - [ ] Performance optimizations
 
 ### Phase 4: Future Enhancements 🔮
 - [ ] WebRTC peer-to-peer communication
-- [ ] Multi-signature transaction support
-- [ ] Smart contract editor and deployment tools
 - [ ] Mobile apps (React Native)
-- [ ] Hardware wallet support (Ledger, Trezor)
 - [ ] Analytics dashboard
 - [ ] Governance/voting mechanisms
-- [ ] Channel auditing and compliance tools
 
 ### Additional Resources
 
-- [NEAR Protocol Documentation](https://docs.near.org/)
 - [Tauri Documentation](https://tauri.app/v1/guides/)
 - [Next.js Documentation](https://nextjs.org/docs)
 - [IPFS Documentation](https://docs.ipfs.tech/)
