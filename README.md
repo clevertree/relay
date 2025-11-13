@@ -302,3 +302,14 @@ npm run test:tauri
 - [Tauri Documentation](https://tauri.app/v1/guides/)
 - [Next.js Documentation](https://nextjs.org/docs)
 - [IPFS Documentation](https://docs.ipfs.tech/)
+
+
+
+## Host Repositories: Non-bare, Checked-out Working Trees (Git Interop)
+
+- Repositories served by host mode live under `host/repos/<name>` as non-bare repositories with a checked-out working tree on the default branch (master unless configured).
+- There is no `.git` suffix in the served path. Example remote URL: `git://<host>:9418/movies` maps to `host/repos/movies`.
+- The HTTP static server serves files directly from these checked-out working trees so that repository contents are fully accessible to the web UI.
+- The git server MUST support standard Git operations against these working trees, including `clone`, `fetch`, `pull`, and `push`, while keeping the working tree updated appropriately (e.g., fast-forward pulls).
+- Full Git protocol interoperability is a priority: any standard Git client should be able to operate against the server using the `git://` protocol.
+- Validation on push is blockchain-like: a pre-receive–style validation checks the entire set of incoming commits against the repository schema. If any commit violates the schema rules, the whole push is rejected. This ensures an append-only, validated history.
