@@ -1,70 +1,39 @@
-version: 1
-
-title: Movie repository schema
-
-description: >
-  Defines the file layout and JSON schemas for a movie repository.
-  Each movie has a metadata file under data/<year>/<title_trimmed>/meta.json.
-  Index files live under /byDirector/<director>/<movie>.json and
-  /byGenre/<genre>/<movie>.json and point to the movie folder using
-  the '<year>/<title_trimmed>' relative path.
-
-interface: "movie-browser"
-
-database:
-  - type: primary
-    path: "data/{year:[0-9]{4}}/{title_trimmed}"
-    description: "Primary movie metadata file stored under data/<year>/<title_trimmed>/meta.json"
-    meta:
-      path: 'meta.json'
-      title:
-        type: string
-        description: "Official movie title (human readable)"
-      imdb:
-        type: string
-        pattern: "^tt\\d+$"
-        description: "IMDB id (e.g. tt0111161)"
-      ipfs:
-        type: string
-        description: "IPFS CID pointing to the movie assets or metadata"
-    assets:
-      path: "assets/{asset:[\w_-]+}.{ext:mp4|jpg|png}" # TODO: alphanumeric asset names + underscore
-      description: "Folder containing movie assets"
-
-  - type: index
-    path: "byDirector/{director}/{movie}.json"
-    description: "Index by director. The 'movie' field contains '<year>/<title_trimmed>' pointing at the movie data folder."
-    schema:
-      type: object
-      required:
-        - movie
-      properties:
-        movie:
+# Minimal schema for the default 'movies' repository
+version: 0.1
+name: movies
+allow_extensions:
+  - .md
+  - .css
+  - .png
+  - .jpg
+  - .jpeg
+  - .gif
+  - .svg
+  - .json
+  - .wasm
+  - .html
+  - .txt
+  - .xml
+  - .pdf
+content:
+  collections:
+    movies:
+      path: "data/movies"
+      file: "*.json"
+      fields:
+        - key: title
           type: string
-          pattern: "^[0-9]{4}/[a-z0-9\\-]+$"
-          description: "Relative pointer to movie folder in /data, format '<year>/<title_trimmed>'"
-
-  - type: index
-    path: "byGenre/{genre}/{movie}.json"
-    description: "Index by genre. Same shape as byDirector entries."
-    schema:
-      type: object
-      required:
-        - movie
-      properties:
-        movie:
+          required: true
+        - key: year
+          type: number
+          required: true
+        - key: ipfs_hash
           type: string
-          pattern: "^[0-9]{4}/[a-z0-9\\-]+$"
-          description: "Relative pointer to movie folder in /data, format '<year>/<title_trimmed>'"
-
-metadata:
-  title_trim_rules: >
-    The <title_trimmed> segment should be a filesystem-safe, lowercase
-    representation of the movie title.
-    Recommended transform:
-    - Trim leading/trailing whitespace
-    - Convert to lower-case
-    - Replace spaces and sequences of non-alphanumeric characters with single hyphens
-    - Remove characters not safe for filenames
-    Example: "The Lord of the Rings: The Fellowship of the Ring" ->
-    "the-lord-of-the-rings-the-fellowship-of-the-ring"
+          required: true
+        - key: poster
+          type: string
+          required: false
+      constraints:
+        max_file_size_kb: 256
+        allowed_mime:
+          - application/json

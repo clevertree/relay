@@ -1,4 +1,4 @@
-# Relay - Decentralized FileShare
+# Relay - Decentralized Browsable Repository
 
 A decentralized content distribution platform built on git protocol, 
 featuring IPFS content sharing, and dual-mode client support (desktop + web).
@@ -15,7 +15,20 @@ with distributed file sharing via IPFS. The platform features:
 - **Docker support**: Containerized host mode deployment
 
 ## Quick Start
-TBD
+
+Until the codebase is bootstrapped, see `docs/PLAN.md` for the full implementation blueprint and milestones.
+
+After the initial scaffold (Milestone M1), you will be able to:
+
+1. Clone the repo and install prerequisites (Rust 1.91+, Node 20+).
+2. Build Rust workspace: `cargo build`.
+3. Run the web app (dev): `cd apps/web && npm install && npm run dev`.
+4. Create a sample repository: `cargo run -p relay-cli -- init --repo movies --template movies --path ./host/repos`.
+5. Start host mode: `cargo run -p relay-cli -- host start --port 8080 --root ./host` (also starts the git protocol server on port 9418 by default).
+6. Clone from another client via git protocol: `cargo run -p relay-cli -- git clone git://localhost:9418/movies ./movies`.
+7. Open the UI at `http://localhost:8080` or use the Tauri desktop app after build.
+
+Note: Commands are indicative and will be available as milestones are completed.
 
 ### Prerequisites
 
@@ -26,10 +39,18 @@ TBD
 ## Architecture Overview
 
 ### Project Structure
- TBD 
+
+See `docs/PLAN.md` for the full target layout. High-level overview:
+
+- Rust workspace in `crates/`: `relay-core`, `relay-cli`, `relay-wasm`
+- Apps in `apps/`: `web` (Next.js), `desktop` (Tauri)
+- Runtime host data in `host/`: `repos/`, `static/`, `hooks/`
+- Templates in `template/` (e.g., `template/movies/.relay/schema.yaml`)
+- Docs in `docs/` (this plan and future architecture docs)
+- Scripts in `scripts/` for dev/CI
 ### Core Components
 
-- **relay-core**: Shared Rust library with crypto, IPFS, git repository server/client, and http server/client.
+- **relay-core**: Shared Rust library with crypto, IPFS, git protocol server/client (via mygit, default port 9418), and HTTP server/client.
 - **relay-cli**: Command-line interface for host mode operations
 - **relay-wasm**: WebAssembly build for browser-only mode
 - **UI (Next.js)**: Universal frontend (static export for Tauri + web)
@@ -91,7 +112,6 @@ IPFS Hash → DHT Search → Peer Connection → Download/Stream
 ```
 
 ### 4. Repository Schema + Browser UI
-
 - Defined by files in git repo which are automatically downloaded when browsing: 
 -- Browser interface text, css and content defined by `.relay/interface.md`
 -- File structure to define each Repository `.relay/schema.yaml`
@@ -103,6 +123,7 @@ IPFS Hash → DHT Search → Peer Connection → Download/Stream
 - By default, the only files that a repo browser are allowed to load within it's own UI are:
    .md, .css, .png, .jpg, .jpeg, .gif, .svg, .json, .wasm, .html, .txt, .xml, .pdf
 - Client UI is never allowed to load any insecure files from the host directory, like javascript.
+- When a repo approves a commit and merges, it pushes the changes to each of the other master peer servers.
 
 ### 5. Host file structure
 - clients in 'host' mode host a static file http server on a port defined in config
@@ -144,7 +165,25 @@ IPFS Hash → DHT Search → Peer Connection → Download/Stream
 ## Getting Started
 
 ### Development Workflow
-TBD
+
+Refer to `docs/PLAN.md` §14 for day-to-day commands. Summary:
+
+- Rust
+  - Format/lint/test: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+- Web (Next.js)
+  - Dev: `cd apps/web && npm install && npm run dev`
+  - Build + export: `npm run build && npx next export`
+- Desktop (Tauri)
+  - Dev: `cd apps/desktop && npm install && npm run tauri dev`
+- Host mode
+  - Start server: `cargo run -p relay-cli -- host start --port 8080 --root ./host`
+- Git operations (mygit protocol)
+  - Clone: `cargo run -p relay-cli -- git clone git://localhost:9418/movies ./movies`
+  - Fetch: `cargo run -p relay-cli -- git fetch git://localhost:9418/movies`
+  - Pull: `cargo run -p relay-cli -- git pull git://localhost:9418/movies master`
+  - Push: `cargo run -p relay-cli -- git push git://localhost:9418/movies master`
+- Templates
+  - Init sample repo: `cargo run -p relay-cli -- init --repo movies --template movies --path ./host/repos`
 
 ## Use Cases
 

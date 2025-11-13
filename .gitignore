@@ -1,0 +1,20 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+/apps/web/.next/
+/apps/web/out/
+/apps/**/dist/
+
+# Tauri
+/apps/desktop/src-tauri/target/
+
+# Runtime data
+/host/static/
+/host/repos/
+/host/hooks/
+
+# Relay config (user-specific)
+**/.relay/

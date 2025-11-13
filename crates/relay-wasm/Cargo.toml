@@ -1,0 +1,17 @@
+[package]
+name = "relay-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "relay_wasm"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+# Note: In future, enable wasm-bindgen and console_error_panic_hook for wasm32 target
