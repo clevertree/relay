@@ -2,8 +2,9 @@
 import { spawnSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
-const repoRoot = path.resolve(new URL(import.meta.url).pathname, '..', '..', '..')
+const repoRoot = process.cwd()
 const src = path.join(repoRoot, 'media', 'icon-transparent.png')
 const outDir = path.join(repoRoot, 'src-tauri', 'icons')
 
@@ -16,7 +17,7 @@ fs.mkdirSync(outDir, { recursive: true })
 
 // Try tauri CLI `tauri icon --input <in> --output <outdir>`
 console.log('Trying tauri CLI to generate icons...')
-let r = spawnSync('tauri', ['icon', '--input', src, '--output', outDir], { stdio: 'inherit' })
+let r = spawnSync('cargo', ['tauri', 'icon', src, '--output', outDir], { stdio: 'inherit' })
 if (r.status === 0) {
   console.log('Icons generated with tauri CLI ->', outDir)
   process.exit(0)

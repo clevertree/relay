@@ -26,6 +26,9 @@ export const useConfigStore = create<Store>()(
       ...defaultConfig,
       set: (partial) => set({ ...get(), ...partial }),
     }),
-    { name: 'relay-ui-config' }
+    { 
+      name: 'relay-ui-config',
+      skipHydration: true,
+    }
   )
 );

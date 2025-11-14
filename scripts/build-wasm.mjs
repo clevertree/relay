@@ -33,7 +33,7 @@ async function buildOnce() {
   await run('rustup', ['target', 'add', 'wasm32-unknown-unknown']).catch(() => {});
   await run('cargo', ['build', '--release', '--target', 'wasm32-unknown-unknown'], { cwd: crateDir });
 
-  const targetWasm = path.join(crateDir, 'target', 'wasm32-unknown-unknown', 'release', 'relay_wasm.wasm');
+  const targetWasm = path.join(projectRoot, 'target', 'wasm32-unknown-unknown', 'release', 'relay_wasm.wasm');
 
   // Prefer wasm-bindgen if available, otherwise try wasm-pack
   async function has(cmd) {
