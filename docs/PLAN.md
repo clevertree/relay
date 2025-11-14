@@ -286,3 +286,17 @@ M6 — Packaging + Docker + CI
 - Host mode: local server that serves repos and static site
 - Web mode: browser-only, using WASM and HTTP to a host peer
 - Interface: `.relay/interface.md` describing UI content and behavior hints
+
+## 16. Deployment: Rackspace spot instance (overview)
+
+We plan to run our first master/test node on a Rackspace spot (preemptible) instance and use an existing Terraform API setup and an existing kubeconfig for deployment. The detailed, actionable deployment guide is in `docs/DEPLOYMENT.md` (recommended next steps, CI/CD wiring, artifact publishing to GHCR and GitHub Releases, DNS/TLS for `node1.relaynet.online`, and operational best practices).
+
+Quick summary:
+- Provision a Rackspace spot instance via Terraform (user already has API access)
+- Ensure kubeconfig is set up so we can apply manifests to the target cluster
+- Deploy build runners (buildkit/kaniko or self-hosted GitHub Actions runners) on the cluster
+- CI builds: multi-arch CLI + desktop installers; push images to GHCR and installers to GitHub Releases (and optionally to object storage with CDN)
+- Expose downloads and endpoints under `node1.relaynet.online` with TLS (cert-manager / Let's Encrypt) and an Ingress controller
+- Use remote object storage (Rackspace OpenStack Swift, or S3-compatible endpoint) for persisting build artifacts so spot evictions do not lose artifacts
+
+See `docs/DEPLOYMENT.md` for the full plan and commands.
