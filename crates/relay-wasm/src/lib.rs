@@ -37,6 +37,7 @@ pub struct ContentDef {
     pub properties: Option<std::collections::BTreeMap<String, ContentProperty>>,
 }
 
+#[allow(non_snake_case)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct IndexDef {
     pub path: String,
@@ -53,7 +54,7 @@ pub struct RepoSchema {
     pub title: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default = "default_index")] 
+    #[serde(default = "default_index")]
     pub index: String,
     #[serde(default)]
     pub content: Option<ContentDef>,
@@ -61,7 +62,9 @@ pub struct RepoSchema {
     pub indices: Option<std::collections::BTreeMap<String, IndexDef>>,
 }
 
-fn default_index() -> String { "README.md".to_string() }
+fn default_index() -> String {
+    "README.md".to_string()
+}
 
 impl RepoSchema {
     pub fn basic(&self) -> (u32, Option<&str>, Option<&str>, &str) {

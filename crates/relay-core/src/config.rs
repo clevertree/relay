@@ -26,7 +26,9 @@ pub struct GitConfig {
     pub shallow_default: bool,
 }
 
-fn default_git_shallow_default() -> bool { true }
+fn default_git_shallow_default() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeaturesConfig {
@@ -40,7 +42,10 @@ impl Default for Config {
             master_endpoint: "https://node1.relaynet.online".to_string(),
             data_path: default_data_path,
             http: HttpConfig { port: 8080 },
-            git: GitConfig { port: 9418, shallow_default: true },
+            git: GitConfig {
+                port: 9418,
+                shallow_default: true,
+            },
             features: FeaturesConfig { web_only: false },
         }
     }
@@ -62,7 +67,11 @@ fn default_config_path() -> PathBuf {
 fn default_data_path_string() -> String {
     if let Some(base) = BaseDirs::new() {
         let home = base.home_dir();
-        return home.join(".relay").join("host").to_string_lossy().into_owned();
+        return home
+            .join(".relay")
+            .join("host")
+            .to_string_lossy()
+            .into_owned();
     }
     ".relay/host".to_string()
 }
@@ -77,16 +86,24 @@ impl Default for ConfigPaths {
 
 fn apply_env_overrides(cfg: &mut Config) {
     if let Ok(v) = env::var("RELAY_MASTER_ENDPOINT") {
-        if !v.is_empty() { cfg.master_endpoint = v; }
+        if !v.is_empty() {
+            cfg.master_endpoint = v;
+        }
     }
     if let Ok(v) = env::var("RELAY_DATA_PATH") {
-        if !v.is_empty() { cfg.data_path = v; }
+        if !v.is_empty() {
+            cfg.data_path = v;
+        }
     }
     if let Ok(v) = env::var("RELAY_HTTP_PORT") {
-        if let Ok(p) = v.parse::<u16>() { cfg.http.port = p; }
+        if let Ok(p) = v.parse::<u16>() {
+            cfg.http.port = p;
+        }
     }
     if let Ok(v) = env::var("RELAY_GIT_PORT") {
-        if let Ok(p) = v.parse::<u16>() { cfg.git.port = p; }
+        if let Ok(p) = v.parse::<u16>() {
+            cfg.git.port = p;
+        }
     }
     if let Ok(v) = env::var("RELAY_GIT_SHALLOW_DEFAULT") {
         let vlow = v.to_ascii_lowercase();
@@ -103,10 +120,9 @@ pub fn load_config(paths: Option<&ConfigPaths>) -> Result<Config> {
     if !paths.config_path.exists() {
         // Ensure parent exists
         if let Some(parent) = paths.config_path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!(
-                "Failed to create config directory: {}",
-                parent.display()
-            ))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
         let mut cfg = Config::default();
         apply_env_overrides(&mut cfg);
@@ -120,7 +136,8 @@ pub fn load_config(paths: Option<&ConfigPaths>) -> Result<Config> {
             paths.config_path.display()
         )
     })?;
-    let mut cfg: Config = toml::from_str(&content).with_context(|| "Failed to parse TOML config")?;
+    let mut cfg: Config =
+        toml::from_str(&content).with_context(|| "Failed to parse TOML config")?;
     apply_env_overrides(&mut cfg);
     Ok(cfg)
 }
@@ -128,10 +145,8 @@ pub fn load_config(paths: Option<&ConfigPaths>) -> Result<Config> {
 pub fn save_config(cfg: &Config, paths: Option<&ConfigPaths>) -> Result<()> {
     let paths = paths.cloned().unwrap_or_default();
     if let Some(parent) = paths.config_path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!(
-            "Failed to create config directory: {}",
-            parent.display()
-        ))?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
     }
     let toml_str = toml::to_string_pretty(cfg).with_context(|| "Failed to serialize config")?;
     fs::write(&paths.config_path, toml_str).with_context(|| {

@@ -6,25 +6,34 @@ export type RepoInfo = { name: string; path?: string; description?: string };
 
 export async function listRepos(): Promise<RepoInfo[]> {
   const { masterEndpoint } = useConfigStore.getState();
-  const url = `${masterEndpoint.replace(/\/$/, '')}/api/repos`;
+  const base = masterEndpoint.replace(/\/$/, '');
+  // Directory listing JSON at /repos/ expected: [ { name, path, type } ]
+  const url = `${base}/repos/`;
   try {
-    const res = await axios.get(url, { timeout: 2500 });
-    if (Array.isArray(res.data)) return res.data as RepoInfo[];
+    const res = await axios.get(url, { timeout: 2500, responseType: 'json' });
+    const arr = res.data as any;
+    if (Array.isArray(arr)) {
+      return arr
+        .filter((e) => e && (e.type === 'dir' || e.type === 'directory'))
+        .map((e) => ({ name: e.name || e.path || '', path: e.path }))
+        .filter((r) => r.name);
+    }
   } catch (e) {
-    // fall back to mock data
+    // return empty if unavailable
   }
-  return [ { name: 'movies', description: 'Sample movies repository' } ];
+  return [];
 }
 
 export async function fetchInterfaceMarkdown(repo: string): Promise<string> {
   const { masterEndpoint } = useConfigStore.getState();
-  const url = `${masterEndpoint.replace(/\/$/, '')}/api/repos/${encodeURIComponent(repo)}/file?path=.relay/interface.md`;
+  const base = masterEndpoint.replace(/\/$/, '');
+  // Static file access only
+  const url = `${base}/repos/${encodeURIComponent(repo)}/.relay/interface.md`;
   try {
-    const res = await axios.get(url, { timeout: 2500 });
+    const res = await axios.get(url, { timeout: 2500, responseType: 'text' });
     if (typeof res.data === 'string') return res.data;
-    if (res.data && typeof res.data.content === 'string') return res.data.content;
   } catch (e) {
-    // mock content
+    // no mocks; return empty string
   }
-  return `# ${repo}\n\nWelcome to the ${repo} repository.\n\nThis is a placeholder interface. Configure your host HTTP server to serve .relay/interface.md.`;
+  return '';
 }

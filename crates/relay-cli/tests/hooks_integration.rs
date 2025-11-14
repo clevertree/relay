@@ -18,7 +18,13 @@ fn hooks_valid_push_succeeds_scaffold() {
         eprintln!("skipping (set RELAY_IT_GIT=1 to enable)");
         return;
     }
-    let relay = match relay_bin() { Some(p) => p, None => { eprintln!("missing RELAY_IT_RELAY_BIN"); return; } };
+    let relay = match relay_bin() {
+        Some(p) => p,
+        None => {
+            eprintln!("missing RELAY_IT_RELAY_BIN");
+            return;
+        }
+    };
 
     // Scaffold only: outline steps for a valid push scenario.
     // 1) init bare repo, 2) clone, 3) add schema + valid content, 4) install hooks, 5) push and expect success.
@@ -34,7 +40,13 @@ fn hooks_invalid_push_rejected_scaffold() {
         eprintln!("skipping (set RELAY_IT_GIT=1 to enable)");
         return;
     }
-    let relay = match relay_bin() { Some(p) => p, None => { eprintln!("missing RELAY_IT_RELAY_BIN"); return; } };
+    let relay = match relay_bin() {
+        Some(p) => p,
+        None => {
+            eprintln!("missing RELAY_IT_RELAY_BIN");
+            return;
+        }
+    };
 
     // Scaffold only: outline steps for an invalid push scenario.
     // 1) init bare repo, 2) clone, 3) add schema + invalid content, 4) install hooks, 5) push and expect non-zero exit.

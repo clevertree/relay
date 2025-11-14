@@ -186,11 +186,15 @@ Notes:
   - `features.web_only = true|false`
 
 ## 6. HTTP API (Host Mode) — Draft
-- `GET /api/repos` -> `[ { name, path, description } ]`
-- `GET /api/repos/:name/tree?path=...` -> directory listing (filtered by allowlist)
-- `GET /api/repos/:name/file?path=...` -> raw file (only allowed types)
+- `GET /repos/` -> JSON array of immediate children (files and directories) under the repos root. Non-recursive.
+- `GET /repos/:name/<dir>` -> JSON array of immediate children under that directory. Non-recursive.
+- `GET /repos/:name/<file>` -> serves raw file content (static hosting).
 - `GET /static/*` -> static assets
-- `POST /api/repos/:name/validate` -> validate current head (auth TBD)
+
+Notes:
+- Browsing local or remote peers uses the same static paths; only the base endpoint differs.
+- The UI never calls `/api/...`; it reads files and directory listings directly from static paths.
+- Directory listing JSON entries contain `{ name, path, type }`; the UI filters directories/files client-side for browse and filter behaviors.
 
 Security: enforce allowlist of extensions in server and client. Deny JS and any executable content.
 

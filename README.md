@@ -377,7 +377,7 @@ The UI lives under `apps/web` (Next.js 14 + TypeScript + MUI) and is designed to
 pnpm install
 pnpm run web:dev
 ```
-Navigate to http://localhost:3000. The Home page lists repositories via the Host HTTP API when available; otherwise it falls back to mock data (e.g., a `movies` repo). The Repo page renders `.relay/interface.md` using a safe markdown renderer.
+Navigate to http://localhost:3000. The Home page shows repositories based on configured/static sources; if none are available it shows an empty list. The Repo page renders `.relay/interface.md` using a safe markdown renderer.
 
 ### Build and export to static files
 ```
@@ -397,7 +397,7 @@ The Settings page (top-right) lets you adjust:
 - HTTP and Git ports
 - Shallow clone preference
 
-Settings persist to browser storage and will be used by the web app for API calls. When the Host HTTP API is not yet available, the UI uses a graceful mock fallback so pages still render.
+Settings persist to browser storage and will be used by the web app. The UI reads repositories via static file hosting under `/repos` and shows empty lists when no repositories are available; no mock data is used.
 
 ### Repository Browser: Remote vs Local File Loading
 
@@ -414,8 +414,71 @@ This model keeps local usage flexible while providing strong safety defaults whe
 ### Repository YAML and Validation
 - Each repository may include a `relay.yaml` file at its root to describe:
   - Basic metadata: `version`, `title`, `description`, `index` (defaults to `README.md` when omitted)
-  - `content` template path and its properties (e.g., `data/{year}/{title}/meta.json`)
+  - `content` template path and its properties (e.g., `data/{year}/{title}/` with `metaFile` inside)
   - Named `indices` such as `byTitle`, `byDirector`, `byGenre`, each with `path` and optional `searchPath`
 - A reference schema file lives in `schema/relay.schema.yaml` in this monorepo. It documents the canonical shape of `relay.yaml` and is used as the basis for validators.
 - The web UI’s `RepositoryBrowser` component loads `<repo>/relay.yaml`, applies minimal validation based on the schema rules, defaults `index` to `README.md` when missing, then loads the index markdown for display.
-- TODO: Implement full JSON Schema validation in the UI and hook server-side validation to reject invalid `relay.yaml` via Git hooks.
+
+### Repository CLI — Validate, Insert, Search
+The `relay repo` commands operate against a repository root containing `relay.yaml` (see schema above). They use the shared `relay-repo` library for parsing, templating, and validation.
+
+1) Validate
+```
+relay repo validate --path <repo-root> [--json]
+```
+- Loads `<repo-root>/relay.yaml` and performs structural checks and on-disk validation:
+  - Ensures placeholders in templates correspond to `content.properties`
+  - Validates all discovered meta files against `content.properties`
+  - Checks index link directories resolve to existing content dirs
+- Exit codes: `0` (no violations), `2` (violations found), `1` (fatal error)
+
+2) Insert (Upsert)
+```
+relay repo insert --path <repo-root> --props '{"title":"The Matrix","year":1999,"director":"Lana Wachowski"}' [--replace]
+```
+- Renders `content.path` using slugified values of all keys in `content.properties` (e.g., `{title}`, `{year}`, `{director}`)
+- Creates/updates the content directory and writes `metaFile` (defaults to `meta.json`).
+  - Without `--replace`, merges incoming JSON into existing meta (shallow merge)
+  - With `--replace`, overwrites meta entirely
+- Creates directory links for each `indices.*.path` that point to the content directory.
+- Windows policy: if the command cannot create a proper symlink (or NTFS junction fallback) for index entries, the insert FAILS.
+
+3) Search
+```
+relay repo search --path <repo-root> --index <byTitle|byDirector|...> --query <text> [--limit N] [--json]
+```
+- Normalizes the query with the same slugify used for paths and returns index directories (symlink/junctions) that contain the substring.
+- Prints relative paths by default or a JSON array with `--json`.
+
+Examples
+```
+# Validate a repo
+relay repo validate --path ./host/repos/movies
+
+# Insert an entry
+relay repo insert --path ./host/repos/movies --props '{"title":"The Matrix","year":1999,"director":"Lana Wachowski"}'
+
+# Search by title and by director
+relay repo search --path ./host/repos/movies --index byTitle --query matrix
+relay repo search --path ./host/repos/movies --index byDirector --query lana
+```
+
+
+### Repository Browser — Browse & Filter
+
+The web UI browses repositories using static paths only. All file and directory requests are served under `/repos/<name>/<path>` at the configured Master Endpoint (local or remote). There are no API endpoints or mock fallbacks.
+
+- Root path `/` renders the repository index markdown specified by `relay.yaml#index` (defaults to `README.md`).
+- Directory listing contract (non-recursive):
+  - `GET /repos/` → JSON array of immediate children under the repos root
+  - `GET /repos/<name>/<dir>` → JSON array of immediate children under that directory
+  - `GET /repos/<name>/<file>` → raw file content
+  - Each JSON entry has `{ name, path, type }` where `type` is `file` or `dir` (or `symlink` for links)
+- Location and Filter are always visible in the Repository Browser:
+  - Location shows `/repo/<name>/<currentPath>` for clarity (visual only).
+  - The Filter input performs a client-side substring filter on the directory entries currently in memory.
+  - Clicking a directory navigates deeper, clears Filter, and focuses it for immediate narrowing of results.
+- Indices navigation: index roots (e.g., `byTitle/`, `byDirector/`, `byGenre/`) are derived dynamically from `relay.yaml#indices` and shown as quick navigation chips.
+- File viewing:
+  - Markdown (`.md`, `.markdown`, `.mdx`): rendered as HTML via a safe markdown renderer.
+  - Other types: displayed as plain text for now (specialized viewers may be added later).

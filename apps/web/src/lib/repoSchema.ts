@@ -11,6 +11,7 @@ export type IndexDef = {
 
 export type ContentDef = {
   path: string;
+  metaFile?: string; // defaults to meta.json
   description?: string;
   properties?: Record<string, {
     type?: "string" | "integer" | "number" | "boolean";
@@ -29,15 +30,48 @@ export type RepoSchema = {
   indices?: Record<string, IndexDef>;
 };
 
+export function defaultIndexPath(schema: RepoSchema | null | undefined): string {
+  const idx = schema?.index && typeof schema.index === "string" && schema.index.trim() ? schema.index : "README.md";
+  return idx;
+}
+
+export function defaultMetaFile(schema: RepoSchema | null | undefined): string {
+  const mf = schema?.content?.metaFile && schema.content.metaFile.trim() ? schema.content.metaFile : "meta.json";
+  return mf;
+}
+
+export function slugify(input: string): string {
+  const s = (input ?? "").toString().trim().toLowerCase();
+  // replace sequences of non-alphanumeric with single '-'
+  return s
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "");
+}
+
+export function computeIndexSearchPath(idx: IndexDef, query: string): string {
+  if (idx.searchPath && idx.searchPath.includes("{search}")) {
+    return idx.searchPath.replace("{search}", slugify(query));
+  }
+  // Fallback: use the base of idx.path (before first placeholder)
+  const p = idx.path || "";
+  const cut = p.indexOf("{");
+  const base = (cut >= 0 ? p.slice(0, cut) : p).replace(/\/+$/, "");
+  return base;
+}
+
 async function fetchRepoFile(repo: string, path: string): Promise<string> {
   const { masterEndpoint } = useConfigStore.getState();
   const base = masterEndpoint.replace(/\/$/, "");
-  const url = `${base}/api/repos/${encodeURIComponent(repo)}/file?path=${encodeURIComponent(path)}`;
-  const res = await axios.get(url, { timeout: 2500 }).catch(() => ({ data: null as any }));
-  const data = res?.data;
-  if (typeof data === "string") return data;
-  if (data && typeof data.content === "string") return data.content;
-  return "";
+  // Static file hosting: files are served directly from /repos/<name>/<path>
+  const clean = path.replace(/^\/+/, "");
+  const url = `${base}/repos/${encodeURIComponent(repo)}/${clean}`;
+  try {
+    const res = await axios.get(url, { timeout: 2500, responseType: 'text' });
+    return typeof res.data === "string" ? res.data : "";
+  } catch (e) {
+    return "";
+  }
 }
 
 export async function loadRepoSchema(repo: string): Promise<RepoSchema | null> {

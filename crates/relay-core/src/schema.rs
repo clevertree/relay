@@ -59,9 +59,8 @@ pub fn load_schema_from_repo<P: AsRef<Path>>(repo_root: P) -> Result<RepoSchema>
     if !schema_path.exists() {
         bail!("Schema file not found: {}", schema_path.display());
     }
-    let data = fs::read_to_string(&schema_path).with_context(|| {
-        format!("Failed to read schema file at {}", schema_path.display())
-    })?;
+    let data = fs::read_to_string(&schema_path)
+        .with_context(|| format!("Failed to read schema file at {}", schema_path.display()))?;
     let schema: RepoSchema = serde_yaml::from_str(&data)
         .with_context(|| format!("Failed to parse YAML schema at {}", schema_path.display()))?;
     Ok(schema)
@@ -132,7 +131,9 @@ pub fn validate_repo<P: AsRef<Path>>(repo_root: P) -> Result<ValidationReport> {
                                 // Extension check
                                 if let Some(ext) = entry.extension().and_then(|s| s.to_str()) {
                                     let dot_ext = format!(".{}", ext).to_ascii_lowercase();
-                                    if !allowed_exts.is_empty() && !allowed_exts.contains_key(&dot_ext) {
+                                    if !allowed_exts.is_empty()
+                                        && !allowed_exts.contains_key(&dot_ext)
+                                    {
                                         errors.push(ValidationError {
                                             path: entry.to_string_lossy().into_owned(),
                                             code: "ext.not_allowed".into(),
@@ -145,17 +146,17 @@ pub fn validate_repo<P: AsRef<Path>>(repo_root: P) -> Result<ValidationReport> {
                                         errors.push(ValidationError {
                                             path: entry.to_string_lossy().into_owned(),
                                             code: "ext.missing".into(),
-                                            message: "File has no extension but allowlist is enforced".into(),
+                                            message:
+                                                "File has no extension but allowlist is enforced"
+                                                    .into(),
                                         });
                                     }
                                 }
 
                                 // Size check
                                 if let Ok(md) = fs::metadata(&entry) {
-                                    if let Some(max_kb) = coll
-                                        .constraints
-                                        .as_ref()
-                                        .and_then(|c| c.max_file_size_kb)
+                                    if let Some(max_kb) =
+                                        coll.constraints.as_ref().and_then(|c| c.max_file_size_kb)
                                     {
                                         let size_kb = (md.len() + 1023) / 1024; // ceil
                                         if size_kb > max_kb {
@@ -198,14 +199,23 @@ pub fn validate_repo<P: AsRef<Path>>(repo_root: P) -> Result<ValidationReport> {
                                 {
                                     if let Some(fields) = &coll.fields {
                                         match fs::read_to_string(&entry) {
-                                            Ok(txt) => match serde_json::from_str::<serde_json::Value>(&txt) {
-                                                Ok(val) => validate_json_fields(&entry, fields, &mut errors, val),
-                                                Err(e) => errors.push(ValidationError {
-                                                    path: entry.to_string_lossy().into_owned(),
-                                                    code: "json.parse_error".into(),
-                                                    message: e.to_string(),
-                                                }),
-                                            },
+                                            Ok(txt) => {
+                                                match serde_json::from_str::<serde_json::Value>(
+                                                    &txt,
+                                                ) {
+                                                    Ok(val) => validate_json_fields(
+                                                        &entry,
+                                                        fields,
+                                                        &mut errors,
+                                                        val,
+                                                    ),
+                                                    Err(e) => errors.push(ValidationError {
+                                                        path: entry.to_string_lossy().into_owned(),
+                                                        code: "json.parse_error".into(),
+                                                        message: e.to_string(),
+                                                    }),
+                                                }
+                                            }
                                             Err(e) => errors.push(ValidationError {
                                                 path: entry.to_string_lossy().into_owned(),
                                                 code: "file.read_error".into(),
@@ -227,7 +237,10 @@ pub fn validate_repo<P: AsRef<Path>>(repo_root: P) -> Result<ValidationReport> {
         }
     }
 
-    Ok(ValidationReport { passed: errors.is_empty(), errors })
+    Ok(ValidationReport {
+        passed: errors.is_empty(),
+        errors,
+    })
 }
 
 fn guess_mime_from_ext(path: &Path) -> Option<String> {
@@ -249,7 +262,12 @@ fn guess_mime_from_ext(path: &Path) -> Option<String> {
     Some(m.to_string())
 }
 
-fn validate_json_fields(path: &Path, fields: &Vec<FieldSpec>, errors: &mut Vec<ValidationError>, val: serde_json::Value) {
+fn validate_json_fields(
+    path: &Path,
+    fields: &Vec<FieldSpec>,
+    errors: &mut Vec<ValidationError>,
+    val: serde_json::Value,
+) {
     let obj = match val.as_object() {
         Some(o) => o,
         None => {
@@ -351,9 +369,8 @@ pub fn load_schema_from_repo<P: AsRef<Path>>(repo_root: P) -> Result<RepoSchema>
     if !schema_path.exists() {
         bail!("Schema file not found: {}", schema_path.display());
     }
-    let data = fs::read_to_string(&schema_path).with_context(|| {
-        format!("Failed to read schema file at {}", schema_path.display())
-    })?;
+    let data = fs::read_to_string(&schema_path)
+        .with_context(|| format!("Failed to read schema file at {}", schema_path.display()))?;
     let schema: RepoSchema = serde_yaml::from_str(&data)
         .with_context(|| format!("Failed to parse YAML schema at {}", schema_path.display()))?;
     Ok(schema)
@@ -404,7 +421,10 @@ pub fn validate_repo<P: AsRef<Path>>(repo_root: P) -> Result<ValidationReport> {
     }
     // ... (rest of validation omitted for brevity in this view)
     // For now, return passed if schema loads.
-    Ok(ValidationReport { passed: true, errors: vec![] })
+    Ok(ValidationReport {
+        passed: true,
+        errors: vec![],
+    })
 }
 
 // -------------------- New: Allowlist helpers for Host HTTP API --------------------
@@ -413,8 +433,8 @@ pub fn validate_repo<P: AsRef<Path>>(repo_root: P) -> Result<ValidationReport> {
 /// Mirrors README/PLAN: .md, .css, .png, .jpg, .jpeg, .gif, .svg, .json, .wasm, .html, .txt, .xml, .pdf
 pub fn default_allowed_extensions() -> &'static [&'static str] {
     &[
-        ".md", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
-        ".json", ".wasm", ".html", ".txt", ".xml", ".pdf",
+        ".md", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".json", ".wasm", ".html", ".txt",
+        ".xml", ".pdf",
     ]
 }
 
@@ -429,12 +449,18 @@ pub fn allowed_extensions<P: AsRef<Path>>(repo_root: P) -> Result<HashSet<String
         if let Some(exts) = schema.allow_extensions {
             for e in exts {
                 let lower = e.to_ascii_lowercase();
-                if lower.starts_with('.') { set.insert(lower); }
+                if lower.starts_with('.') {
+                    set.insert(lower);
+                }
             }
-            if !set.is_empty() { return Ok(set); }
+            if !set.is_empty() {
+                return Ok(set);
+            }
         }
     }
-    for e in default_allowed_extensions() { set.insert((*e).to_string()); }
+    for e in default_allowed_extensions() {
+        set.insert((*e).to_string());
+    }
     Ok(set)
 }
 
@@ -445,15 +471,29 @@ pub fn is_allowed_file<P: AsRef<Path>>(repo_root: P, rel_path: &str) -> Result<b
     let root = repo_root.as_ref();
     let rel = Path::new(rel_path);
     // No absolute paths
-    if rel.is_absolute() { return Ok(false); }
+    if rel.is_absolute() {
+        return Ok(false);
+    }
     // Normalize: prevent traversal
     let candidate = normalize_join(root, rel);
-    if candidate.is_none() { return Ok(false); }
+    if candidate.is_none() {
+        return Ok(false);
+    }
     let candidate = candidate.unwrap();
-    if !candidate.starts_with(root) { return Ok(false); }
-    if !candidate.is_file() { return Ok(false); }
-    let ext = candidate.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-    if ext.is_empty() { return Ok(false); }
+    if !candidate.starts_with(root) {
+        return Ok(false);
+    }
+    if !candidate.is_file() {
+        return Ok(false);
+    }
+    let ext = candidate
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext.is_empty() {
+        return Ok(false);
+    }
     let dotext = format!(".{}", ext);
     let allow = allowed_extensions(root)?;
     Ok(allow.contains(&dotext))
@@ -467,13 +507,19 @@ fn normalize_join(base: &Path, rel: &Path) -> Option<PathBuf> {
         use std::path::Component::*;
         match comp {
             RootDir | Prefix(_) => return None,
-            CurDir => {},
-            ParentDir => { if parts.pop().is_none() { return None; } },
+            CurDir => {}
+            ParentDir => {
+                if parts.pop().is_none() {
+                    return None;
+                }
+            }
             Normal(s) => parts.push(s.to_str()?),
         }
     }
     let mut out = base.to_path_buf();
-    for p in parts { out.push(p); }
+    for p in parts {
+        out.push(p);
+    }
     Some(out)
 }
 
