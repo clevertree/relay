@@ -7,6 +7,9 @@ export type UiConfig = {
   httpPort: number;
   gitPort: number;
   shallowDefault: boolean;
+  // Base path where the desktop host stores app data (repos). When empty, we
+  // resolve a default at runtime: OS app dir when desktop, or './host/repos' in web.
+  configPath: string;
 };
 
 const defaultConfig: UiConfig = {
@@ -14,6 +17,7 @@ const defaultConfig: UiConfig = {
   httpPort: 8080,
   gitPort: 9418,
   shallowDefault: true,
+  configPath: '', // empty means: resolve default per runtime
 };
 
 type Store = UiConfig & {

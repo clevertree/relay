@@ -4,6 +4,7 @@ import MuiThemeProvider from '../src/components/Theme';
 import NavBar from '../src/components/NavBar';
 import { Box, Chip, Typography } from '@mui/material';
 import FooterConsole from '../src/components/FooterConsole';
+import BridgeAlert from '../src/components/BridgeAlert';
 
 // Read version from package.json at build time using next's public metadata import
 import pkg from '../package.json';
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <MuiThemeProvider>
           <NavBar />
+          <BridgeAlert />
           <main style={{ padding: '16px', maxWidth: 1200, margin: '0 auto' }}>
             {/* DesktopGuard will error out if the webview is embedded in Tauri but the bridge is missing */}
             <DesktopGuard>

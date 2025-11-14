@@ -22,6 +22,8 @@ import {
 } from '@mui/material';
 import Link from 'next/link';
 import type { RepoInfo } from '../lib/api';
+import { useConfigStore } from '../store/config';
+import { getDefaultConfigPath } from '../lib/paths';
 
 type Props = {
   repos: RepoInfo[];
@@ -40,6 +42,8 @@ export default function RepoList({ repos, onCreated }: Props) {
   const [template, setTemplate] = useState('movies');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [repoPath, setRepoPath] = useState<string>('');
+  const cfg = useConfigStore();
 
   // Detect desktop/Tauri environment reactively.
   // The Tauri bridge can be injected after initial render, so poll briefly
@@ -82,9 +86,22 @@ export default function RepoList({ repos, onCreated }: Props) {
     setOpen(false);
     setName('');
     setTemplate('movies');
+    setRepoPath('');
     setError(null);
     setCreating(false);
   };
+
+  // When dialog opens, seed repoPath from config or default resolver
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      let base = cfg.configPath?.trim();
+      if (!base) {
+        try { base = await getDefaultConfigPath(); } catch {}
+      }
+      setRepoPath(base || '');
+    })();
+  }, [open]);
 
   const validateName = (n: string) => /^[a-zA-Z0-9_-]+$/.test(n);
 
@@ -97,7 +114,8 @@ export default function RepoList({ repos, onCreated }: Props) {
     setCreating(true);
     try {
       logInfo(`create repo: ${name} (template=${template})`);
-      await tauriInvoke('init_repo', { name, template });
+      const path = (repoPath || '').trim() || undefined;
+      await tauriInvoke('init_repo', { name, template, path });
       logInfo('create repo: success');
       if (typeof onCreated === 'function') onCreated();
       closeModal();
@@ -167,7 +185,8 @@ export default function RepoList({ repos, onCreated }: Props) {
         <DialogTitle>Create repository</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Create a new repository under the host repos path. This operation requires desktop mode (Tauri) and will run the native init logic.
+            Create a new repository. Choose where to create it; by default we use your host app directory.
+            This operation requires desktop mode (Tauri).
           </DialogContentText>
           <Box mt={2} display="flex" flexDirection="column" gap={2}>
             <TextField
@@ -176,6 +195,13 @@ export default function RepoList({ repos, onCreated }: Props) {
               onChange={(e) => setName(e.target.value)}
               helperText={error ?? 'Allowed: letters, numbers, - and _'}
               error={!!error}
+              fullWidth
+            />
+            <TextField
+              label="Repo path"
+              value={repoPath}
+              onChange={(e) => setRepoPath(e.target.value)}
+              helperText={repoPath ? 'Directory where the repository folder will be created' : 'Using runtime default path'}
               fullWidth
             />
             <Select value={template} onChange={(e) => setTemplate(e.target.value)} fullWidth>

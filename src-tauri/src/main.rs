@@ -18,7 +18,7 @@ fn main() {
   // Build and run the tauri app. We'll redirect the main webview to the
   // FRONTEND_PORT if the env var is set (useful for dev orchestration).
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![init_repo, log_message, debug_state])
+    .invoke_handler(tauri::generate_handler![init_repo, log_message, debug_state, get_app_host_path])
     .setup(|app| {
       // On setup, if FRONTEND_PORT is provided, redirect the main webview.
       if let Ok(port) = std::env::var("FRONTEND_PORT") {
@@ -102,6 +102,20 @@ fn app_log_path() -> PathBuf {
   PathBuf::from("app.log")
 }
 
+/// Default host path for storing repositories. Uses OS app data dir
+/// e.g. on Windows: %AppData%/org/relay/relay/repos
+fn app_host_default_path() -> PathBuf {
+  if let Some(dirs) = ProjectDirs::from("org", "relay", "relay") {
+    return dirs.data_dir().join("repos");
+  }
+  PathBuf::from("host/repos")
+}
+
+#[tauri::command]
+async fn get_app_host_path() -> Result<String, String> {
+  Ok(app_host_default_path().to_string_lossy().to_string())
+}
+
 /// Initialize a repository by invoking the workspace `relay-cli` binary.
 ///
 /// This command shells out to `cargo run -p relay-cli -- init --repo <name> --template <template> --path <path>`
@@ -117,7 +131,7 @@ async fn init_repo(name: String, template: Option<String>, path: Option<String>)
 
   let template = template.unwrap_or_else(|| "movies".to_string());
   // default path: workspace relative host/repos
-  let repo_path = path.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("host/repos"));
+  let repo_path = path.map(PathBuf::from).unwrap_or_else(app_host_default_path);
 
   // Build owned args so we can move into the blocking closure
   let repo_path_arg = repo_path.to_string_lossy().to_string();

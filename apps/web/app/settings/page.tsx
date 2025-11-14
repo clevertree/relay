@@ -1,14 +1,15 @@
 "use client";
 import React from 'react';
-import { Box, TextField, Switch, FormControlLabel, Typography, Paper } from '@mui/material';
+import { Box, TextField, Switch, FormControlLabel, Typography, Paper, Button } from '@mui/material';
 import { useConfigStore } from '../../src/store/config';
+import { getDefaultConfigPath } from '../../src/lib/paths';
 
 export default function SettingsPage() {
   const cfg = useConfigStore();
   return (
     <Box>
       <Typography variant="h4" gutterBottom>Settings</Typography>
-      <Paper variant="outlined" sx={{ p: 2, display: 'grid', gap: 2, maxWidth: 600 }}>
+      <Paper variant="outlined" sx={{ p: 2, display: 'grid', gap: 2, maxWidth: 800 }}>
         <TextField
           fullWidth
           label="Master Endpoint"
@@ -34,8 +35,21 @@ export default function SettingsPage() {
           control={<Switch checked={cfg.shallowDefault} onChange={(_, v) => cfg.set({ shallowDefault: v })} />}
           label="Shallow clone by default"
         />
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <TextField
+            fullWidth
+            label="Config path (host app dir)"
+            helperText="Base directory for local repositories and app data. Leave empty to use the OS default."
+            value={cfg.configPath}
+            onChange={(e) => cfg.set({ configPath: e.target.value })}
+          />
+          <Button variant="outlined" onClick={async () => {
+            const p = await getDefaultConfigPath();
+            cfg.set({ configPath: p });
+          }}>Use default</Button>
+        </Box>
         <Typography variant="body2" color="text.secondary">
-          Changes are saved locally in your browser and applied immediately.
+          Changes are saved locally and applied immediately. The default config path resolves to the OS app data directory when running as a desktop app, otherwise to ./host/repos during web development.
         </Typography>
       </Paper>
     </Box>

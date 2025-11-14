@@ -6,17 +6,8 @@
   <component name="ChangeListManager">
     <list default="true" id="543c1da8-56e2-48f2-b391-bdcd3225397b" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Cargo.lock" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/app/layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/app/layout.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/components/DesktopGuard.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/DesktopGuard.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/components/RepoList.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/RepoList.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/crates/relay-cli/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-cli/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/crates/relay-cli/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-cli/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src-tauri/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src-tauri/gen/schemas/desktop-schema.json" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/gen/schemas/desktop-schema.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src-tauri/gen/schemas/windows-schema.json" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/gen/schemas/windows-schema.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/src/components/FooterConsole.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/FooterConsole.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/src/store/config.ts" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/store/config.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src-tauri/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/src/main.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />

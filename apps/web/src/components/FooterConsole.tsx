@@ -9,7 +9,7 @@ import { useLogStore, logInfo, logError, logDebug, tauriInvoke, bridgeAvailable 
 export default function FooterConsole() {
   const { items, clear } = useLogStore();
   const [open, setOpen] = useState(true);
-  const [cmd, setCmd] = useState('debug_state');
+  const [cmd, setCmd] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [items.length]);
