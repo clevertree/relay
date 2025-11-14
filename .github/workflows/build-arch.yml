@@ -1,3 +1,75 @@
+name: Build CLI binaries and multi-arch Docker image
+on:
+  push:
+    tags: ['v*']
+    branches: ['main']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/relay
+
+jobs:
+  build-binaries:
+    name: Build native binaries (matrix)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install QEMU (for cross)
+        run: sudo apt-get update && sudo apt-get install -y qemu-user-static
+
+      - name: Setup cargo target
+        run: rustup target add ${{ matrix.target }} || true
+
+      - name: Build relay CLI
+        run: |
+          export CARGO_TARGET_DIR=target/${{ matrix.target }}
+          cargo build --release --manifest-path crates/relay-cli/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/relay
+
+  build-docker:
+    name: Build CLI Docker multi-arch image
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        env:
+          IMAGE: ${{ env.IMAGE }}
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --push -t $IMAGE:latest -f crates/relay-cli/Dockerfile .
 name: Build CLI Docker multi-arch image
 on:
   push:
