@@ -1,11 +1,14 @@
-"use client";
+
 import React from 'react';
-import { useParams } from 'next/navigation';
 import RepositoryBrowser from '../../../src/components/RepositoryBrowser';
 
-export default function RepoPage() {
-  const params = useParams<{ name: string }>();
-  const name = (params?.name as string) || '';
+// Required for Next.js static export
+export function generateStaticParams() {
+  return [];
+}
+
+export default function RepoPage({ params }: { params: { name: string } }) {
+  const name = params?.name ?? '';
   if (!name) return null;
   return <RepositoryBrowser repoName={name} />;
 }

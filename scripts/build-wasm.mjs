@@ -76,11 +76,22 @@ async function main() {
 
   // Watch mode: re-run build on Rust changes
   console.log('[build-wasm] Watching for changes...');
-  const chokidarPath = path.join(projectRoot, 'node_modules', '.bin', 'chokidar-cli');
-  try {
-    await run('node', [chokidarPath, path.join(crateDir, 'src', '**', '*'), '-c', `node ${path.relative(projectRoot, __filename)}`]);
-  } catch (e) {
-    console.warn('[build-wasm] chokidar-cli not found; running single build. Install as devDependency if you want live rebuilds.');
+  // Support either `chokidar-cli` or `chokidar` binary name under node_modules/.bin
+  const possibleBins = ['chokidar-cli', 'chokidar'];
+  let found = false;
+  for (const bin of possibleBins) {
+    const p = path.join(projectRoot, 'node_modules', '.bin', bin);
+    try {
+      // Execute the binary via shell (some bin shims are shell scripts, not Node modules)
+      await run(p, [path.join(crateDir, 'src', '**', '*'), '-c', `node ${path.relative(projectRoot, __filename)}`]);
+      found = true;
+      break;
+    } catch (e) {
+      // try next
+    }
+  }
+  if (!found) {
+    console.warn('[build-wasm] chokidar-cli/chokidar not found; running single build. Install as devDependency if you want live rebuilds.');
     await buildOnce();
   }
 }

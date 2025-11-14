@@ -15,6 +15,7 @@
     "format:rust": "cargo fmt",
     "tauri:dev": "cargo tauri dev -C src-tauri",
     "tauri:build": "cargo tauri build -C src-tauri",
+  "dev:desktop": "node src-tauri/scripts/run-tauri-dev.mjs",
     "dev:host": "cargo run -p relay-cli -- host start --port 8080 --root ./host",
     "web:dev": "pnpm --filter ./apps/web dev",
     "web:build": "pnpm --filter ./apps/web build",
