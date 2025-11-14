@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-  "dev": "concurrently -k -n WASM,WEB -c yellow,green \"node ../../scripts/build-wasm.mjs --watch\" \"next dev -p $FRONTEND_PORT\"",
+  "dev": "concurrently -k -n WASM,WEB -c yellow,green \"node ../../scripts/build-wasm.mjs --watch\" \"node ./scripts/start-next.js\"",
     "prebuild": "node ../../scripts/build-wasm.mjs",
     "build": "next build",
     "start": "next start -p 3000",

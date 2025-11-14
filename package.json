@@ -5,6 +5,7 @@
   "packageManager": "pnpm@9.12.0",
   "scripts": {
   "dev": "concurrently -k -n WEB,TAURI -c green,cyan \"FRONTEND_PORT=13337 pnpm --filter ./apps/web dev\" \"npm run dev:tauri\"",
+  "dev:win": "concurrently -k -n WEB,TAURI -c green,cyan \"cross-env FRONTEND_PORT=13337 pnpm --filter ./apps/web dev\" \"npm run dev:tauri\"",
   "build:next": "pnpm --filter ./apps/web build",
   "build:copy-to-host": "node scripts/copy-web-to-host.mjs",
   "build:tauri": "cd src-tauri && cargo tauri build",
