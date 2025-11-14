@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::Manager;
+use tauri::Emitter;
 use std::process::Command as StdCommand;
 use tauri::async_runtime::spawn_blocking;
 use serde::Serialize;
@@ -9,12 +10,15 @@ use std::path::PathBuf;
 // Use relay-repo crate directly for fast, in-process repo initialization
 use relay_repo::ops as repo_ops;
 use std::fs;
+use tracing::{info, warn, error, debug};
+use directories::ProjectDirs;
+use std::io::Write;
 
 fn main() {
   // Build and run the tauri app. We'll redirect the main webview to the
   // FRONTEND_PORT if the env var is set (useful for dev orchestration).
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![init_repo])
+    .invoke_handler(tauri::generate_handler![init_repo, log_message, debug_state])
     .setup(|app| {
       // On setup, if FRONTEND_PORT is provided, redirect the main webview.
       if let Ok(port) = std::env::var("FRONTEND_PORT") {
@@ -55,6 +59,47 @@ fn main() {
 struct InitResult {
   success: bool,
   message: String,
+}
+
+#[tauri::command]
+async fn log_message(level: String, message: String, window: tauri::WebviewWindow) -> Result<(), String> {
+  // Append to app log file and emit to UI
+  if let Err(e) = append_log(&level, &message) {
+    eprintln!("[log] failed to write log: {}", e);
+  }
+  let payload = serde_json::json!({"level": level, "message": message, "ts": chrono::Utc::now().timestamp_millis()});
+  let _ = window.emit("relay://log", payload);
+  Ok(())
+}
+
+#[tauri::command]
+async fn debug_state() -> Result<String, String> {
+  let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| "<unknown>".into());
+  let has_port = std::env::var("FRONTEND_PORT").ok();
+  let msg = format!(
+    "relay-desktop debug\ncwd: {}\nFRONTEND_PORT: {:?}\n",
+    cwd, has_port
+  );
+  if let Err(e) = append_log("debug", &format!("debug_state requested\n{}", msg)) {
+    eprintln!("[log] failed to write debug_state: {}", e);
+  }
+  Ok(msg)
+}
+
+fn append_log(level: &str, message: &str) -> std::io::Result<()> {
+  let path = app_log_path();
+  if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+  let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+  let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+  writeln!(f, "[{}][{}] {}", ts, level, message)?;
+  Ok(())
+}
+
+fn app_log_path() -> PathBuf {
+  if let Some(dirs) = ProjectDirs::from("org", "relay", "relay") {
+    return dirs.data_dir().join("app.log");
+  }
+  PathBuf::from("app.log")
 }
 
 /// Initialize a repository by invoking the workspace `relay-cli` binary.

@@ -3,6 +3,7 @@ import React from 'react';
 import MuiThemeProvider from '../src/components/Theme';
 import NavBar from '../src/components/NavBar';
 import { Box, Chip, Typography } from '@mui/material';
+import FooterConsole from '../src/components/FooterConsole';
 
 // Read version from package.json at build time using next's public metadata import
 import pkg from '../package.json';
@@ -36,6 +37,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <RuntimeChip />
             </Box>
           </Box>
+
+          <FooterConsole />
 
         </MuiThemeProvider>
       </body>

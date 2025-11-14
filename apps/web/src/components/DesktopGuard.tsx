@@ -83,49 +83,7 @@ export default function DesktopGuard({ children }: { children: React.ReactNode }
     };
     }, []);
 
-  if (embedded && !bridgePresent) {
-    return (
-      <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 4 }}>
-        <Box sx={{ textAlign: 'center' }}>
-          <Typography variant="h5" gutterBottom>Relay desktop startup error</Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-            The application expected a desktop runtime (Tauri bridge) but it was not available.
-            This indicates a broken desktop startup. Please restart the app.
-          </Typography>
-          <Button variant="contained" onClick={() => location.reload()}>Reload</Button>
-        </Box>
-      </Box>
-    );
-  }
-  if (embedded && !bridgePresent && checked) {
-    return (
-      <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 4 }}>
-        <Box sx={{ textAlign: 'center' }}>
-          <Typography variant="h5" gutterBottom>Relay desktop startup error</Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-            The application expected a desktop runtime (Tauri bridge) but it was not available.
-            This indicates a broken desktop startup. Please restart the app.
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-            <Button variant="contained" onClick={() => location.reload()}>Reload</Button>
-            <Button variant="outlined" onClick={() => {
-              // Diagnostics: print known globals to the console to help debugging
-              try {
-                const anyWin = window as any;
-                console.log('__RELAY_TAURI_EMBEDDED=', anyWin.__RELAY_TAURI_EMBEDDED);
-                console.log('__TAURI__=', anyWin.__TAURI__);
-                console.log('tauri=', anyWin.tauri);
-                console.log('__TAURI_IPC__=', anyWin.__TAURI_IPC__);
-                console.log('location.search=', window.location.search);
-              } catch (e) {
-                console.error('diagnostics error', e);
-              }
-            }}>Diagnostics</Button>
-          </Box>
-        </Box>
-      </Box>
-    );
-  }
-
+  // In all cases render children; if embedded but bridge missing, log and allow web-only fallback.
+  // A banner could be shown elsewhere (footer console shows runtime).
   return <>{children}</>;
 }

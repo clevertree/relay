@@ -7,19 +7,17 @@
     <list default="true" id="543c1da8-56e2-48f2-b391-bdcd3225397b" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Cargo.lock" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/components/RepositoryBrowser.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/RepositoryBrowser.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/lib/api.ts" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/lib/api.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/lib/repoSchema.ts" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/lib/repoSchema.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/app/layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/app/layout.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/src/components/DesktopGuard.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/DesktopGuard.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/src/components/RepoList.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/RepoList.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/crates/relay-cli/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-cli/Cargo.toml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/crates/relay-cli/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-cli/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/crates/relay-cli/tests/hooks_integration.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-cli/tests/hooks_integration.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/crates/relay-core/src/config.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-core/src/config.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/crates/relay-core/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-core/src/lib.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/crates/relay-core/src/schema.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-core/src/schema.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/crates/relay-repo/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-repo/src/lib.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/crates/relay-wasm/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-wasm/src/lib.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/PLAN.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/PLAN.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/schema/template/movies/relay.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/schema/template/movies/relay.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src-tauri/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/Cargo.toml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src-tauri/gen/schemas/desktop-schema.json" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/gen/schemas/desktop-schema.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src-tauri/gen/schemas/windows-schema.json" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/gen/schemas/windows-schema.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src-tauri/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/src/main.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -29,37 +27,39 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "customColor": "",
-  "associatedIndex": 2
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 2
+}</component>
   <component name="ProjectId" id="35TA1oywnGt0RIAFpcEJoeSUnB7" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultAutoModeForALLUsers.v1": "true",
-    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
-    "git-widget-placeholder": "main",
-    "junie.onboarding.icon.badge.shown": "true",
-    "kotlin-language-version-configured": "true",
-    "last_opened_file_path": "C:/Users/ari/dev/relay/schema",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "pnpm",
-    "to.speed.mode.migration.done": "true",
-    "ts.external.directory.path": "C:\\Users\\ari\\dev\\relay\\apps\\web\\node_modules\\typescript\\lib",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultAutoModeForALLUsers.v1&quot;: &quot;true&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/ari/dev/relay/schema&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;pnpm&quot;,
+    &quot;npm.dev.executor&quot;: &quot;Run&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;terminal&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
+    &quot;ts.external.directory.path&quot;: &quot;C:\\Users\\ari\\dev\\relay\\apps\\web\\node_modules\\typescript\\lib&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Users\ari\dev\relay\schema" />
@@ -67,6 +67,38 @@
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\ari\dev\relay\schema" />
     </key>
+  </component>
+  <component name="RunManager">
+    <configuration default="true" type="ShConfigurationType">
+      <option name="SCRIPT_TEXT" value="" />
+      <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+      <option name="SCRIPT_PATH" value="" />
+      <option name="SCRIPT_OPTIONS" value="" />
+      <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
+      <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+      <option name="INTERPRETER_PATH" value="powershell.exe" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="EXECUTE_IN_TERMINAL" value="true" />
+      <option name="EXECUTE_SCRIPT_FILE" value="true" />
+      <envs />
+      <method v="2" />
+    </configuration>
+    <configuration name="dev" type="js.build_tools.npm" temporary="true" nameIsGenerated="true">
+      <package-json value="$PROJECT_DIR$/package.json" />
+      <command value="run" />
+      <scripts>
+        <script value="dev" />
+      </scripts>
+      <node-interpreter value="project" />
+      <envs />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="npm.dev" />
+      </list>
+    </recent_temporary>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
@@ -89,5 +121,9 @@
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="XSLT-Support.FileAssociations.UIState">
+    <expand />
+    <select />
   </component>
 </project>

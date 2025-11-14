@@ -12,6 +12,8 @@ serde_json = { workspace = true }
 tauri = { version = "2.9.3", features = [] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+chrono = "0.4"
+directories = { workspace = true }
 # Use relay-repo crate directly for repo initialization (fs helpers)
 relay-repo = { path = "../crates/relay-repo", features = ["fs"] }
 # The app helper crate was removed to avoid generated scaffolding. Inline the

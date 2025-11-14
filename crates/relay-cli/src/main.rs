@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::Value as JsonValue;
 use std::path::Path;
+use std::io::Write;
 
 #[derive(Parser, Debug)]
 #[command(name = "relay")]
@@ -61,10 +62,16 @@ enum RepoCmd {
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
-    match cli.command {
-        Commands::Repo { cmd } => handle_repo(cmd)?,
+    // session-only: we do not read from previous logs. We only append new lines.
+    log_append("info", &format!("relay-cli start: {:?}", std::env::args().collect::<Vec<_>>()));
+    let res = match cli.command {
+        Commands::Repo { cmd } => handle_repo(cmd),
+    };
+    match &res {
+        Ok(_) => log_append("info", "relay-cli finished OK"),
+        Err(e) => log_append("error", &format!("relay-cli error: {}", e)),
     }
-    Ok(())
+    res
 }
 
 fn handle_repo(cmd: RepoCmd) -> Result<()> {

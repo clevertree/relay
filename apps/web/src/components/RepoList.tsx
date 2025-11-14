@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { isDesktopRuntime } from '../lib/runtime';
+import { logInfo, logError, logWarn, tauriInvoke } from '../lib/log';
 import {
   Grid,
   Card,
@@ -94,16 +95,14 @@ export default function RepoList({ repos, onCreated }: Props) {
     if (!isDesktop) return setError('Repository creation is available only in desktop mode');
 
     setCreating(true);
-      try {
-      // Call Tauri command; the native command will be implemented separately.
-  const anyWin = (window as any) || {};
-  const invoke = anyWin.__TAURI__?.invoke ?? anyWin.tauri?.invoke ?? anyWin.__TAURI_IPC__?.invoke;
-  if (!invoke) throw new Error('Tauri invoke unavailable');
-  await invoke('init_repo', { name, template });
-      // notify parent to refresh list
+    try {
+      logInfo(`create repo: ${name} (template=${template})`);
+      await tauriInvoke('init_repo', { name, template });
+      logInfo('create repo: success');
       if (typeof onCreated === 'function') onCreated();
       closeModal();
     } catch (err: any) {
+      logError('create repo failed: ' + (err?.message || String(err)));
       setError(err?.message || String(err));
       setCreating(false);
     }
