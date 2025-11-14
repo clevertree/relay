@@ -76,8 +76,9 @@ async function main() {
 
   // Watch mode: re-run build on Rust changes
   console.log('[build-wasm] Watching for changes...');
-  // Support either `chokidar-cli` or `chokidar` binary name under node_modules/.bin
-  const possibleBins = ['chokidar-cli', 'chokidar'];
+  // Support either `chokidar` or `chokidar-cli` binary name under node_modules/.bin.
+  // Prefer `chokidar` (present in this workspace) so watch mode runs reliably.
+  const possibleBins = ['chokidar', 'chokidar-cli'];
   let found = false;
   for (const bin of possibleBins) {
     const p = path.join(projectRoot, 'node_modules', '.bin', bin);

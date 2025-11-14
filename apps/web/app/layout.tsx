@@ -6,6 +6,9 @@ import NavBar from '../src/components/NavBar';
 export const metadata = {
   title: 'Relay',
   description: 'Relay UI',
+  icons: {
+    icon: '/favicon.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
