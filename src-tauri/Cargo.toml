@@ -26,3 +26,7 @@ default = []
 [package.metadata.tauri]
 # Point to tauri.conf.json in this directory
 config = { path = "tauri.conf.json" }
+
+[package.metadata.tauri-winres]
+# Path to the .ico file used to generate Windows resources (relative to this crate)
+icon = "icons/icon.ico"
