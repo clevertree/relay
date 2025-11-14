@@ -2,5 +2,8 @@
   "build": {
     "devUrl": "http://localhost:13337",
     "frontendDist": "../host/static"
+  },
+  "app": {
+    "withGlobalTauri": true
   }
 }

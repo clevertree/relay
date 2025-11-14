@@ -16,6 +16,9 @@ const tauriConfig = {
     frontendDist: '../host/static'
   }
 }
+// Enable the Tauri allowlist during dev so the JS API is exposed in the webview.
+// Put allowlist at the top-level of the override so it merges correctly.
+tauriConfig.allowlist = { all: true }
 
 fs.writeFileSync(tauriCliPath, JSON.stringify(tauriConfig, null, 2))
 console.log(`Wrote Tauri override config to ${tauriCliPath} -> devUrl=http://localhost:${port}`)
