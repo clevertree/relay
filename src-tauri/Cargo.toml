@@ -12,7 +12,9 @@ serde_json = { workspace = true }
 tauri = { version = "2.9.3", features = [] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-app_lib = { package = "app", path = "./src-tauri" }
+# The app helper crate was removed to avoid generated scaffolding. Inline the
+# runtime logic in `src/main.rs` so `cargo metadata` won't look for
+# `src-tauri/src-tauri/Cargo.toml` anymore.
 
 
 [features]
