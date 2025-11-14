@@ -10,6 +10,7 @@ clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 relay-core = { path = "../relay-core" }
+relay-repo = { path = "../relay-repo", features = ["fs"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ctrlc = { workspace = true }

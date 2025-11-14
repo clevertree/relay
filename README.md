@@ -409,3 +409,13 @@ The repository browser enforces file-type restrictions only for files fetched fr
 - Enforcement is client-side: the host server serves raw files, but the web UI blocks disallowed types before loading/previewing them.
 
 This model keeps local usage flexible while providing strong safety defaults when browsing content from peers over the network.
+
+
+### Repository YAML and Validation
+- Each repository may include a `relay.yaml` file at its root to describe:
+  - Basic metadata: `version`, `title`, `description`, `index` (defaults to `README.md` when omitted)
+  - `content` template path and its properties (e.g., `data/{year}/{title}/meta.json`)
+  - Named `indices` such as `byTitle`, `byDirector`, `byGenre`, each with `path` and optional `searchPath`
+- A reference schema file lives in `schema/relay.schema.yaml` in this monorepo. It documents the canonical shape of `relay.yaml` and is used as the basis for validators.
+- The web UI’s `RepositoryBrowser` component loads `<repo>/relay.yaml`, applies minimal validation based on the schema rules, defaults `index` to `README.md` when missing, then loads the index markdown for display.
+- TODO: Implement full JSON Schema validation in the UI and hook server-side validation to reject invalid `relay.yaml` via Git hooks.

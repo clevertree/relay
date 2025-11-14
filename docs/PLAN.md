@@ -198,6 +198,10 @@ Security: enforce allowlist of extensions in server and client. Deny JS and any 
 - Define content types, fields, constraints (e.g., movies: title, year, ipfs_hash, poster path)
 - Validation rules for directory structure and file types
 - Example minimal schema lives in `template/movies/.relay/schema.yaml`
+- Root-level `relay.yaml` in each repository defines repository metadata (version, title, description, index), primary content path template, and named indices.
+- Reference schema file: `schema/relay.schema.yaml` (JSON Schema in YAML) documents/validates the shape of `relay.yaml`.
+- Rust: `relay-wasm` exposes `parse_repo_schema(yaml: &str)` using `serde_yaml` to read basic fields (a) metadata, (b) content info path, (c) indices accessible by name.
+- Web: UI performs minimal client-side validation now; full JSON Schema validation against `schema/relay.schema.yaml` is planned.
 
 ## 8. Testing Strategy
 - Rust: `cargo test` for core, CLI; clippy + fmt gates

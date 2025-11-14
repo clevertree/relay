@@ -7,11 +7,17 @@ license = "MIT OR Apache-2.0"
 [lib]
 name = "relay_wasm"
 path = "src/lib.rs"
-crate-type = ["rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-# Note: In future, enable wasm-bindgen and console_error_panic_hook for wasm32 target
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { version = "0.2" }
+console_error_panic_hook = { version = "0.1" }

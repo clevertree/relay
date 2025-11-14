@@ -1,0 +1,75 @@
+#  Defines the file layout and JSON schemas for a movie repository.
+#  Each movie has a metadata file under data/<year>/<title_trimmed>/meta.json.
+#  Index symlinks live under /byDirector/<director>/<movie> and
+#  /byGenre/<genre>/<movie> and point to the movie folder using
+#  the '<year>/<title_trimmed>' relative path. All path fields are auto 'trimmed'
+#  removing non alphanumeric characters and replacing whitespace with '-'.
+
+# All path segments should be a filesystem-safe, lowercase
+# representation of the variable.
+# Recommended transform:
+# - Trim leading/trailing whitespace
+# - Convert to lower-case
+# - Replace spaces and sequences of non-alphanumeric characters with single hyphens
+# - Remove characters not safe for filenames
+# Example: "The Lord of the Rings: The Fellowship of the Ring" ->
+# "the-lord-of-the-rings-the-fellowship-of-the-ring"
+
+version: 1
+
+title: Movie repository schema
+
+description: A movie repository organized by title, director, and genre.
+
+# Path to README file relative to repo root which is used for rendering index page in the RepositoryBrowser
+index: 'README.md'
+content:
+  # Content gets auto-inserted based on property values
+  path: "data/{year}/{title}/"
+  metaFile: 'meta.json'
+  description: "Primary movie metadata file stored under data/<year>/<title_trimmed>/meta.json"
+  properties:
+    year:
+      type: integer
+      description: "Year of release"
+      required: true
+    title:
+      type: string
+      description: "Official movie title (human readable)"
+      required: true
+    director:
+      type: string
+      description: "Director's name"
+    imdb:
+      type: string
+      pattern: "^tt\\d+$"
+      description: "IMDB id (e.g. tt0111161)"
+    ipfs:
+      type: string
+      description: "IPFS CID pointing to the movie assets or metadata"
+
+indices:
+  byTitle:
+    # Indices get auto-inserted based on property values
+    # Path creates symlink on insert that points to the movie folder in data/
+    path: "byTitle/{title}"
+    # Search path is used for searching symlinks by title
+    searchPath: "byTitle/{search}"
+    description: "Index by title. Symlinks point at movie data folder."
+
+  byDirector:
+    # Indices get auto-inserted based on property values
+    # Path creates symlink on insert that points to the movie folder in data/
+    path: "byDirector/{director}/{title}"
+    # Search path is used for searching symlinks by director
+    searchPath: "byDirector/{search}"
+    description: "Index by director. Symlinks point at movie data folder."
+
+  byGenre:
+    # Indices get auto-inserted based on property values
+    # Path creates symlink on insert that points to the movie folder in data/
+    path: "byGenre/{genre}/{title}"
+    # Search path is used for searching symlinks by genre
+    searchPath: "byGenre/{search}"
+    description: "Index by genre. Symlinks point at movie data folder."
+

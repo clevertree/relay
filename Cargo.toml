@@ -2,7 +2,8 @@
 members = [
     "crates/relay-core",
     "crates/relay-cli",
-    "crates/relay-wasm"
+    "crates/relay-wasm",
+    "crates/relay-repo"
 ]
 resolver = "2"
 

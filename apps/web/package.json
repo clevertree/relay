@@ -3,9 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "concurrently -k -n WASM,WEB -c yellow,green \"node ../../scripts/build-wasm.mjs --watch\" \"next dev -p 3000\"",
+    "prebuild": "node ../../scripts/build-wasm.mjs",
     "build": "next build",
     "start": "next start -p 3000",
+    "preexport": "node ../../scripts/build-wasm.mjs",
     "export": "next export",
     "lint": "eslint .",
     "type-check": "tsc --noEmit"
@@ -19,7 +21,8 @@
     "@emotion/styled": "11.11.0",
     "zustand": "4.5.2",
     "axios": "1.7.7",
-    "react-markdown": "9.0.1"
+    "react-markdown": "9.0.1",
+    "yaml": "2.4.5"
   },
   "devDependencies": {
     "@types/node": "20.11.30",

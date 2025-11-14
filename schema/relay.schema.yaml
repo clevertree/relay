@@ -1,0 +1,79 @@
+# Relay Repository YAML Schema (relay.schema.yaml)
+# Defines the shape and constraints for <repo>/relay.yaml files used by the Repository Browser.
+# This file is authored in YAML for readability. Implementations may translate it to a JSON Schema
+# at build time or validate via custom logic. Client UIs should at minimum enforce required fields
+# and apply documented defaults.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+id: "https://relaynet.online/schema/relay.schema.yaml"
+title: "Relay Repository Schema"
+description: |
+  Schema for repository-level configuration files named `relay.yaml` located at the root of a
+  Relay repository. This file describes:
+    - Basic metadata (version, title, description, index)
+    - Content location template (path) and metadata properties
+    - Search indices (e.g., byTitle, byDirector, byGenre)
+
+# Root type
+type: object
+required: [version]
+additionalProperties: true
+properties:
+  version:
+    type: integer
+    minimum: 1
+  title:
+    type: string
+  description:
+    type: string
+  # Path to the index Markdown file to display as the repository index in the UI.
+  # Default is README.md when omitted.
+  index:
+    type: string
+    default: "README.md"
+  content:
+    type: object
+    required: [path]
+    additionalProperties: false
+    properties:
+      # Template for the primary content metadata file; placeholders are enclosed in {curly} braces.
+      # Example: data/{year}/{title}/meta.json
+      path:
+        type: string
+        pattern: "\\{[a-zA-Z0-9_]+\\}"
+      metaFile:
+        type: string
+      description:
+        type: string
+      properties:
+        type: object
+        additionalProperties:
+          type: object
+          additionalProperties: false
+          properties:
+            type:
+              enum: [string, integer, number, boolean]
+            description:
+              type: string
+            required:
+              type: boolean
+            pattern:
+              type: string
+  indices:
+    type: object
+    description: Map of named indices (e.g., byTitle, byDirector) to index definitions.
+    additionalProperties:
+      type: object
+      required: [path]
+      additionalProperties: false
+      properties:
+        # Path template for where the index entries live; placeholders may reference fields
+        # from content.properties (e.g., {title}, {director}).
+        path:
+          type: string
+        # Optional searchPath template. If provided, the UI can construct query paths by replacing
+        # {search} with a user-supplied term (already normalized by the UI).
+        searchPath:
+          type: string
+        description:
+          type: string
