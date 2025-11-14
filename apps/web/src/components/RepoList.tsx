@@ -1,5 +1,6 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { isDesktopRuntime } from '../lib/runtime';
 import {
   Grid,
   Card,
@@ -39,8 +40,41 @@ export default function RepoList({ repos, onCreated }: Props) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Detect desktop/Tauri environment
-  const isDesktop = typeof window !== 'undefined' && !!(window as any).__TAURI__;
+  // Detect desktop/Tauri environment reactively.
+  // The Tauri bridge can be injected after initial render, so poll briefly
+  // to catch late arrival and update the UI accordingly.
+  const [isDesktop, setIsDesktop] = useState<boolean>(
+    typeof window !== 'undefined' && isDesktopRuntime()
+  );
+
+  useEffect(() => {
+    if (isDesktop) return;
+    let mounted = true;
+    // quick polling for bridge for up to ~2s
+    const intervalMs = 150;
+    const maxAttempts = Math.ceil(2000 / intervalMs);
+    let attempts = 0;
+    const id = setInterval(() => {
+      attempts += 1;
+      if (!mounted) return;
+      try {
+        if (isDesktopRuntime()) {
+          setIsDesktop(true);
+          clearInterval(id);
+          return;
+        }
+      } catch (e) {
+        // ignore
+      }
+      if (attempts >= maxAttempts) {
+        clearInterval(id);
+      }
+    }, intervalMs);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
+  }, [isDesktop]);
 
   const openModal = () => setOpen(true);
   const closeModal = () => {
@@ -62,9 +96,10 @@ export default function RepoList({ repos, onCreated }: Props) {
     setCreating(true);
       try {
       // Call Tauri command; the native command will be implemented separately.
-      const invoke = (window as any).__TAURI__?.invoke;
-      if (!invoke) throw new Error('Tauri invoke unavailable');
-      await invoke('init_repo', { name, template });
+  const anyWin = (window as any) || {};
+  const invoke = anyWin.__TAURI__?.invoke ?? anyWin.tauri?.invoke ?? anyWin.__TAURI_IPC__?.invoke;
+  if (!invoke) throw new Error('Tauri invoke unavailable');
+  await invoke('init_repo', { name, template });
       // notify parent to refresh list
       if (typeof onCreated === 'function') onCreated();
       closeModal();

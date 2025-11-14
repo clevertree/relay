@@ -6,6 +6,8 @@ import { Box, Chip, Typography } from '@mui/material';
 
 // Read version from package.json at build time using next's public metadata import
 import pkg from '../package.json';
+import RuntimeChip from '../src/components/RuntimeChip';
+import DesktopGuard from '../src/components/DesktopGuard';
 
 export const metadata = {
   title: 'Relay',
@@ -22,7 +24,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <MuiThemeProvider>
           <NavBar />
           <main style={{ padding: '16px', maxWidth: 1200, margin: '0 auto' }}>
-            {children}
+            {/* DesktopGuard will error out if the webview is embedded in Tauri but the bridge is missing */}
+            <DesktopGuard>
+              {children}
+            </DesktopGuard>
           </main>
 
           <Box component="footer" sx={{ mt: 4, py: 2, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
@@ -38,10 +43,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   );
 }
 
-function RuntimeChip() {
-  // detect Tauri runtime
-  const isDesktop = typeof window !== 'undefined' && !!(window as any).__TAURI__;
-  return (
-    <Chip label={isDesktop ? 'desktop' : 'web-only'} color={isDesktop ? 'success' : 'primary'} size="small" />
-  );
-}
+// RuntimeChip is provided as a client component under `src/components/RuntimeChip`.
