@@ -17,11 +17,21 @@ export default function HomePage() {
     return () => { mounted = false; };
   }, []);
 
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const r = await listRepos();
+      setRepos(r);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Box>
       <Typography variant="h4" gutterBottom>Repositories</Typography>
       {loading && <CircularProgress />}
-      {!loading && <RepoList repos={repos ?? []} />}
+      {!loading && <RepoList repos={repos ?? []} onCreated={reload} />}
     </Box>
   );
 }
