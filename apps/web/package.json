@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-  "dev": "concurrently -k -n WASM,WEB -c yellow,green \"node ../../scripts/build-wasm.mjs --watch\" \"node ./scripts/start-next.js\"",
+    "dev": "concurrently -k -n WASM,WEB -c yellow,green \"node ../../scripts/build-wasm.mjs --watch\" \"node ./scripts/start-next.js\"",
     "prebuild": "node ../../scripts/build-wasm.mjs",
     "build": "next build",
     "start": "next start -p 3000",
@@ -13,16 +13,17 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@emotion/react": "11.11.4",
+    "@emotion/styled": "11.11.0",
+    "@mui/icons-material": "5",
+    "@mui/material": "5.15.15",
+    "axios": "1.7.7",
     "next": "14.2.5",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "@mui/material": "5.15.15",
-    "@emotion/react": "11.11.4",
-    "@emotion/styled": "11.11.0",
-    "zustand": "4.5.2",
-    "axios": "1.7.7",
     "react-markdown": "9.0.1",
-    "yaml": "2.4.5"
+    "yaml": "2.4.5",
+    "zustand": "4.5.2"
   },
   "devDependencies": {
     "@types/node": "20.11.30",
