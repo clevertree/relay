@@ -1,6 +1,7 @@
 {
   "name": "relay-monorepo",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@9.12.0",
   "scripts": {
     "dev": "concurrently -k -n WEB,TAURI -c green,cyan \"pnpm --filter ./apps/web dev\" \"npm run tauri:dev\"",
@@ -21,6 +22,7 @@
     "web:export:to-host": "node scripts/copy-web-to-host.mjs"
   },
   "devDependencies": {
+    "chokidar-cli": "^3.0.0",
     "concurrently": "^9.2.1",
     "turbo": "^2.0.12"
   }
