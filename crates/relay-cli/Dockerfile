@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.71-bullseye AS builder
+FROM rust:1.82-bullseye AS builder
 WORKDIR /workspace
 
 # Copy only Cargo files first for caching
@@ -17,5 +17,6 @@ RUN cargo build --release --manifest-path crates/relay-cli/Cargo.toml
 
 # Runtime stage
 FROM gcr.io/distroless/cc-debian11
-COPY --from=builder /workspace/target/release/relay /usr/local/bin/relay
+# The crate produces a binary named `relay-cli` in workspace mode; copy and rename it
+COPY --from=builder /workspace/target/release/relay-cli /usr/local/bin/relay
 ENTRYPOINT ["/usr/local/bin/relay"]
