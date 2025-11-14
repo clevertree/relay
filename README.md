@@ -365,3 +365,47 @@ Notes:
 - Requires system Git on PATH (server-side).
 - Works with bare and non-bare repositories.
 - For now only `refs/heads/main` is validated by default; pass `--ref-filter <ref>` to change.
+
+
+
+## Web App (Next.js) — Dev, Build, and Export
+
+The UI lives under `apps/web` (Next.js 14 + TypeScript + MUI) and is designed to be statically exported and served from `host/static`.
+
+### Develop locally
+```
+pnpm install
+pnpm run web:dev
+```
+Navigate to http://localhost:3000. The Home page lists repositories via the Host HTTP API when available; otherwise it falls back to mock data (e.g., a `movies` repo). The Repo page renders `.relay/interface.md` using a safe markdown renderer.
+
+### Build and export to static files
+```
+pnpm run web:build
+pnpm run web:export
+pnpm run web:export:to-host    # copies apps/web/out → host/static
+```
+Then you can serve the exported UI:
+- Using the Relay host (HTTP stub note):
+  - `relay host start --root ./host --port 8080` (HTTP server implementation is scheduled for M4; until then, use a static server for preview)
+- Or any static file server for preview, e.g.:
+  - `npx serve host/static` then open the printed URL
+
+### Configuration in the UI
+The Settings page (top-right) lets you adjust:
+- Master Endpoint (HTTP base URL for the host server)
+- HTTP and Git ports
+- Shallow clone preference
+
+Settings persist to browser storage and will be used by the web app for API calls. When the Host HTTP API is not yet available, the UI uses a graceful mock fallback so pages still render.
+
+### Repository Browser: Remote vs Local File Loading
+
+The repository browser enforces file-type restrictions only for files fetched from a remote peer in host mode. Local files are not subject to these network safety limits.
+
+- Local files (desktop mode or direct local browsing): all file types may be loaded and previewed, subject to the operating environment’s standard protections.
+- Remote files (fetched from a peer’s host server): the browser computes an allowlist from the remote repository’s `.relay/schema.yaml` and only loads/preview files whose extensions are allowed by that schema. If the schema is missing, a conservative default allowlist is used.
+- JavaScript is always forbidden in the repository browser, regardless of schema. JS files are never executed or rendered as active content.
+- Enforcement is client-side: the host server serves raw files, but the web UI blocks disallowed types before loading/previewing them.
+
+This model keeps local usage flexible while providing strong safety defaults when browsing content from peers over the network.

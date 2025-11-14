@@ -12,7 +12,11 @@
     "test:rust": "cargo test",
     "lint:rust": "cargo clippy -- -D warnings",
     "format:rust": "cargo fmt",
-    "dev:host": "cargo run -p relay-cli -- host start --port 8080 --root ./host"
+    "dev:host": "cargo run -p relay-cli -- host start --port 8080 --root ./host",
+    "web:dev": "pnpm --filter ./apps/web dev",
+    "web:build": "pnpm --filter ./apps/web build",
+    "web:export": "pnpm --filter ./apps/web export",
+    "web:export:to-host": "node scripts/copy-web-to-host.mjs"
   },
   "devDependencies": {
     "turbo": "^2.0.12"

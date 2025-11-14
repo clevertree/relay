@@ -14,3 +14,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 ctrlc = { workspace = true }
 toml = { workspace = true }
+tiny_http = "0.12"
+percent-encoding = "2.3"
