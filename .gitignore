@@ -7,6 +7,8 @@ node_modules/
 /apps/web/.next/
 /apps/web/out/
 /apps/**/dist/
+.turbo/
+pnpm-lock.yaml
 
 # Tauri
 /apps/desktop/src-tauri/target/
