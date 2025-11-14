@@ -8,15 +8,6 @@ license = "MIT OR Apache-2.0"
 name = "relay_core"
 path = "src/lib.rs"
 
-[features]
-# Git integration via gitoxide. Enabled by default so clients can use host mode without extra flags.
-# Note: Runtime still only starts the server in Host Mode.
-default = ["git"]
-git = [
-    "dep:gix-transport",
-    "dep:gix-protocol",
-]
-
 [dependencies]
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -27,6 +18,3 @@ toml = { workspace = true }
 directories = { workspace = true }
 log = { workspace = true }
 glob = { workspace = true }
-# Git protocol stack (feature-gated)
-gix-transport = { version = "0.38", optional = true, default-features = false }
-gix-protocol = { version = "0.41", optional = true, default-features = false }

@@ -1,6 +1,5 @@
 pub mod config;
 pub mod schema;
-pub mod git;
 
 pub use config::{load_config, save_config, Config, ConfigPaths};
 pub use schema::{
@@ -12,5 +11,3 @@ pub use schema::{
     ValidationReport,
     ValidationError,
 };
-
-pub use git::{start_git_server, stop_git_server, GitServerHandle};

@@ -22,7 +22,11 @@ pub struct HttpConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitConfig {
     pub port: u16,
+    #[serde(default = "default_git_shallow_default")]
+    pub shallow_default: bool,
 }
+
+fn default_git_shallow_default() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeaturesConfig {
@@ -36,7 +40,7 @@ impl Default for Config {
             master_endpoint: "https://node1.relaynet.online".to_string(),
             data_path: default_data_path,
             http: HttpConfig { port: 8080 },
-            git: GitConfig { port: 9418 },
+            git: GitConfig { port: 9418, shallow_default: true },
             features: FeaturesConfig { web_only: false },
         }
     }
@@ -83,6 +87,10 @@ fn apply_env_overrides(cfg: &mut Config) {
     }
     if let Ok(v) = env::var("RELAY_GIT_PORT") {
         if let Ok(p) = v.parse::<u16>() { cfg.git.port = p; }
+    }
+    if let Ok(v) = env::var("RELAY_GIT_SHALLOW_DEFAULT") {
+        let vlow = v.to_ascii_lowercase();
+        cfg.git.shallow_default = matches!(vlow.as_str(), "1" | "true" | "yes");
     }
     if let Ok(v) = env::var("RELAY_WEB_ONLY") {
         let vlow = v.to_ascii_lowercase();

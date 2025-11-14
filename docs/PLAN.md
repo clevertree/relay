@@ -182,6 +182,7 @@ Notes:
   - `data_path = "<appdir>/host"`
   - `http.port = 8080`
   - `git.port = 9418`  # mygit protocol default
+  - `git.shallow_default = true`  # default clone depth behavior (true = shallow, false = full)
   - `features.web_only = true|false`
 
 ## 6. HTTP API (Host Mode) — Draft
@@ -228,10 +229,13 @@ M2 — Schema validation + CLI hooks
 - Hook installation and rejection on invalid commits
 - Accept: failing commit shows error; passing commit allowed
 
-M3 — Git protocol server + CLI `relay git`
-- Implement mygit-based server in relay-core, started with `relay host start`
-- Implement `relay git clone|fetch|pull|push` in CLI using mygit client
-- Accept: from Client B, clone `git://ClientA:9418/movies` succeeds; push from B to A triggers validation hooks
+M3 — Git service via system Git + CLI `relay git`
+- Use the system `git daemon` for serving repositories (started via `relay host start` or `relay git-daemon start`)
+- Implement `relay git clone|fetch|pull|push` as thin wrappers over the system Git client
+- Accept:
+  - `relay git-daemon start --base-path <host/repos> --port 9418` serves repos on LAN
+  - From Client B, `git clone git://ClientA:9418/movies` succeeds (shallow when configured)
+  - Push from B to A triggers validation hooks (`pre-receive` calling `relay hooks pre-receive`) and rejects invalid commits
 
 M4 — Host HTTP server + web browser
 - Serve static and repo files with allowlist enforcement

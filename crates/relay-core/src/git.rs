@@ -28,7 +28,7 @@ pub fn start_git_server<P: AsRef<Path>>(port: u16, repos_root: P) -> Result<GitS
     let sd_flag = shutdown.clone();
 
     log::info!(
-        "[git] Starting scaffold git server on {} serving repos at {}",
+        "[git] Starting git server on {} serving repos at {}",
         bind_addr,
         root.display()
     );
@@ -101,7 +101,7 @@ fn handle_client(stream: &mut TcpStream, repos_root: &Path) -> Result<()> {
         }
     };
 
-    let mut name = raw_path.trim_start_matches('/').trim_end_matches(".git");
+    let name = raw_path.trim_start_matches('/').trim_end_matches(".git");
     // Safety check on repo name
     if !is_safe_repo_name(name) {
         write_err_pkt(stream, "invalid repository name")?;
@@ -111,10 +111,23 @@ fn handle_client(stream: &mut TcpStream, repos_root: &Path) -> Result<()> {
     // Resolve path to ensure repo exists and is non-bare
     if let Some(repo_path) = resolve_repo_path(repos_root, name) {
         log::info!("[git] {} -> {}", service, repo_path.display());
-        // For now, respond with a protocol-level error but confirm discovery works
         match service {
-            "git-upload-pack" | "git-receive-pack" => {
-                write_err_pkt(stream, "git protocol not yet implemented (advertise-refs/upload-pack/receive-pack WIP)")?;
+            "git-upload-pack" => {
+                advertise_refs(stream, &repo_path, service).or_else(|e| {
+                    log::warn!("[git] advertise-refs failed: {}", e);
+                    write_err_pkt(stream, "failed to advertise refs")
+                })?;
+                // Proceed to (minimal) negotiation; full upload-pack will be implemented in M3.2
+                if let Err(e) = handle_upload_pack(stream, &repo_path) {
+                    log::warn!("[git] upload-pack negotiation error: {}", e);
+                }
+            }
+            "git-receive-pack" => {
+                // For now, we only implement discovery here as well
+                advertise_refs(stream, &repo_path, service).or_else(|e| {
+                    log::warn!("[git] advertise-refs (receive) failed: {}", e);
+                    write_err_pkt(stream, "failed to advertise refs")
+                })?;
             }
             _ => {
                 write_err_pkt(stream, "unsupported service")?;
@@ -141,6 +154,89 @@ fn write_err_pkt(stream: &mut TcpStream, msg: &str) -> Result<()> {
 fn pkt_line(s: &str) -> String {
     let len = s.len() + 4;
     format!("{:04x}{}", len, s)
+}
+
+#[cfg(feature = "git")]
+fn read_loose_ref(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+}
+
+#[cfg(feature = "git")]
+fn enumerate_loose_heads(git_dir: &Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let heads = git_dir.join("refs").join("heads");
+    if heads.is_dir() {
+        let walk = std::fs::read_dir(&heads).ok();
+        if let Some(walk) = walk {
+            for entry in walk.flatten() {
+                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if let Some(oid) = read_loose_ref(&entry.path()) {
+                        if oid.len() >= 40 { out.push((oid[..40].to_string(), format!("refs/heads/{}", name))); }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(feature = "git")]
+fn read_head_ref(git_dir: &Path) -> (Option<String>, Option<String>) {
+    // Returns (symref target, resolved oid if direct)
+    let head = git_dir.join("HEAD");
+    if let Some(content) = read_loose_ref(&head) {
+        if let Some(rest) = content.strip_prefix("ref: ") {
+            return (Some(rest.to_string()), None);
+        } else {
+            // direct
+            let oid = content.trim().to_string();
+            if oid.len() >= 40 { return (None, Some(oid[..40].to_string())); }
+        }
+    }
+    (None, None)
+}
+
+#[cfg(feature = "git")]
+fn advertise_refs(stream: &mut TcpStream, repo_path: &Path, service: &str) -> Result<()> {
+    let git_dir = repo_path.join(".git");
+    // Gather refs
+    let mut refs = enumerate_loose_heads(&git_dir);
+
+    // HEAD
+    let (head_symref, head_oid_direct) = read_head_ref(&git_dir);
+    let head_oid = if let Some(sym) = &head_symref {
+        let target = git_dir.join(sym);
+        read_loose_ref(&target).and_then(|s| if s.len()>=40 { Some(s[..40].to_string()) } else { None })
+    } else { head_oid_direct };
+
+    // Build capabilities (minimal)
+    let caps = vec!["multi_ack".to_string(), "side-band-64k".to_string(), "symref=HEAD:".to_string() + head_symref.as_deref().unwrap_or("refs/heads/main")];
+    let capabilities = caps.join(" ");
+
+    // First line: either HEAD or first ref carries capabilities with NUL separator
+    let mut first_line_written = false;
+    if let Some(oid) = head_oid {
+        let mut line = format!("{} {}\0{}\n", oid, "HEAD", capabilities);
+        let pkt = pkt_line(&line);
+        stream.write_all(pkt.as_bytes())?;
+        first_line_written = true;
+    }
+
+    for (oid, name) in refs.drain(..) {
+        let line = if !first_line_written {
+            first_line_written = true;
+            format!("{} {}\0{}\n", oid, name, capabilities)
+        } else {
+            format!("{} {}\n", oid, name)
+        };
+        let pkt = pkt_line(&line);
+        stream.write_all(pkt.as_bytes())?;
+    }
+
+    // flush
+    stream.write_all(b"0000")?;
+    Ok(())
 }
 
 #[cfg(not(feature = "git"))]
@@ -218,4 +314,86 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+}
+
+
+#[cfg(feature = "git")]
+fn read_pkt_line(stream: &mut TcpStream) -> Result<Option<String>> {
+    let mut hdr = [0u8; 4];
+    stream.read_exact(&mut hdr)?;
+    let len_hex = std::str::from_utf8(&hdr).context("Invalid pkt-line header")?;
+    if len_hex == "0000" {
+        return Ok(None); // flush
+    }
+    let len = u16::from_str_radix(len_hex, 16).context("Bad pkt-line length")? as usize;
+    if len < 4 { anyhow::bail!("Invalid pkt-line length <4"); }
+    let payload_len = len - 4;
+    let mut payload = vec![0u8; payload_len];
+    stream.read_exact(&mut payload)?;
+    let s = String::from_utf8(payload).context("pkt payload not utf8")?;
+    Ok(Some(s))
+}
+
+#[cfg(feature = "git")]
+fn resolve_ref_oid(git_dir: &Path, refname: &str) -> Option<String> {
+    let target = git_dir.join(refname);
+    read_loose_ref(&target).and_then(|s| if s.len() >= 40 { Some(s[..40].to_string()) } else { None })
+}
+
+#[cfg(feature = "git")]
+fn handle_upload_pack(stream: &mut TcpStream, repo_path: &Path) -> Result<()> {
+    // Minimal negotiation parser: collect wants/deepen/done then reply with ERR for now.
+    // This scaffolds M3.2; actual pack streaming will replace this.
+    log::debug!("[git] upload-pack: waiting for negotiation lines");
+
+    let git_dir = repo_path.join(".git");
+    let main_ref = "refs/heads/main";
+    let head_oid_main = resolve_ref_oid(&git_dir, main_ref);
+
+    // Read first phase: wants until flush
+    let mut wants: Vec<String> = Vec::new();
+    let mut requested_deepen: Option<u32> = None;
+    loop {
+        match read_pkt_line(stream)? {
+            Some(line) => {
+                let line_trim = line.trim_end_matches('\n');
+                if let Some(rest) = line_trim.strip_prefix("want ") {
+                    // First 'want' may carry capabilities after NUL; keep OID part
+                    let oid_part = rest.splitn(2, '\0').next().unwrap_or(rest).trim();
+                    wants.push(oid_part.to_string());
+                } else if let Some(rest) = line_trim.strip_prefix("deepen ") {
+                    if let Ok(n) = rest.trim().parse::<u32>() { requested_deepen = Some(n); }
+                    log::debug!("[git] client requested deepen {:?}", requested_deepen);
+                } else if line_trim == "done" {
+                    // Some clients send done before flush
+                    log::debug!("[git] client sent done");
+                } else {
+                    log::debug!("[git] upload-pack: other line: {}", line_trim.escape_debug());
+                }
+            }
+            None => break, // flush
+        }
+    }
+
+    if wants.is_empty() {
+        write_err_pkt(stream, "no 'want' received in upload-pack")?;
+        return Ok(());
+    }
+
+    // Validate that the want matches our main head (v1 scope)
+    if let Some(main_oid) = head_oid_main {
+        if !wants.iter().any(|w| w == &main_oid) {
+            write_err_pkt(stream, "requested OID not available (only refs/heads/main supported in v1)")?;
+            return Ok(());
+        }
+    } else {
+        write_err_pkt(stream, "refs/heads/main not found")?;
+        return Ok(());
+    }
+
+    // For now, we don't generate a pack yet.
+    // Acknowledge shallow request if present (log only), then return explicit WIP error.
+    let _ = requested_deepen;
+    write_err_pkt(stream, "upload-pack not implemented yet (M3.2 WIP)")?;
+    Ok(())
 }
