@@ -1,34 +1,40 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Typography, IconButton, TextField, Button } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
+import { Box, Typography, TextField, Button } from '@mui/material';
 import TerminalIcon from '@mui/icons-material/Terminal';
-import BugReportIcon from '@mui/icons-material/BugReport';
-import { useLogStore, logInfo, logError, logDebug, tauriInvoke, bridgeAvailable } from '../lib/log';
+import { useLogStore, logInfo, logError, logDebug, tauriInvoke, useBridgeStore, startBridgeValidation } from '../lib/log';
 
 export default function FooterConsole() {
   const { items, clear } = useLogStore();
   const [open, setOpen] = useState(true);
   const [cmd, setCmd] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
+  const { validated } = useBridgeStore();
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [items.length]);
 
+  // Start bridge validation once on mount
+  useEffect(() => {
+    startBridgeValidation();
+  }, []);
+
   // Subscribe to tauri event stream if available
   useEffect(() => {
-    let unlisten: any;
-    try {
-      const anyWin: any = typeof window !== 'undefined' ? (window as any) : {};
-      const tauriEvent = anyWin.__TAURI__?.event ?? anyWin.tauri?.event ?? undefined;
-      if (tauriEvent?.listen) {
-        tauriEvent.listen('relay://log', (e: any) => {
+    let unlisten: undefined | (() => void);
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        const off = await listen('relay://log', (e: any) => {
           const payload = e?.payload || {};
           const level = (payload.level || 'info') as any;
           const message = String(payload.message || '');
           useLogStore.getState().append(level, message);
-        }).then((un: any) => { unlisten = un; });
+        });
+        unlisten = off;
+      } catch (e) {
+        // In web-only runtime, @tauri-apps/api/event may throw; ignore.
       }
-    } catch {}
+    })();
     return () => { try { if (unlisten) unlisten(); } catch {} };
   }, []);
 
@@ -53,7 +59,7 @@ export default function FooterConsole() {
       <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
         <TerminalIcon fontSize="small" />
         <Typography variant="caption" sx={{ flexGrow: 1 }}>
-          Log console — {items.length} entries {bridgeAvailable() ? '(desktop)' : '(web-only)'}
+          Log console — {items.length} entries {validated ? '(desktop)' : '(web-only)'}
         </Typography>
         <Button size="small" onClick={() => clear()}>Clear</Button>
       </Box>

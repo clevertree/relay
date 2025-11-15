@@ -1,12 +1,15 @@
 "use client";
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Chip } from '@mui/material';
-import { isDesktopRuntime } from '../lib/runtime';
+import { startBridgeValidation, useBridgeStore } from '../lib/log';
 
 export default function RuntimeChip() {
-  const [isDesktop, setIsDesktop] = useState(false);
+  const { validated, validating } = useBridgeStore();
   useEffect(() => {
-    setIsDesktop(isDesktopRuntime());
+    // Kick off validation on first render
+    startBridgeValidation();
   }, []);
-  return <Chip label={isDesktop ? 'desktop' : 'web-only'} color={isDesktop ? 'success' : 'primary'} size="small" />;
+  const label = validated ? 'desktop' : (validating ? 'checking…' : 'web-only');
+  const color: any = validated ? 'success' : 'primary';
+  return <Chip label={label} color={color} size="small" />;
 }

@@ -1,7 +1,6 @@
 "use client";
 import React, { useState, useEffect } from 'react';
-import { isDesktopRuntime } from '../lib/runtime';
-import { logInfo, logError, logWarn, tauriInvoke } from '../lib/log';
+import { logInfo, logError, logWarn, tauriInvoke, useBridgeStore, startBridgeValidation } from '../lib/log';
 import {
   Grid,
   Card,
@@ -45,41 +44,9 @@ export default function RepoList({ repos, onCreated }: Props) {
   const [repoPath, setRepoPath] = useState<string>('');
   const cfg = useConfigStore();
 
-  // Detect desktop/Tauri environment reactively.
-  // The Tauri bridge can be injected after initial render, so poll briefly
-  // to catch late arrival and update the UI accordingly.
-  const [isDesktop, setIsDesktop] = useState<boolean>(
-    typeof window !== 'undefined' && isDesktopRuntime()
-  );
-
-  useEffect(() => {
-    if (isDesktop) return;
-    let mounted = true;
-    // quick polling for bridge for up to ~2s
-    const intervalMs = 150;
-    const maxAttempts = Math.ceil(2000 / intervalMs);
-    let attempts = 0;
-    const id = setInterval(() => {
-      attempts += 1;
-      if (!mounted) return;
-      try {
-        if (isDesktopRuntime()) {
-          setIsDesktop(true);
-          clearInterval(id);
-          return;
-        }
-      } catch (e) {
-        // ignore
-      }
-      if (attempts >= maxAttempts) {
-        clearInterval(id);
-      }
-    }, intervalMs);
-    return () => {
-      mounted = false;
-      clearInterval(id);
-    };
-  }, [isDesktop]);
+  // Use bridge validation state to gate desktop-only actions.
+  const { validated, validating } = useBridgeStore();
+  useEffect(() => { startBridgeValidation(); }, []);
 
   const openModal = () => setOpen(true);
   const closeModal = () => {
@@ -109,7 +76,7 @@ export default function RepoList({ repos, onCreated }: Props) {
     setError(null);
     if (!name) return setError('Repository name is required');
     if (!validateName(name)) return setError('Use only letters, numbers, - or _');
-    if (!isDesktop) return setError('Repository creation is available only in desktop mode');
+    if (!validated) return setError('Repository creation is available only in desktop mode');
 
     setCreating(true);
     try {
@@ -153,9 +120,9 @@ export default function RepoList({ repos, onCreated }: Props) {
     <Box>
       <Box mb={2} display="flex" alignItems="center" justifyContent="space-between">
         <Typography variant="h6">Local repositories</Typography>
-        <Tooltip title={isDesktop ? 'Create a new local repository' : 'Repository creation is available in desktop mode only'}>
+        <Tooltip title={validated ? 'Create a new local repository' : (validating ? 'Checking desktop environment…' : 'Repository creation is available in desktop mode only')}>
           <span>
-            <Button variant="contained" onClick={openModal} disabled={!isDesktop} size="small">
+            <Button variant="contained" onClick={openModal} disabled={!validated} size="small">
               Add repository
             </Button>
           </span>
@@ -212,7 +179,7 @@ export default function RepoList({ repos, onCreated }: Props) {
         </DialogContent>
         <DialogActions>
           <Button onClick={closeModal} disabled={creating}>Cancel</Button>
-          <Button onClick={handleCreate} variant="contained" disabled={creating || !isDesktop}>
+          <Button onClick={handleCreate} variant="contained" disabled={creating || !validated}>
             Create
           </Button>
         </DialogActions>
