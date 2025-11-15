@@ -23,6 +23,7 @@ import Link from 'next/link';
 import type { RepoInfo } from '../lib/api';
 import { useConfigStore } from '../store/config';
 import { getDefaultConfigPath } from '../lib/paths';
+import { slugify } from '../lib/repoSchema';
 
 type Props = {
   repos: RepoInfo[];
@@ -30,18 +31,23 @@ type Props = {
 };
 
 function statusFor(repo: RepoInfo) {
-  // Heuristic: presence of a `path` is considered local; otherwise remote.
-  if (repo.path) return { label: 'Local', color: 'primary' } as const;
+  // Presence of a `localPath` is considered local; otherwise remote.
+  if (repo.localPath) {
+    if (repo.missing) return { label: 'Missing', color: 'warning' } as const;
+    return { label: 'Local', color: 'primary' } as const;
+  }
   return { label: 'Remote', color: 'default' } as const;
 }
 
 export default function RepoList({ repos, onCreated }: Props) {
   const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [name, setName] = useState('');
   const [template, setTemplate] = useState('movies');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [repoPath, setRepoPath] = useState<string>('');
+  const [basePath, setBasePath] = useState<string>('');
   const cfg = useConfigStore();
 
   // Use bridge validation state to gate desktop-only actions.
@@ -51,14 +57,16 @@ export default function RepoList({ repos, onCreated }: Props) {
   const openModal = () => setOpen(true);
   const closeModal = () => {
     setOpen(false);
+    setTitle('');
+    setDescription('');
     setName('');
     setTemplate('movies');
-    setRepoPath('');
+    setBasePath('');
     setError(null);
     setCreating(false);
   };
 
-  // When dialog opens, seed repoPath from config or default resolver
+  // When dialog opens, seed basePath from config or default resolver
   useEffect(() => {
     if (!open) return;
     (async () => {
@@ -66,23 +74,26 @@ export default function RepoList({ repos, onCreated }: Props) {
       if (!base) {
         try { base = await getDefaultConfigPath(); } catch {}
       }
-      setRepoPath(base || '');
+      setBasePath(base || '');
     })();
   }, [open]);
 
-  const validateName = (n: string) => /^[a-zA-Z0-9_-]+$/.test(n);
+  const validateName = (n: string) => /^[a-zA-Z0-9 _-]+$/.test(n);
+  const safeName = slugify(name || '').replace(/_/g, '-');
+  const computedPath = (basePath?.replace(/\\+$/,'').replace(/\/+$/, '') || '') + (safeName ? `/${safeName}` : '');
 
   const handleCreate = async () => {
     setError(null);
-    if (!name) return setError('Repository name is required');
-    if (!validateName(name)) return setError('Use only letters, numbers, - or _');
+    if (!title.trim()) return setError('Title is required');
+    if (!name.trim()) return setError('Repository name is required');
+    if (!validateName(name)) return setError('Use letters, numbers, spaces, - or _');
     if (!validated) return setError('Repository creation is available only in desktop mode');
 
     setCreating(true);
     try {
-      logInfo(`create repo: ${name} (template=${template})`);
-      const path = (repoPath || '').trim() || undefined;
-      await tauriInvoke('init_repo', { name, template, path });
+      logInfo(`create repo: ${name} (template=${template}) at ${computedPath}`);
+      const path = (basePath || '').trim() || undefined;
+      await tauriInvoke('init_repo', { name, template, path, title, description });
       logInfo('create repo: success');
       if (typeof onCreated === 'function') onCreated();
       closeModal();
@@ -92,8 +103,8 @@ export default function RepoList({ repos, onCreated }: Props) {
       setCreating(false);
     }
   };
-  const local = repos.filter((r) => !!r.path);
-  const remote = repos.filter((r) => !r.path);
+  const local = repos.filter((r) => !!r.localPath);
+  const remote = repos.filter((r) => !r.localPath);
 
   const renderCard = (repo: RepoInfo) => {
     const s = statusFor(repo);
@@ -103,12 +114,15 @@ export default function RepoList({ repos, onCreated }: Props) {
           <Card variant="outlined" sx={{ height: '100%', cursor: 'pointer' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Typography variant="h6">{repo.name}</Typography>
+                <Typography variant="h6">{repo.title || repo.name}</Typography>
                 <Chip label={s.label} color={s.color as any} size="small" />
               </Box>
-              <Typography variant="body2" color="text.secondary">
-                {repo.description || 'Git repository'}
+              <Typography variant="body2" color={repo.missing ? 'warning.main' as any : 'text.secondary'}>
+                {repo.missing ? 'Local repository missing on disk' : (repo.lastURL || repo.localPath || '')}
               </Typography>
+              {repo.title && repo.title !== repo.name && (
+                <Typography variant="caption" color="text.secondary">{repo.name}</Typography>
+              )}
             </CardContent>
           </Card>
         </Link>
@@ -157,18 +171,39 @@ export default function RepoList({ repos, onCreated }: Props) {
           </DialogContentText>
           <Box mt={2} display="flex" flexDirection="column" gap={2}>
             <TextField
+              label="Title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              helperText={!title ? 'A readable title for your repository' : ' '}
+              fullWidth
+            />
+            <TextField
+              label="Description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              helperText={'Optional short description'}
+              multiline minRows={2}
+              fullWidth
+            />
+            <TextField
               label="Repository name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              helperText={error ?? 'Allowed: letters, numbers, - and _'}
+              helperText={error ?? 'Letters, numbers, spaces, - or _; used to form the folder name'}
               error={!!error}
               fullWidth
             />
             <TextField
-              label="Repo path"
-              value={repoPath}
-              onChange={(e) => setRepoPath(e.target.value)}
-              helperText={repoPath ? 'Directory where the repository folder will be created' : 'Using runtime default path'}
+              label="Base folder"
+              value={basePath}
+              onChange={(e) => setBasePath(e.target.value)}
+              helperText={basePath ? 'Directory where the repository folder will be created' : 'Using runtime default path'}
+              fullWidth
+            />
+            <TextField
+              label="Will be created at"
+              value={computedPath}
+              InputProps={{ readOnly: true }}
               fullWidth
             />
             <Select value={template} onChange={(e) => setTemplate(e.target.value)} fullWidth>

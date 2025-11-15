@@ -13,12 +13,14 @@ use std::fs;
 use tracing::{info, warn, error, debug};
 use directories::ProjectDirs;
 use std::io::Write;
+use serde::{Deserialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
   // Build and run the tauri app. We'll redirect the main webview to the
   // FRONTEND_PORT if the env var is set (useful for dev orchestration).
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![init_repo, log_message, debug_state, get_app_host_path])
+    .invoke_handler(tauri::generate_handler![init_repo, log_message, debug_state, get_app_host_path, get_repos, save_repos])
     .setup(|app| {
       // On setup, if FRONTEND_PORT is provided, redirect the main webview.
       if let Ok(port) = std::env::var("FRONTEND_PORT") {
@@ -53,6 +55,18 @@ fn main() {
     })
       .run(tauri::generate_context!("tauri.conf.json"))
     .expect("error while running tauri application");
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct RepoEntry {
+  name: String,
+  #[serde(skip_serializing_if = "Option::is_none")] title: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")] lastSize: Option<u64>,
+  #[serde(skip_serializing_if = "Option::is_none")] lastUpdate: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")] lastURL: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")] localPath: Option<String>,
+  // transient marker for UI; not part of strict spec but harmless
+  #[serde(skip_serializing_if = "Option::is_none")] missing: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -95,6 +109,29 @@ fn append_log(level: &str, message: &str) -> std::io::Result<()> {
   Ok(())
 }
 
+fn sanitize_name(input: &str) -> String {
+  let s = input.to_lowercase();
+  let mut out = String::with_capacity(s.len());
+  let mut prev_dash = false;
+  for ch in s.chars() {
+    if ch.is_ascii_alphanumeric() {
+      out.push(ch);
+      prev_dash = false;
+    } else if ch == '-' || ch == '_' {
+      out.push(ch);
+      prev_dash = false;
+    } else {
+      if !prev_dash {
+        out.push('-');
+        prev_dash = true;
+      }
+    }
+  }
+  // trim leading/trailing dashes
+  let trimmed = out.trim_matches('-').to_string();
+  if trimmed.is_empty() { "repo".into() } else { trimmed }
+}
+
 fn app_log_path() -> PathBuf {
   if let Some(dirs) = ProjectDirs::from("org", "relay", "relay") {
     return dirs.data_dir().join("app.log");
@@ -116,6 +153,64 @@ async fn get_app_host_path() -> Result<String, String> {
   Ok(app_host_default_path().to_string_lossy().to_string())
 }
 
+fn repos_config_path() -> PathBuf {
+  if let Some(dirs) = ProjectDirs::from("org", "relay", "relay") {
+    return dirs.data_dir().join("repos.json");
+  }
+  PathBuf::from("repos.json")
+}
+
+fn load_repos_file() -> Vec<RepoEntry> {
+  let p = repos_config_path();
+  if let Ok(data) = std::fs::read_to_string(&p) {
+    match serde_json::from_str::<Vec<RepoEntry>>(&data) {
+      Ok(mut arr) => {
+        // normalize names to non-empty
+        arr.retain(|e| !e.name.trim().is_empty());
+        return arr;
+      }
+      Err(e) => {
+        eprintln!("failed to parse repos.json: {}", e);
+      }
+    }
+  }
+  Vec::new()
+}
+
+fn save_repos_file(repos: &Vec<RepoEntry>) -> Result<(), String> {
+  let p = repos_config_path();
+  if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+  let data = serde_json::to_string_pretty(repos).map_err(|e| e.to_string())?;
+  std::fs::write(&p, data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_repos() -> Result<Vec<RepoEntry>, String> {
+  let mut arr = load_repos_file();
+  // Mark missing local repos
+  let mut missing_count = 0usize;
+  for e in arr.iter_mut() {
+    if let Some(lp) = &e.localPath {
+      let exists = std::path::Path::new(lp).exists();
+      let miss = !exists;
+      e.missing = Some(miss);
+      if miss { missing_count += 1; }
+    }
+  }
+  let _ = append_log("debug", &format!("get_repos: {} entries ({} missing)", arr.len(), missing_count));
+  Ok(arr)
+}
+
+#[tauri::command]
+async fn save_repos(repos: Vec<RepoEntry>) -> Result<(), String> {
+  let res = save_repos_file(&repos);
+  match &res {
+    Ok(_) => { let _ = append_log("info", &format!("save_repos: {} entries written to {}", repos.len(), repos_config_path().display())); }
+    Err(e) => { let _ = append_log("error", &format!("save_repos failed: {}", e)); }
+  }
+  res
+}
+
 /// Initialize a repository by invoking the workspace `relay-cli` binary.
 ///
 /// This command shells out to `cargo run -p relay-cli -- init --repo <name> --template <template> --path <path>`
@@ -123,20 +218,28 @@ async fn get_app_host_path() -> Result<String, String> {
 /// default `./host/repos` relative to the workspace root; you can pass an absolute
 /// path using `path`.
 #[tauri::command]
-async fn init_repo(name: String, template: Option<String>, path: Option<String>) -> Result<InitResult, String> {
+async fn init_repo(name: String, template: Option<String>, path: Option<String>, title: Option<String>, description: Option<String>) -> Result<InitResult, String> {
   // basic validation
   if name.trim().is_empty() {
     return Err("repo name is required".into());
   }
 
   let template = template.unwrap_or_else(|| "movies".to_string());
-  // default path: workspace relative host/repos
-  let repo_path = path.map(PathBuf::from).unwrap_or_else(app_host_default_path);
+  // base dir for repos
+  let base_dir = path.map(PathBuf::from).unwrap_or_else(app_host_default_path);
+  // sanitize name to file-safe
+  let safe_name = sanitize_name(&name);
+  let repo_path = base_dir.join(&safe_name);
+
+  info!("init_repo starting: name={}, template={}, path={}", name, template, repo_path.display());
+  let _ = append_log("info", &format!("init_repo: {} (template={}) at {}", name, template, repo_path.display()));
 
   // Build owned args so we can move into the blocking closure
   let repo_path_arg = repo_path.to_string_lossy().to_string();
   let name_arg = name.clone();
   let template_arg = template.clone();
+  let title_arg = title.clone().unwrap_or_else(|| name.clone());
+  let desc_arg = description.clone().unwrap_or_default();
 
     // We'll try four strategies in order:
   // 0) perform an in-process init using `relay-repo` ops (create minimal relay.yaml)
@@ -144,6 +247,7 @@ async fn init_repo(name: String, template: Option<String>, path: Option<String>)
   // 2) run a `relay-cli` binary found on PATH
   // 3) fall back to `cargo run -p relay-cli -- init ...` (slow, requires Rust toolchain)
 
+  let repo_path_str = repo_path.to_string_lossy().to_string();
   let res = spawn_blocking(move || {
     // helper to collect output
     let collect = |o: std::process::Output| {
@@ -154,37 +258,36 @@ async fn init_repo(name: String, template: Option<String>, path: Option<String>)
     };
 
     // 0) try in-process init via relay-repo ops
-    // create a minimal relay.yaml in the target path if it doesn't exist and validate
+    // create relay.yaml in the target path and validate
     let repo_root = PathBuf::from(&repo_path_arg);
     if !repo_root.exists() {
       if let Err(e) = fs::create_dir_all(&repo_root) {
         eprintln!("failed to create repo root {}: {}", repo_root.display(), e);
-      } else {
-        // write a minimal relay.yaml to the repo root
-        let yaml = "version: 1\ntitle: \"New repository\"\n";
-        let yaml_path = repo_root.join("relay.yaml");
-        if let Err(e) = fs::write(&yaml_path, yaml) {
-          eprintln!("failed to write relay.yaml: {}", e);
-        } else {
-          // run validate_repo to see if basic layout is acceptable
-          match repo_ops::validate_repo(&repo_root) {
-            Ok(v) => {
-              if v.is_empty() {
-                return Ok(InitResult { success: true, message: "initialized repository (minimal)".into() });
-              } else {
-                // collect validation messages
-                let mut msg = String::new();
-                for viol in v {
-                  msg.push_str(&format!("[{}] {} - {}\n", viol.code, viol.path, viol.message));
-                }
-                // continue to other strategies if validation failed
-                eprintln!("validation warnings/errors:\n{}", msg);
-              }
+      }
+    }
+    // write relay.yaml with provided title/description
+    let yaml = format!("version: 1\ntitle: \"{}\"\n{}", title_arg.replace('"', "'"), if !desc_arg.is_empty() { format!("description: \"{}\"\n", desc_arg.replace('"', "'")) } else { String::new() });
+    let yaml_path = repo_root.join("relay.yaml");
+    if let Err(e) = fs::write(&yaml_path, yaml) {
+      eprintln!("failed to write relay.yaml: {}", e);
+    } else {
+      // run validate_repo to see if basic layout is acceptable
+      match repo_ops::validate_repo(&repo_root) {
+        Ok(v) => {
+          if v.is_empty() {
+            return Ok(InitResult { success: true, message: "initialized repository".into() });
+          } else {
+            // collect validation messages
+            let mut msg = String::new();
+            for viol in v {
+              msg.push_str(&format!("[{}] {} - {}\n", viol.code, viol.path, viol.message));
             }
-            Err(e) => {
-              eprintln!("validate_repo failed: {}", e);
-            }
+            // continue to other strategies if validation failed
+            eprintln!("validation warnings/errors:\n{}", msg);
           }
+        }
+        Err(e) => {
+          eprintln!("validate_repo failed: {}", e);
         }
       }
     }
@@ -262,5 +365,39 @@ async fn init_repo(name: String, template: Option<String>, path: Option<String>)
     }
   }).await;
 
-  res.map_err(|e| format!("background task failed: {}", e))?
+  let result = res.map_err(|e| format!("background task failed: {}", e))?;
+  // If success, update repos.json with localPath and metadata
+  if let Ok(r) = &result {
+    if r.success {
+      let mut repos = load_repos_file();
+      let mut found = false;
+      for entry in repos.iter_mut() {
+        if entry.name == name {
+          entry.title = Some(title.clone().unwrap_or_else(|| name.clone()));
+          entry.localPath = Some(repo_path_str.clone());
+          entry.lastUpdate = Some(chrono::Utc::now().to_rfc3339());
+          entry.missing = Some(false);
+          found = true;
+          break;
+        }
+      }
+      if !found {
+        repos.push(RepoEntry {
+          name: name.clone(),
+          title: Some(title.clone().unwrap_or_else(|| name.clone())),
+          lastSize: None,
+          lastUpdate: Some(chrono::Utc::now().to_rfc3339()),
+          lastURL: None,
+          localPath: Some(repo_path_str.clone()),
+          missing: Some(false),
+        });
+      }
+      if let Err(e) = save_repos_file(&repos) {
+        let _ = append_log("error", &format!("failed to save repos.json after init: {}", e));
+      } else {
+        let _ = append_log("info", &format!("repo '{}' recorded in config at {}", name, repos_config_path().display()));
+      }
+    }
+  }
+  result
 }

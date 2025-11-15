@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Box, CircularProgress, Typography } from '@mui/material';
 import { listRepos, RepoInfo } from '../src/lib/api';
 import RepoList from '../src/components/RepoList';
+import { logInfo, logError } from '../src/lib/log';
 
 export default function HomePage() {
   const [repos, setRepos] = useState<RepoInfo[] | null>(null);

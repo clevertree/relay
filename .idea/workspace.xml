@@ -6,13 +6,15 @@
   <component name="ChangeListManager">
     <list default="true" id="543c1da8-56e2-48f2-b391-bdcd3225397b" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/package.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/components/DesktopGuard.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/DesktopGuard.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/components/FooterConsole.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/FooterConsole.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/app/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/public/pkg/relay_wasm.js" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/public/pkg/relay_wasm.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/public/pkg/relay_wasm_bg.wasm" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/public/pkg/relay_wasm_bg.wasm" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/apps/web/src/components/RepoList.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/RepoList.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/components/RuntimeChip.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/components/RuntimeChip.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/lib/log.ts" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/lib/log.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/web/src/lib/runtime.ts" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/lib/runtime.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/src/lib/api.ts" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/src/lib/api.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/web/tsconfig.tsbuildinfo" beforeDir="false" afterPath="$PROJECT_DIR$/apps/web/tsconfig.tsbuildinfo" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/crates/relay-wasm/pkg/relay_wasm.js" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-wasm/pkg/relay_wasm.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/crates/relay-wasm/pkg/relay_wasm_bg.wasm" beforeDir="false" afterPath="$PROJECT_DIR$/crates/relay-wasm/pkg/relay_wasm_bg.wasm" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src-tauri/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src-tauri/src/main.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -109,7 +111,7 @@
       <updated>1763123478337</updated>
       <workItem from="1763123480322" duration="13175000" />
       <workItem from="1763207089888" duration="674000" />
-      <workItem from="1763217276301" duration="1906000" />
+      <workItem from="1763217276301" duration="5136000" />
     </task>
     <servers />
   </component>
