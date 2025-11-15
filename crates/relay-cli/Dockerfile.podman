@@ -1,4 +1,4 @@
-# Build stage
+# Build stage (local Podman/test override)
 FROM rust:1.82-bullseye AS builder
 WORKDIR /workspace
 
@@ -17,6 +17,6 @@ RUN cargo build --release --manifest-path crates/relay-cli/Cargo.toml
 
 # Runtime stage
 FROM gcr.io/distroless/cc-debian11
-# The crate produces a binary named `relay-cli` in workspace mode; copy and rename it
+# The crate binary is named `relay-cli`; copy and rename it to `relay` for runtime
 COPY --from=builder /workspace/target/release/relay-cli /usr/local/bin/relay
 ENTRYPOINT ["/usr/local/bin/relay"]

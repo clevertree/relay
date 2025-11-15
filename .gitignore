@@ -20,3 +20,6 @@ pnpm-lock.yaml
 
 # Relay config (user-specific)
 **/.relay/
+
+
+.github/workflow-logs/
