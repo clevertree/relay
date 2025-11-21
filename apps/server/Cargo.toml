@@ -18,3 +18,4 @@ mime_guess = "2"
 percent-encoding = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 base64 = "0.22"
+jsonschema = "0.17"

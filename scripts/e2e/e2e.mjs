@@ -24,14 +24,16 @@ function shCapture(cmd, args, opts = {}) {
   return res.stdout;
 }
 
-async function waitForServer(url, timeoutMs = 60_000) {
+async function waitForServer(url, timeoutMs = 180_000, pollIntervalMs = 1000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
       const res = await fetch(url, { method: 'POST' });
       if (res.ok) return await res.json();
-    } catch {}
-    await delay(1000);
+    } catch (e) {
+      // ignore and retry
+    }
+    await delay(pollIntervalMs);
   }
   throw new Error(`Server at ${url} did not become ready within ${timeoutMs}ms`);
 }
@@ -42,22 +44,32 @@ async function main() {
   const name = `relay-e2e-${Date.now()}`;
   let needCleanup = false;
   let localServerProc = null;
-  // Require Docker to be available for E2E. Fail fast if not present.
-  try {
-    const res = sync('docker', ['info'], { stdio: 'ignore' });
-    if (res.status !== 0) throw new Error('docker info returned non-zero');
-  } catch (e) {
-    console.error('E2E requires Docker and the Docker daemon to be running. Aborting.');
-    process.exit(2);
+  // Parse flags
+  const useLocal = process.argv.includes('--local');
+
+  if (useLocal) {
+    console.log('E2E: running server locally (cargo run) because --local specified');
+    // spawn cargo run in background
+    localServerProc = spawn('cargo', ['run', '--manifest-path', 'apps/server/Cargo.toml'], { stdio: 'inherit' });
+    needCleanup = true;
+  } else {
+    // Require Docker to be available for E2E. Fail fast if not present.
+    try {
+      const res = sync('docker', ['info'], { stdio: 'ignore' });
+      if (res.status !== 0) throw new Error('docker info returned non-zero');
+    } catch (e) {
+      console.error('E2E requires Docker and the Docker daemon to be running. Aborting.');
+      process.exit(2);
+    }
+
+    // 2) Build Docker image
+    await sh('docker', ['build', '-t', image, '.']);
+
+    // 3) Run container (do not --rm so logs persist on failure). Map docker ports.
+    const ports = ['-p', '8088:8088'];
+    await sh('docker', ['run', '-d', '--name', name, ...ports, image]);
+    needCleanup = true;
   }
-
-  // 2) Build Docker image
-  await sh('docker', ['build', '-t', image, '.']);
-
-  // 3) Run container
-  const ports = ['-p', '8088:8088'];
-  await sh('docker', ['run', '-d', '--rm', '--name', name, ...ports, image]);
-  needCleanup = true;
   try {
     // 3) Wait for server readiness
     const status = await waitForServer('http://localhost:8088/status');
@@ -75,6 +87,17 @@ async function main() {
     const connectJson = JSON.parse(connectOut);
     if (!connectJson.ok) throw new Error('CLI connect failed');
 
+    // Verify rules/metaSchema properties are returned by the server via connect response
+    const rules = connectJson.rules;
+    if (!rules || !rules.metaSchema || !rules.metaSchema.properties) {
+      throw new Error('Server /status did not return metaSchema.properties in rules (required for meta tests)');
+    }
+    const propertyList = Object.keys(rules.metaSchema.properties);
+    if (!Array.isArray(propertyList) || propertyList.length === 0) {
+      throw new Error('metaSchema.properties is empty');
+    }
+    console.log('Discovered meta properties from server:', propertyList.join(', '));
+
     // 6) Prepare a test file and PUT
     const testBody = '# E2E Test\n\nHello Relay!\n';
     const testPath = 'data/e2e/index.md';
@@ -90,6 +113,50 @@ async function main() {
     const got = fs.readFileSync(tmpFile, 'utf-8');
     if (got.trim() !== testBody.trim()) throw new Error('GET content mismatch');
 
+    // 7b) Attempt to PUT an invalid/disallowed file type (e.g., .html) and expect rejection
+    const invalidBody = '<!doctype html><html><body>bad</body></html>\n';
+    const invalidPath = 'data/e2e/index.html';
+    // Use spawnSync to capture exit status (CLI should fail when server rejects the commit)
+    const invalidRes = sync(cliPath, [ 'put', 'http://localhost:8088', invalidPath, '--branch', 'main' ], { input: invalidBody, encoding: 'utf-8' });
+    if (invalidRes.status === 0) {
+      // CLI exited 0 — invalid file was accepted which violates rules
+      throw new Error('Invalid file (html) was accepted; expected rejection by rules.yaml');
+    } else {
+      console.log('Invalid file correctly rejected by server (as expected)');
+      if (invalidRes.stdout) console.log('Server response stdout:', invalidRes.stdout);
+      if (invalidRes.stderr) console.log('Server response stderr:', invalidRes.stderr);
+    }
+
+    // 8) META JSON tests: create a valid meta.json using the server-declared property list
+    // Build a valid meta object using required property names from the server metaSchema
+    const validMeta = {};
+    // reasonable defaults: title, release_date, genre
+    if (propertyList.includes('title')) validMeta.title = 'E2E Movie';
+    if (propertyList.includes('release_date')) validMeta.release_date = '2025-11-21';
+    if (propertyList.includes('genre')) validMeta.genre = ['drama', 'e2e'];
+
+    const metaPath = 'data/e2e/meta.json';
+    const metaStr = JSON.stringify(validMeta, null, 2);
+    console.log('Uploading valid meta.json:', metaStr);
+    const putMetaOut = shCapture(cliPath, ['put', 'http://localhost:8088', metaPath, '--branch', 'main'], { input: metaStr });
+    const putMetaJson = JSON.parse(putMetaOut);
+    if (!putMetaJson.commit) throw new Error('PUT meta.json did not return commit (expected success)');
+    console.log('Valid meta.json committed as expected');
+
+    // 9) Upload an invalid meta.json that violates schema: missing required fields or wrong type
+    const invalidMeta = { random_field: 'should fail' };
+    const invalidMetaStr = JSON.stringify(invalidMeta);
+    console.log('Uploading invalid meta.json (should be rejected):', invalidMetaStr);
+  // Try to overwrite the same meta.json with invalid content (should be rejected by schema validation)
+  const invalidMetaRes = sync(cliPath, ['put', 'http://localhost:8088', metaPath, '--branch', 'main'], { input: invalidMetaStr, encoding: 'utf-8' });
+    if (invalidMetaRes.status === 0) {
+      throw new Error('Invalid meta.json was accepted; expected validation rejection');
+    } else {
+      console.log('Invalid meta.json correctly rejected by server (validation)');
+      if (invalidMetaRes.stdout) console.log('Server response stdout:', invalidMetaRes.stdout);
+      if (invalidMetaRes.stderr) console.log('Server response stderr:', invalidMetaRes.stderr);
+    }
+
     // 8) TODO: query test once implemented for template repo rules
     console.log('TODO: add QUERY E2E when server rules.db queryPolicy is active');
 
@@ -99,6 +166,16 @@ async function main() {
       if (localServerProc) {
         try { localServerProc.kill('SIGINT'); } catch (e) {}
       } else {
+        // print container logs for debugging
+        try {
+          console.log('\n--- Container logs start ---');
+          const logs = spawnSync('docker', ['logs', '--tail', '200', name], { encoding: 'utf-8' });
+          if (logs.stdout) console.log(logs.stdout);
+          if (logs.stderr) console.error(logs.stderr);
+          console.log('--- Container logs end ---\n');
+        } catch (e) {
+          // ignore
+        }
         try { await sh('docker', ['rm', '-f', name]); } catch (e) { /* ignore */ }
       }
     }

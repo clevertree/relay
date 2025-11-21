@@ -437,6 +437,35 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
     // Write blob
     let blob_oid = repo.blob(content)?;
 
+    // If this is a meta.json being written, validate against rules.metaSchema from default branch rules.yaml
+    if path.ends_with("meta.json") {
+        // Attempt to read rules.yaml from default branch
+        if let Ok(bytes) = read_file_from_repo(repo_path, DEFAULT_BRANCH, "rules.yaml") {
+            if let Ok(rules_yaml) = String::from_utf8(bytes) {
+                if let Ok(rules_val) = serde_yaml::from_str::<serde_json::Value>(&rules_yaml) {
+                    if let Some(meta_schema) = rules_val.get("metaSchema") {
+                        // Compile schema and validate
+                        // Leak to satisfy jsonschema static lifetime requirement
+                        let leaked_schema: &'static serde_json::Value = Box::leak(Box::new(meta_schema.clone()));
+                        let compiled = jsonschema::JSONSchema::compile(leaked_schema)
+                            .map_err(|e| anyhow::anyhow!("invalid metaSchema in rules.yaml: {}", e))?;
+                        let meta_json: serde_json::Value = serde_json::from_slice(content)
+                            .map_err(|e| anyhow::anyhow!("meta.json is not valid JSON: {}", e))?;
+                        if !compiled.is_valid(&meta_json) {
+                            let mut msgs: Vec<String> = Vec::new();
+                            if let Err(errors) = compiled.validate(&meta_json) {
+                                for e in errors {
+                                    msgs.push(format!("{} at {}", e, e.instance_path));
+                                }
+                            }
+                            return Err(anyhow::anyhow!("meta.json failed schema validation: {}", msgs.join("; ")));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Update tree recursively for the path
     let mut components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     if components.is_empty() { anyhow::bail!("empty path"); }
