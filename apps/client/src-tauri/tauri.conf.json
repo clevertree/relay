@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Relay Client",
+  "version": "0.1.0",
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Relay Client",
+        "width": 1200,
+        "height": 800
+      }
+    ]
+  },
+  "bundle": {
+    "active": false
+  }
+}

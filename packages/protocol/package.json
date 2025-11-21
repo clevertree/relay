@@ -1,0 +1,16 @@
+{
+  "name": "@relay/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared OpenAPI spec for Relay API (Node/Rust)",
+  "files": [
+    "openapi.yaml",
+    "index.ts"
+  ],
+  "type": "module",
+  "scripts": {
+    "lint": "echo 'No lint configured'",
+    "build": "cp openapi.yaml dist/openapi.yaml && cp index.ts dist/index.ts",
+    "prepublishOnly": "pnpm run build"
+  }
+}

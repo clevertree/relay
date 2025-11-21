@@ -1,0 +1,156 @@
+openapi: 3.0.3
+info:
+  title: Relay API
+  version: 0.1.0
+  description: |
+    The Relay API exposes CRUD operations on a Git repository with branch selection via header.
+    Disallowed file types for CRUD: .html, .htm, .js
+servers:
+  - url: http://localhost:8088
+    description: Local Relay server
+tags:
+  - name: files
+    description: File CRUD and query
+  - name: system
+    description: Server status and capabilities
+paths:
+  /status:
+    post:
+      tags: [system]
+      summary: Get server status and capabilities
+      operationId: postStatus
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Server status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+  /{path}:
+    parameters:
+      - in: header
+        name: X-Relay-Branch
+        schema:
+          type: string
+          default: main
+        required: false
+        description: Git branch to use
+      - in: path
+        name: path
+        required: true
+        schema:
+          type: string
+        description: Repository-relative path (URL-encoded)
+    get:
+      tags: [files]
+      summary: Read file contents from a branch
+      operationId: getFile
+      responses:
+        '200':
+          description: Raw file bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Disallowed file type
+        '404':
+          description: File not found
+    put:
+      tags: [files]
+      summary: Create or update a file on a branch, committing the change
+      operationId: putFile
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: File written and committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteResponse'
+        '403':
+          description: Disallowed file type
+    delete:
+      tags: [files]
+      summary: Delete a file from a branch, committing the change
+      operationId: deleteFile
+      responses:
+        '200':
+          description: File deleted and committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteResponse'
+        '404':
+          description: File not found
+        '403':
+          description: Disallowed file type
+  /query/{path}:
+    parameters:
+      - in: header
+        name: X-Relay-Branch
+        schema:
+          type: string
+          default: main
+        required: false
+      - in: path
+        name: path
+        required: false
+        schema:
+          type: string
+        description: Optional path prefix
+    post:
+      tags: [files]
+      summary: Query repository metadata (not implemented)
+      operationId: query
+      requestBody:
+        required: false
+      responses:
+        '501':
+          description: Not implemented
+components:
+  schemas:
+    StatusResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        repoInitialized:
+          type: boolean
+        branches:
+          type: array
+          items:
+            type: string
+        samplePaths:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            index: index.md
+        capabilities:
+          type: array
+          items:
+            type: string
+          example: [git, torrent, ipfs, http]
+    WriteResponse:
+      type: object
+      properties:
+        branch:
+          type: string
+        path:
+          type: string
+        commit:
+          type: string
