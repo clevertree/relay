@@ -1,29 +1,47 @@
 
 #!/bin/sh
+# Minimal entrypoint for Relay all-in-one image.
+# Starts IPFS, Deluge, ensures a bare repo exists, runs git-daemon, then execs relay-server.
+
 set -e
 
-# Initialize IPFS if needed
-if ! ipfs --repo /srv/relay/ipfs repo stat >/dev/null 2>&1; then
-  IPFS_PATH=/srv/relay/ipfs ipfs init
-fi
+ensure_repo() {
+  repo=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
+  if [ ! -d "$repo" ] || [ ! -d "$repo/objects" ]; then
+    tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
+    echo "Cloning bare repo from $tmpl to $repo"
+    mkdir -p "$(dirname "$repo")"
+    git clone --bare "$tmpl" "$repo"
+  fi
+}
 
-# Start IPFS daemon
-IPFS_PATH=/srv/relay/ipfs ipfs daemon &
+start_ipfs() {
+  IPFS_PATH=/srv/relay/ipfs
+  if ! ipfs --repo "$IPFS_PATH" repo stat >/dev/null 2>&1; then
+    IPFS_PATH="$IPFS_PATH" ipfs init
+  fi
+  IPFS_PATH="$IPFS_PATH" ipfs daemon &
+}
 
-# Start Deluge
-deluged -d -c /var/lib/deluge &
+start_deluged() {
+  deluged -d -c /var/lib/deluge || true
+}
 
-# Ensure bare repo exists by cloning template if missing
-if [ ! -d "${RELAY_REPO_PATH}" ] || [ ! -d "${RELAY_REPO_PATH}/objects" ]; then
-  TEMPLATE_URL="${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}"
-  echo "Cloning bare repo from ${TEMPLATE_URL} to ${RELAY_REPO_PATH}..."
-  mkdir -p "$(dirname "${RELAY_REPO_PATH}")"
-  git clone --bare "${TEMPLATE_URL}" "${RELAY_REPO_PATH}"
-fi
+start_git_daemon() {
+  git daemon --reuseaddr --base-path=/srv/relay/data --export-all --enable=receive-pack --informative-errors --verbose --detach --listen=0.0.0.0 --port=9418 || true
+}
 
-# Start git daemon (read/write, insecure)
-git daemon --reuseaddr --base-path=/srv/relay/data --export-all --enable=receive-pack --informative-errors --verbose --detach --listen=0.0.0.0 --port=9418
+main() {
+  start_ipfs
+  start_deluged
+  ensure_repo
+  start_git_daemon
 
-# Start Relay server
-exec env RELAY_REPO_PATH="${RELAY_REPO_PATH}" RELAY_BIND="${RELAY_BIND}" /usr/local/bin/relay-server
+  export RELAY_REPO_PATH=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
+  export RELAY_BIND=${RELAY_BIND:-0.0.0.0:8088}
+
+  exec /usr/local/bin/relay-server
+}
+
+main "$@"
 
