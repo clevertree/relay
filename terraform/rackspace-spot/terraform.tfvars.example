@@ -1,0 +1,16 @@
+# Example overrides for Rackspace Spot deployment
+
+# Optionally override the default cloudspace name
+# cloudspace_name = "relay-test"
+
+# Optionally override the region
+# region = "us-central-dfw-1"
+
+# Optionally override the server class
+# server_class = "gp.vs1.small-dfw"
+
+# Adjust bid price if needed
+# bid_price = 0.002
+
+# If you don't want to read from ../../rackspace_token, set token here
+# rackspace_spot_token = "REPLACE_WITH_YOUR_TOKEN"
