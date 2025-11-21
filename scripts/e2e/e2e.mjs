@@ -5,6 +5,7 @@ import { platform } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import fs from 'node:fs';
+import { spawnSync as sync } from 'node:child_process';
 
 function sh(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
@@ -36,15 +37,27 @@ async function waitForServer(url, timeoutMs = 60_000) {
 }
 
 async function main() {
-  // 1) Build Docker image
+  // 1) Attempt to use Docker; otherwise fall back to running server locally via cargo
   const image = 'relay-all-in-one:test';
+  const name = `relay-e2e-${Date.now()}`;
+  let needCleanup = false;
+  let localServerProc = null;
+  // Require Docker to be available for E2E. Fail fast if not present.
+  try {
+    const res = sync('docker', ['info'], { stdio: 'ignore' });
+    if (res.status !== 0) throw new Error('docker info returned non-zero');
+  } catch (e) {
+    console.error('E2E requires Docker and the Docker daemon to be running. Aborting.');
+    process.exit(2);
+  }
+
+  // 2) Build Docker image
   await sh('docker', ['build', '-t', image, '.']);
 
-  // 2) Run container
-  const name = `relay-e2e-${Date.now()}`;
+  // 3) Run container
   const ports = ['-p', '8088:8088'];
   await sh('docker', ['run', '-d', '--rm', '--name', name, ...ports, image]);
-  let needCleanup = true;
+  needCleanup = true;
   try {
     // 3) Wait for server readiness
     const status = await waitForServer('http://localhost:8088/status');
@@ -69,9 +82,10 @@ async function main() {
     const putJson = JSON.parse(putOut);
     if (!putJson.commit) throw new Error('PUT did not return commit');
 
-    // 7) GET and verify
-    const tmpFile = path.join(process.cwd(), 'scripts', 'e2e', 'tmp-index.md');
-    if (!fs.existsSync(path.dirname(tmpFile))) fs.mkdirSync(path.dirname(tmpFile), { recursive: true });
+  // 7) GET and verify (use tmp/e2e for generated files)
+  const tmpDir = path.join(process.cwd(), 'tmp', 'e2e');
+  const tmpFile = path.join(tmpDir, 'tmp-index.md');
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
     await sh(cliPath, ['get', 'http://localhost:8088', testPath, '--branch', 'main', '--out', tmpFile]);
     const got = fs.readFileSync(tmpFile, 'utf-8');
     if (got.trim() !== testBody.trim()) throw new Error('GET content mismatch');
@@ -82,7 +96,11 @@ async function main() {
     console.log('E2E SUCCESS');
   } finally {
     if (needCleanup) {
-      try { await sh('docker', ['rm', '-f', name]); } catch {}
+      if (localServerProc) {
+        try { localServerProc.kill('SIGINT'); } catch (e) {}
+      } else {
+        try { await sh('docker', ['rm', '-f', name]); } catch (e) { /* ignore */ }
+      }
     }
   }
 }

@@ -5,3 +5,4 @@ apps/server/Cargo.lock
 **/.DS_Store
 node_modules/
 dist/
+tmp/
