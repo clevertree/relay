@@ -1468,6 +1468,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "git2",
+ "jsonschema",
  "mime_guess",
  "percent-encoding",
  "rusqlite",

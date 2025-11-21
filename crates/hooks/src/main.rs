@@ -21,27 +21,34 @@ struct Args {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 struct RulesDoc {
     #[serde(default)]
-    indexFile: Option<String>,
-    allowedPaths: Vec<String>,
-    insertTemplate: String,
-    metaSchema: JsonValue,
-    #[serde(default)]
+    #[serde(rename = "indexFile")]
+    index_file: Option<String>,
+    #[serde(rename = "allowedPaths")]
+    allowed_paths: Vec<String>,
+    #[serde(rename = "insertTemplate")]
+    insert_template: String,
+    #[serde(rename = "metaSchema")]
+    meta_schema: JsonValue,
+    #[serde(default, rename = "db")]
     db: Option<DbConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 struct DbConfig {
     #[serde(default)]
     schema: Vec<String>,
     #[serde(default)]
     constraints: Vec<String>,
-    #[serde(default)]
-    insertPolicy: Option<InsertPolicy>,
+    #[serde(default, rename = "insertPolicy")]
+    insert_policy: Option<InsertPolicy>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 struct InsertPolicy {
     #[serde(default = "default_policy_branch")]
     branch: String,
@@ -128,7 +135,7 @@ fn validate_push(repo: &Repository, old: Oid, new: Oid, refname: &str) -> Result
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut diffopts))?;
 
     // Build glob allowlist
-    let globset = build_globset(&parsed.allowedPaths)?;
+    let globset = build_globset(&parsed.allowed_paths)?;
 
     let mut violations: Vec<String> = vec![];
     let mut changed_meta_paths: Vec<std::path::PathBuf> = vec![];
@@ -140,7 +147,7 @@ fn validate_push(repo: &Repository, old: Oid, new: Oid, refname: &str) -> Result
         }
         if let Some(path) = delta.new_file().path() {
             if !path_allowed(path, &globset) {
-                violations.push(format!("{}: path not permitted by allowedPaths", path.display()));
+                violations.push(format!("{}: path not permitted by allowed_paths", path.display()));
             } else if path.ends_with("meta.json") {
                 if let Err(e) = validate_meta_json(repo, &new_tree, path, &parsed) {
                     violations.push(format!("{}: {}", path.display(), e));
@@ -164,7 +171,7 @@ fn validate_push(repo: &Repository, old: Oid, new: Oid, refname: &str) -> Result
 
 fn load_rules(repo: &Repository, tree: &git2::Tree) -> Result<JsonValue> {
     let mut oid: Option<Oid> = None;
-    tree.walk(TreeWalkMode::PreOrder, |_, entry| {
+    tree.walk(TreeWalkMode::PreOrder, |_root, entry| {
         if let Some(name) = entry.name() {
             if name == "rules.yaml" || name == "rules.yml" {
                 oid = Some(entry.id());
@@ -213,9 +220,9 @@ fn validate_meta_json(repo: &Repository, tree: &git2::Tree, path: &Path, rules: 
     let blob = repo.find_blob(entry.id())?;
     let txt = std::str::from_utf8(blob.content())?;
     let meta_json: JsonValue = serde_json::from_str(txt).context("meta.json must be valid JSON")?;
-    // Validate against metaSchema
+    // Validate against meta_schema
     // Leak meta schema to satisfy 'static lifetime
-    let leaked_meta: &'static JsonValue = Box::leak(Box::new(rules.metaSchema.clone()));
+    let leaked_meta: &'static JsonValue = Box::leak(Box::new(rules.meta_schema.clone()));
     let compiled = JSONSchema::compile(leaked_meta)?;
     if let Err(errors) = compiled.validate(&meta_json) {
         let msgs: Vec<String> = errors.map(|e| format!("{} at {}", e, e.instance_path)).collect();
@@ -229,18 +236,18 @@ fn enforce_uniqueness(
     old_tree: Option<&git2::Tree>,
     new_tree: &git2::Tree,
     branch: &str,
-    rules_val: &JsonValue,
+    _rules_val: &JsonValue,
     changed_meta_paths: &[std::path::PathBuf],
 ) -> Result<()> {
     use std::collections::HashSet;
-    let constraint_fields = extract_constraint_fields(rules_val);
+    let constraint_fields = extract_constraint_fields(_rules_val);
     if constraint_fields.is_empty() {
         return Ok(()); // nothing to enforce
     }
     // Build set from old tree (pre-push state) of keys to compare against
     let mut old_keys: HashSet<(String, String)> = HashSet::new();
     if let Some(tree) = old_tree {
-        tree.walk(TreeWalkMode::PreOrder, |root, entry| {
+    tree.walk(TreeWalkMode::PreOrder, |_root, entry| {
             if let Some(name) = entry.name() {
                 if name == "meta.json" {
                     if let Ok(()) = (|| -> Result<()> {
@@ -265,7 +272,7 @@ fn enforce_uniqueness(
         let blob = repo.find_blob(entry.id())?;
         let txt = std::str::from_utf8(blob.content())?;
         let meta: JsonValue = serde_json::from_str(txt).context("meta.json must be JSON")?;
-        let key = build_constraint_key(branch, &constraint_fields, &meta);
+    let key = build_constraint_key(branch, &constraint_fields, &meta);
         let pair = (branch.to_string(), key.clone());
         if old_keys.contains(&pair) || !seen_new.insert(pair.clone()) {
             violations.push(format!("duplicate ({}, branch) introduced by {}", constraint_fields.join(","), p.display()));
@@ -284,8 +291,8 @@ fn extract_constraint_fields(rules_val: &JsonValue) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn build_constraint_key(branch: &str, fields: &[String], meta: &JsonValue) -> String {
-    let mut parts: Vec<String> = Vec::with_capacity(fields.len() + 1);
+fn build_constraint_key(_branch: &str, fields: &[String], meta: &JsonValue) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(fields.len());
     for f in fields {
         let v = meta.get(f).cloned().unwrap_or(JsonValue::Null);
         let s = match v {
@@ -306,7 +313,7 @@ fn maintain_local_index(
     repo: &Repository,
     new_tree: &git2::Tree,
     branch: &str,
-    rules_val: &JsonValue,
+    _rules_val: &JsonValue,
     rules: &RulesDoc,
     changed_meta_paths: &[PathBuf],
 ) -> Result<()> {
@@ -316,7 +323,7 @@ fn maintain_local_index(
     // DB location: <gitdir>/relay_index.sqlite
     let git_dir = repo.path();
     let db_path = git_dir.join("relay_index.sqlite");
-    let mut conn = Connection::open(db_path)?;
+    let conn = Connection::open(db_path)?;
     // Enable WAL for concurrency
     conn.pragma_update(None, "journal_mode", &"WAL")?;
     // Run declared schema
@@ -324,7 +331,7 @@ fn maintain_local_index(
         conn.execute_batch(stmt)?;
     }
     // Prepare policy
-    let Some(policy) = &db_cfg.insertPolicy else { return Ok(()); };
+    let Some(policy) = &db_cfg.insert_policy else { return Ok(()); };
     if policy.statements.is_empty() { return Ok(()); }
     // Execute for each changed meta.json
     for p in changed_meta_paths {

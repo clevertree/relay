@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use std::fs;

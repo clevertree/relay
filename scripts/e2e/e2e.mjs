@@ -75,6 +75,45 @@ async function main() {
     const status = await waitForServer('http://localhost:8088/status');
     if (!status || !status.ok) throw new Error('Status not ok');
 
+    // If server does not expose rules (no rules.yaml in repo), inject one from template/rules.yaml
+    const hasMetaProps = status.rules && status.rules.metaSchema && status.rules.metaSchema.properties;
+    if (!hasMetaProps) {
+      console.log('Server did not return rules.metaSchema.properties — injecting template/rules.yaml into repo');
+      const bareRepoPath = path.join(process.cwd(), 'data', 'repo.git');
+      const tmpRepo = path.join(process.cwd(), 'tmp', 'e2e', 'rules-push');
+      fs.mkdirSync(tmpRepo, { recursive: true });
+      // Copy template rules if available, otherwise create a minimal rules.yaml
+      const templatePath = path.join(process.cwd(), 'template', 'rules.yaml');
+      const destRules = path.join(tmpRepo, 'rules.yaml');
+      if (fs.existsSync(templatePath)) {
+        fs.copyFileSync(templatePath, destRules);
+      } else {
+        const minimal = `allowedPaths:\n  - data/**/meta.json\ninsertTemplate: "{{title}}"\nmetaSchema:\n  type: object\n  properties:\n    title: { type: string }\n    release_date: { type: string }\n    genre: { type: array, items: { type: string } }\n  required: [title, release_date]\n`;
+        fs.writeFileSync(destRules, minimal);
+      }
+
+      // Initialize tmp git repo and push to bare
+      sync('git', ['init'], { cwd: tmpRepo });
+      sync('git', ['checkout', '-b', 'main'], { cwd: tmpRepo });
+      sync('git', ['add', 'rules.yaml'], { cwd: tmpRepo });
+      sync('git', ['-c', 'user.name=E2E', '-c', "user.email=e2e@local", 'commit', '-m', 'add rules'], { cwd: tmpRepo });
+      const bareUrl = `file://${bareRepoPath}`;
+      try {
+        sync('git', ['remote', 'add', 'origin', bareUrl], { cwd: tmpRepo });
+      } catch (e) {
+        // ignore if remote exists
+      }
+      sync('git', ['push', '--force', 'origin', 'main'], { cwd: tmpRepo });
+
+      // Re-query status after push
+      await delay(1000);
+      const status2 = await waitForServer('http://localhost:8088/status');
+      if (!status2 || !status2.rules || !status2.rules.metaSchema || !status2.rules.metaSchema.properties) {
+        throw new Error('Injecting rules.yaml did not populate server rules.metaSchema.properties');
+      }
+      console.log('rules.yaml injected and server now reports metaSchema.properties');
+    }
+
     // 4) Build relay-cli
     await sh('cargo', ['build', '-p', 'relay-cli', '--release']);
     const binDir = path.join(process.cwd(), 'target', 'release');

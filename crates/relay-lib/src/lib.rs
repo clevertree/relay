@@ -7,9 +7,11 @@ pub const HEADER_BRANCH: &str = "X-Relay-Branch";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub ok: bool,
-    pub repoInitialized: bool,
+    #[serde(rename = "repoInitialized")]
+    pub repo_initialized: bool,
     pub branches: Vec<String>,
-    pub samplePaths: serde_json::Value,
+    #[serde(rename = "samplePaths")]
+    pub sample_paths: serde_json::Value,
     #[serde(default)]
     pub rules: Option<serde_json::Value>,
     pub capabilities: Vec<String>,
@@ -28,7 +30,8 @@ pub struct QueryResponse {
     #[serde(default)]
     pub total: Option<i64>,
     pub page: u32,
-    pub pageSize: u32,
+    #[serde(rename = "pageSize")]
+    pub page_size: u32,
     pub branch: String,
 }
 

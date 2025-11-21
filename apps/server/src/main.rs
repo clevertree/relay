@@ -5,13 +5,13 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{get, post},
     Json, Router,
 };
 use tokio::net::TcpListener;
-use git2::{Oid, Repository, Signature, TreeBuilder, ObjectType};
-use base64::Engine;
+use git2::{Oid, Repository, Signature, ObjectType};
 use percent_encoding::percent_decode_str as url_decode;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{error, info};
@@ -81,9 +81,11 @@ fn ensure_bare_repo(path: &PathBuf) -> anyhow::Result<()> {
 #[derive(Serialize)]
 struct StatusResponse {
     ok: bool,
-    repoInitialized: bool,
+    #[serde(rename = "repoInitialized")]
+    repo_initialized: bool,
     branches: Vec<String>,
-    samplePaths: serde_json::Value,
+    #[serde(rename = "samplePaths")]
+    sample_paths: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     rules: Option<serde_json::Value>,
     capabilities: Vec<&'static str>,
@@ -91,8 +93,8 @@ struct StatusResponse {
 
 #[derive(Deserialize)]
 struct RulesDoc {
-    #[serde(default)]
-    indexFile: Option<String>,
+    #[serde(default, rename = "indexFile")]
+    index_file: Option<String>,
 }
 
 async fn post_status(State(state): State<AppState>) -> impl IntoResponse {
@@ -108,7 +110,7 @@ async fn post_status(State(state): State<AppState>) -> impl IntoResponse {
             match serde_yaml::from_str::<serde_json::Value>(&rules_yaml) {
                 Ok(json_val) => {
                     // Attempt to parse indexFile for samplePaths
-                    let idx = serde_yaml::from_str::<RulesDoc>(&rules_yaml).ok().and_then(|d| d.indexFile);
+                    let idx = serde_yaml::from_str::<RulesDoc>(&rules_yaml).ok().and_then(|d| d.index_file);
                     (Some(json_val), idx.unwrap_or_else(|| "index.md".to_string()))
                 }
                 Err(_) => (None, "index.md".to_string()),
@@ -118,21 +120,22 @@ async fn post_status(State(state): State<AppState>) -> impl IntoResponse {
     };
     let body = StatusResponse {
         ok: true,
-        repoInitialized: true,
+        repo_initialized: true,
         branches,
-        samplePaths: serde_json::json!({"index": index_file}),
+        sample_paths: serde_json::json!({"index": index_file}),
         rules: rules_json,
         capabilities: vec!["git", "torrent", "ipfs", "http"],
     };
     Json(body).into_response()
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct QueryRequest {
     #[serde(default)]
     page: Option<usize>,
-    #[serde(default)]
-    pageSize: Option<usize>,
+    #[serde(default, rename = "pageSize")]
+    page_size: Option<usize>,
     #[serde(default)]
     params: Option<serde_json::Value>,
 }
@@ -143,7 +146,8 @@ struct QueryResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     total: Option<i64>,
     page: usize,
-    pageSize: usize,
+    #[serde(rename = "pageSize")]
+    page_size: usize,
     branch: String,
 }
 
@@ -159,11 +163,11 @@ async fn post_query(
         .unwrap_or(DEFAULT_BRANCH)
         .to_string();
     let req: QueryRequest = match body {
-        Some(Json(v)) => serde_json::from_value(v).unwrap_or(QueryRequest { page: Some(0), pageSize: Some(25), params: None }),
-        None => QueryRequest { page: Some(0), pageSize: Some(25), params: None },
+        Some(Json(v)) => serde_json::from_value(v).unwrap_or(QueryRequest { page: Some(0), page_size: Some(25), params: None }),
+        None => QueryRequest { page: Some(0), page_size: Some(25), params: None },
     };
     let page = req.page.unwrap_or(0);
-    let page_size = req.pageSize.unwrap_or(25);
+    let page_size = req.page_size.unwrap_or(25);
 
     // Open repo and read rules
     let repo = match Repository::open_bare(&state.repo_path) {
@@ -248,7 +252,7 @@ async fn post_query(
         items: serde_json::Value::Array(items_arr),
         total: total_opt,
         page,
-        pageSize: page_size,
+        page_size: page_size,
         branch,
     };
     (StatusCode::OK, Json(resp)).into_response()
@@ -419,7 +423,7 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
     let sig = Signature::now("relay", "relay@local")?;
 
     // Current tree (or empty)
-    let (parent_commit, mut base_tree) = match repo.find_reference(&refname) {
+    let (parent_commit, base_tree) = match repo.find_reference(&refname) {
         Ok(r) => {
             let c = r.peel_to_commit()?;
             let t = c.tree()?;
