@@ -5,12 +5,13 @@
   "description": "Shared OpenAPI spec for Relay API (Node/Rust)",
   "files": [
     "openapi.yaml",
-    "index.ts"
+    "index.ts",
+    "rules.schema.yaml"
   ],
   "type": "module",
   "scripts": {
     "lint": "echo 'No lint configured'",
-    "build": "cp openapi.yaml dist/openapi.yaml && cp index.ts dist/index.ts",
+    "build": "mkdir -p dist && cp openapi.yaml dist/openapi.yaml && cp index.ts dist/index.ts && cp rules.schema.yaml dist/rules.schema.yaml",
     "prepublishOnly": "pnpm run build"
   }
 }

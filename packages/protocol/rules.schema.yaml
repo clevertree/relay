@@ -1,0 +1,102 @@
+%YAML 1.2
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://relay/protocol/rules.schema.yaml"
+title: Relay Repository Rules
+description: >-
+  Rules file that defines what files and paths are allowed for new commits and
+  the metadata format to enforce per repository. Servers and hooks read this
+  file from the repository root as `rules.yaml` and enforce it only for new
+  commits.
+type: object
+properties:
+  indexFile:
+    type: string
+    default: index.md
+    description: Optional default index file for the repository (clients may use this as the default path).
+  allowedPaths:
+    type: array
+    minItems: 1
+    description: >-
+      Whitelist of glob-like path patterns that are allowed for new files.
+      Patterns are repository-relative and use `**` and `*` segments. Examples:
+      `data/**/meta.json`, `data/**/index.md`, `data/**/assets/**`.
+    items:
+      type: string
+  insertTemplate:
+    type: string
+    description: >-
+      A string template that clients can use to suggest the PUT path for new inserts.
+      The template language is client-defined (e.g., JS template literals) and may
+      reference fields from the prospective `meta.json` document.
+  metaSchema:
+    type: object
+    description: >-
+      JSON Schema describing the contents of `meta.json` placed alongside content.
+      Hooks use this schema to validate new inserts.
+    additionalProperties: true
+  db:
+    type: object
+    description: >-
+      Declarative database configuration used by the relay to build and query a local SQLite index.
+      All SQL features are allowed. The system will bind standard named parameters
+      like `:branch`, `:path`, `:meta_dir`, `:meta_json`, and `:meta_<field>` for each
+      top-level meta.json property.
+    properties:
+      schema:
+        type: array
+        description: List of SQL DDL statements to initialize or migrate the database (executed in order).
+        minItems: 1
+        items:
+          type: string
+      constraints:
+        type: array
+        description: List of meta.json field names forming the uniqueness key (combined with implied branch).
+        items:
+          type: string
+      branchTable:
+        type: object
+        description: Configuration for a branch name→id mapping table.
+        properties:
+          name:
+            type: string
+            default: branches
+          schema:
+            type: array
+            description: Optional statements to create/ensure the branch table.
+            items:
+              type: string
+      insertPolicy:
+        type: object
+        description: >-
+          SQL statements executed when a new/updated meta.json is detected for a branch.
+          This policy defines exactly which fields are inserted/updated. Meta files are
+          not serialized and stored by default.
+        properties:
+          branch:
+            type: string
+            description: Branch this policy targets. Use "*" for all branches.
+            default: "*"
+          statements:
+            type: array
+            minItems: 1
+            items:
+              type: string
+      queryPolicy:
+        type: object
+        description: SQL used to query combined results (joins, etc.).
+        properties:
+          statement:
+            type: string
+          countStatement:
+            type: string
+            description: Optional COUNT(*) statement for pagination metadata.
+          pageSizeParam:
+            type: string
+            default: ":limit"
+          pageOffsetParam:
+            type: string
+            default: ":offset"
+    required: [schema]
+required: [allowedPaths, insertTemplate, metaSchema]
+additionalProperties: false

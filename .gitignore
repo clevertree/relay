@@ -1,0 +1,7 @@
+/.output.txt
+/.idea
+**/target/
+apps/server/Cargo.lock
+**/.DS_Store
+node_modules/
+dist/

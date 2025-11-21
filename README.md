@@ -7,11 +7,27 @@ This monorepo hosts the Relay Network reference implementation:
 - apps/client — Tauri (Rust) + React + TypeScript + Tailwind desktop client.
 - apps/tracker — Next.js tracker that lists recent master peer sockets (already provided/deployed).
 - packages/protocol — Shared OpenAPI spec describing the Relay API used by both Node and Rust.
-- crates/hooks — Rust crate intended to be used as a Git hook runner for future metadata/index tasks.
+- crates/hooks — Rust crate used by Git hooks to validate repository rules and enforce insert constraints.
 
 What is the Relay API?
 
 The Relay API describes CRUD operations on any repository path while selecting a Git branch via header. It also includes POST /status for server metadata and capabilities. Certain file types (html, js) are blocked for security.
+
+Repository rules (rules.yaml)
+
+- Each repository may contain a `rules.yaml` at its root describing what files are allowed to be inserted, the JSON Schema for `meta.json`, and a declarative database policy.
+- These rules are enforced only for new commits (existing files are not retroactively validated).
+- The JSON Schema for `rules.yaml` lives at `packages/protocol/rules.schema.yaml`.
+- The Relay server returns the parsed rules (as JSON) in `POST /status`, and honors the optional `indexFile` setting to suggest a default document.
+- The commit hooks crate (`crates/hooks`) validates pushes using `rules.yaml` and rejects violations.
+- The rules `db` section enables fully declarative indexing and querying using SQLite. All SQL features are allowed. The system binds named params like `:branch`, `:path`, `:meta_dir`, `:meta_json`, and `:meta_<field>` for top-level meta fields.
+
+Example (movies) highlights:
+- `allowedPaths` whitelist like `data/**/meta.json`, `data/**/index.md`, `data/**/assets/**`.
+- `meta.json` schema: `title` (no trim), `release_date` (YYYY-MM-DD), and `genre` as an array of strings (multi-genre).
+- `db.constraints: [title, release_date]` defines uniqueness; the branch is implied so uniqueness is `(title, release_date, branch)`.
+- `db.insertPolicy.statements` control what is written to the DB (meta is NOT serialized/stored by default).
+- `db.queryPolicy` provides a SQL statement (and optional count) used by the server `/query` endpoint with pagination.
 
 Quick Start
 
@@ -81,8 +97,8 @@ API Summary
 - GET /{path} — Return file bytes from repo at branch.
 - PUT /{path} — Upsert file content; commits to branch.
 - DELETE /{path} — Delete file; commits to branch.
-- QUERY /{path?} — 501 Not Implemented (suggest using a local index DB).
-- POST /status — Returns server status, branches, sample paths, and capabilities.
+- QUERY /{path?} — Policy-driven query backed by the local SQLite index. Default pagination pageSize=25; `X-Relay-Branch` may be a branch or `all`.
+- POST /status — Returns server status, branches, sample paths (honors rules.indexFile), capabilities, and `rules` JSON if present.
 
 Security
 
@@ -90,7 +106,7 @@ Security
 
 Notes
 
-- QUERY endpoint is intentionally left unimplemented but the recommended approach is to maintain a light-weight local database (e.g., SQLite) updated by Git hooks that index content metadata to support fast search.
+- The local index database (SQLite) is created/updated by Git hooks based on `rules.db` policies. Do not store this database inside the Git repo.
 
 Licensing
 

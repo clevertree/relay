@@ -114,13 +114,25 @@ paths:
         description: Optional path prefix
     post:
       tags: [files]
-      summary: Query repository metadata (not implemented)
+      summary: Query repository metadata (policy-driven)
       operationId: query
       requestBody:
         required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
       responses:
-        '501':
-          description: Not implemented
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '400':
+          description: Invalid rules or query
+        '500':
+          description: Server error
 components:
   schemas:
     StatusResponse:
@@ -140,11 +152,44 @@ components:
             type: string
           example:
             index: index.md
+        rules:
+          type: object
+          description: JSON representation of the repo rules.yaml if present. Includes optional indexFile used by clients as default path.
         capabilities:
           type: array
           items:
             type: string
           example: [git, torrent, ipfs, http]
+    QueryRequest:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 0
+          default: 0
+        pageSize:
+          type: integer
+          minimum: 1
+          default: 25
+        params:
+          type: object
+          additionalProperties: true
+    QueryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+          description: Total rows if countStatement provided
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        branch:
+          type: string
     WriteResponse:
       type: object
       properties:

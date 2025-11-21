@@ -69,10 +69,17 @@ function ServerConnect({ onConnect }: { onConnect: (socket: string) => void }) {
   )
 }
 
+type Rules = {
+  indexFile?: string
+  allowedPaths?: string[]
+  insertTemplate?: string
+}
+
 function useServerStatus(baseUrl?: string) {
   const [branches, setBranches] = useState<string[]>([])
   const [ok, setOk] = useState<boolean | undefined>()
   const [error, setError] = useState<string | undefined>()
+  const [rules, setRules] = useState<Rules | undefined>()
   async function refresh() {
     if (!baseUrl) return
     setError(undefined)
@@ -81,23 +88,39 @@ function useServerStatus(baseUrl?: string) {
       const data = await res.json()
       setOk(!!data.ok)
       setBranches(data.branches || [])
+      setRules(data.rules || undefined)
     } catch (e: any) {
       setError(e?.message || String(e))
     }
   }
   useEffect(() => { refresh() }, [baseUrl])
-  return { ok, branches, error, refresh }
+  return { ok, branches, rules, error, refresh }
 }
 
 function RepositoryBrowser({ socket }: { socket: string }) {
   const baseUrl = useMemo(() => `http://${socket}`, [socket])
-  const { ok, branches, error, refresh } = useServerStatus(baseUrl)
+  const { ok, branches, rules, error, refresh } = useServerStatus(baseUrl)
   const [branch, setBranch] = useState('main')
   const [path, setPath] = useState('/index.md')
   const [content, setContent] = useState<string>('')
   const [search, setSearch] = useState('')
+  const [results, setResults] = useState<any[]>([])
+  const [qPage, setQPage] = useState(0)
+  const [qPageSize, setQPageSize] = useState(25)
+  const [qTotal, setQTotal] = useState<number | undefined>()
+  const [qLoading, setQLoading] = useState(false)
+  const [qError, setQError] = useState<string | undefined>()
+  const [showNew, setShowNew] = useState(false)
+  const [newMeta, setNewMeta] = useState<string>(`{\n  "title": "",\n  "release_date": "",\n  "genre": []\n}`)
+  const [suggestedPath, setSuggestedPath] = useState<string>('')
 
   useEffect(() => { if (branches.length && !branches.includes(branch)) setBranch(branches[0]) }, [branches])
+  useEffect(() => {
+    // When rules arrive, update default path from indexFile
+    if (rules?.indexFile) {
+      setPath(p => p === '/index.md' ? `/${rules.indexFile}`.replace(/\/+/g, '/') : p)
+    }
+  }, [rules])
 
   async function fetchFile() {
     const url = `${baseUrl}${path.startsWith('/') ? path : ('/' + path)}`
@@ -113,9 +136,49 @@ function RepositoryBrowser({ socket }: { socket: string }) {
   }
   useEffect(() => { if (ok) fetchFile() }, [ok, branch, path])
 
-  async function doQuery() {
-    await fetch(`${baseUrl}/query`, { method: 'POST', headers: { 'X-Relay-Branch': branch } })
-    // Not implemented; no results to show.
+  async function doQuery(page = qPage, pageSize = qPageSize) {
+    if (!ok) return
+    setQLoading(true)
+    setQError(undefined)
+    try {
+      const res = await fetch(`${baseUrl}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Relay-Branch': branch },
+        body: JSON.stringify({ page, pageSize, params: search ? { q: search } : {} })
+      })
+      if (!res.ok) throw new Error(`Query failed: ${res.status}`)
+      const data = await res.json()
+      setResults(Array.isArray(data.items) ? data.items : [])
+      setQTotal(typeof data.total === 'number' ? data.total : undefined)
+      setQPage(data.page ?? page)
+      setQPageSize(data.pageSize ?? pageSize)
+    } catch (e: any) {
+      setQError(e?.message || String(e))
+    } finally { setQLoading(false) }
+  }
+
+  function evaluateInsertTemplate(metaObj: any): string {
+    const tpl = rules?.insertTemplate
+    if (!tpl) return ''
+    try {
+      // Unsafe eval within app context; trusted usage only in this sample client
+      // Expose fields as variables for simple template like `${title}` etc.
+      const fn = new Function(...Object.keys(metaObj), `return \
+        (function(){ return ${JSON.stringify(tpl)}; })();`)
+      const val = fn(...Object.values(metaObj))
+      if (typeof val === 'string') return val
+    } catch {}
+    return ''
+  }
+
+  function openNewEntry() {
+    setShowNew(true)
+    // try compute suggestion
+    try {
+      const meta = JSON.parse(newMeta)
+      const s = evaluateInsertTemplate(meta)
+      if (s) setSuggestedPath(s.endsWith('/') ? s + 'meta.json' : s)
+    } catch {}
   }
 
   const html = useMemo(() => {
@@ -130,14 +193,82 @@ function RepositoryBrowser({ socket }: { socket: string }) {
         <input className="flex-1 px-2 py-1 border rounded font-mono" value={path} onChange={e => setPath(e.target.value)} />
         <select className="px-2 py-1 border rounded" value={branch} onChange={e => setBranch(e.target.value)}>
           {branches.map(b => <option key={b} value={b}>{b}</option>)}
+          <option value="all">all</option>
         </select>
         <input className="px-2 py-1 border rounded" placeholder="Search (QUERY)" value={search} onChange={e => setSearch(e.target.value)} />
-        <button className="px-3 py-1 rounded bg-blue-600 text-white" onClick={doQuery}>Search</button>
+        <button className="px-3 py-1 rounded bg-blue-600 text-white" onClick={() => doQuery(0, qPageSize)}>Search</button>
+        <button className="px-3 py-1 rounded bg-green-600 text-white" onClick={openNewEntry} disabled={!rules?.insertTemplate}>New Entry</button>
         <button className="px-3 py-1 rounded bg-gray-200" onClick={refresh}>Status</button>
         {error && <div className="text-xs text-red-600">{error}</div>}
       </div>
       <div className="flex-1 overflow-auto p-4">
         <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="mt-6">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="font-semibold">Query Results</div>
+            {qLoading && <div className="text-xs text-gray-500">Loading…</div>}
+            {qError && <div className="text-xs text-red-600">{qError}</div>}
+            {typeof qTotal === 'number' && <div className="text-xs text-gray-500">Total: {qTotal}</div>}
+            <div className="flex-1" />
+            <button className="px-2 py-1 border rounded" onClick={() => doQuery(Math.max(0, qPage - 1), qPageSize)} disabled={qPage === 0 || qLoading}>Prev</button>
+            <button className="px-2 py-1 border rounded" onClick={() => doQuery(qPage + 1, qPageSize)} disabled={qLoading}>Next</button>
+            <input className="w-20 px-2 py-1 border rounded" type="number" min={1} value={qPageSize} onChange={e => { const n = Math.max(1, Number(e.target.value)||25); setQPageSize(n); }} />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm border">
+              <thead>
+                <tr className="bg-gray-100">
+                  {results[0] && Object.keys(results[0]).map((k) => (
+                    <th key={k} className="px-2 py-1 border text-left">{k}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((row, i) => (
+                  <tr key={i} className="odd:bg-white even:bg-gray-50">
+                    {Object.keys(results[0] || {}).map((k) => (
+                      <td key={k} className="px-2 py-1 border font-mono">{String(row[k])}</td>
+                    ))}
+                  </tr>
+                ))}
+                {!results.length && <tr><td className="px-2 py-3 text-gray-500">No results</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {showNew && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center">
+            <div className="bg-white w-[700px] max-w-[95%] rounded shadow border">
+              <div className="p-2 border-b flex items-center justify-between">
+                <div className="font-semibold">New Entry</div>
+                <button className="text-red-600" onClick={() => setShowNew(false)}>x</button>
+              </div>
+              <div className="p-3 grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-gray-600 mb-1">meta.json</div>
+                  <textarea className="w-full h-64 border rounded p-2 font-mono text-xs" value={newMeta} onChange={e => {
+                    setNewMeta(e.target.value)
+                    try {
+                      const meta = JSON.parse(e.target.value)
+                      const s = evaluateInsertTemplate(meta)
+                      if (s) setSuggestedPath(s.endsWith('/') ? s + 'meta.json' : s)
+                    } catch {}
+                  }} />
+                </div>
+                <div>
+                  <div className="text-xs text-gray-600 mb-1">Suggested PUT path</div>
+                  <input className="w-full border rounded p-2 font-mono" value={suggestedPath} onChange={e => setSuggestedPath(e.target.value)} />
+                  <div className="text-xs text-gray-500 mt-2">Template from rules.insertTemplate. You can edit the path before uploading.</div>
+                </div>
+              </div>
+              <div className="p-2 border-t flex items-center gap-2 justify-end">
+                <button className="px-3 py-1 rounded bg-gray-200" onClick={() => setShowNew(false)}>Close</button>
+                <button className="px-3 py-1 rounded bg-blue-600 text-white" onClick={() => {/* future: PUT meta file */}}>Continue</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
