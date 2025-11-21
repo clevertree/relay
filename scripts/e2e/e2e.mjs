@@ -44,6 +44,7 @@ async function main() {
   const name = `relay-e2e-${Date.now()}`;
   let needCleanup = false;
   let localServerProc = null;
+  let runtime = null;
   // Parse flags
   const useLocal = process.argv.includes('--local');
 
@@ -53,21 +54,35 @@ async function main() {
     localServerProc = spawn('cargo', ['run', '--manifest-path', 'apps/server/Cargo.toml'], { stdio: 'inherit' });
     needCleanup = true;
   } else {
-    // Require Docker to be available for E2E. Fail fast if not present.
+    // Detect container runtime: prefer Docker, fall back to Podman. Fail if neither available.
     try {
       const res = sync('docker', ['info'], { stdio: 'ignore' });
-      if (res.status !== 0) throw new Error('docker info returned non-zero');
+      if (res.status === 0) runtime = 'docker';
     } catch (e) {
-      console.error('E2E requires Docker and the Docker daemon to be running. Aborting.');
+      // ignore
+    }
+    if (!runtime) {
+      try {
+        const res = sync('podman', ['info'], { stdio: 'ignore' });
+        if (res.status === 0) runtime = 'podman';
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (!runtime) {
+      console.error('E2E requires Docker or Podman and a running daemon. Aborting.');
       process.exit(2);
     }
 
-    // 2) Build Docker image
-    await sh('docker', ['build', '-t', image, '.']);
+    console.log(`Using container runtime: ${runtime}`);
 
-    // 3) Run container (do not --rm so logs persist on failure). Map docker ports.
+    // 2) Build image
+    await sh(runtime, ['build', '-t', image, '.']);
+
+    // 3) Run container (do not --rm so logs persist on failure). Map ports.
     const ports = ['-p', '8088:8088'];
-    await sh('docker', ['run', '-d', '--name', name, ...ports, image]);
+    // Podman may run rootless; run similarly to docker
+    await sh(runtime, ['run', '-d', '--name', name, ...ports, image]);
     needCleanup = true;
   }
   try {
@@ -208,14 +223,14 @@ async function main() {
         // print container logs for debugging
         try {
           console.log('\n--- Container logs start ---');
-          const logs = spawnSync('docker', ['logs', '--tail', '200', name], { encoding: 'utf-8' });
+          const logs = spawnSync(runtime || 'docker', ['logs', '--tail', '200', name], { encoding: 'utf-8' });
           if (logs.stdout) console.log(logs.stdout);
           if (logs.stderr) console.error(logs.stderr);
           console.log('--- Container logs end ---\n');
         } catch (e) {
           // ignore
         }
-        try { await sh('docker', ['rm', '-f', name]); } catch (e) { /* ignore */ }
+        try { await sh(runtime || 'docker', ['rm', '-f', name]); } catch (e) { /* ignore */ }
       }
     }
   }

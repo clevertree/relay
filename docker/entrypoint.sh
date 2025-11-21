@@ -1,3 +1,4 @@
+
 #!/bin/sh
 set -e
 
@@ -25,3 +26,4 @@ git daemon --reuseaddr --base-path=/srv/relay/data --export-all --enable=receive
 
 # Start Relay server
 exec env RELAY_REPO_PATH="${RELAY_REPO_PATH}" RELAY_BIND="${RELAY_BIND}" /usr/local/bin/relay-server
+
