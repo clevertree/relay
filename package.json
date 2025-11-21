@@ -7,6 +7,11 @@
     "dev:tracker": "pnpm -C apps/tracker dev",
     "dev:client": "pnpm -C apps/client tauri dev",
     "build:server": "cargo build --manifest-path apps/server/Cargo.toml",
-    "start:server": "cargo run --manifest-path apps/server/Cargo.toml"
+    "start:server": "cargo run --manifest-path apps/server/Cargo.toml",
+    "test": "node scripts/run-all-tests.js"
+  }
+  ,"devDependencies":{
+    "js-yaml":"^4.1.0",
+    "glob":"^8.1.0"
   }
 }

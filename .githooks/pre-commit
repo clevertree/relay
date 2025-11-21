@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# Run workspace tests before commit
+echo "Running workspace tests..."
+pnpm -w test
+RESULT=$?
+if [ $RESULT -ne 0 ]; then
+  echo "Pre-commit tests failed. Aborting commit."
+  exit $RESULT
+fi
+exit 0
