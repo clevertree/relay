@@ -28,7 +28,7 @@ Relay operates as a decentralized network of master peer nodes:
 ### 1. **User‑Hosted Websites Without Traditional Hosting**
 Users can create personal websites without owning any server or hosting service:
 - Users place their files (Markdown index, CSS assets, media, etc.) in the **public user repo**.
-- Their website becomes browseable across the decentralized Relay network.
+- Their website becomes browsable across the decentralized Relay network.
 - **Security restrictions apply:**
   - Users cannot host raw JavaScript or HTML, preventing common exploit avenues.
   - Instead, they use **Markdown components**—HTML‑like elements expressed in Markdown that enable safe, interactive client functionality.

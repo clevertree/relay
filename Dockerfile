@@ -37,6 +37,7 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 8088 9418 4001 5001 8080 58846 58946 58946/udp
 
 ENV RELAY_REPO_PATH=/srv/relay/data/repo.git \
-    RELAY_BIND=0.0.0.0:8088
+    RELAY_BIND=0.0.0.0:8088 \
+    RELAY_TEMPLATE_URL=https://github.com/clevertree/relay-template
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

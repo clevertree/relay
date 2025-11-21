@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
 };
 use tokio::net::TcpListener;
-use git2::{Oid, Repository, Signature};
+use git2::{Oid, Repository, Signature, TreeBuilder, ObjectType};
 use base64::Engine;
 use percent_encoding::percent_decode_str as url_decode;
 use serde::{Deserialize, Serialize};
@@ -413,11 +413,121 @@ fn read_file_from_repo(repo_path: &PathBuf, branch: &str, path: &str) -> Result<
     Ok(blob.content().to_vec())
 }
 
-fn write_file_to_repo(_repo_path: &PathBuf, _branch: &str, _path: &str, _content: &[u8]) -> anyhow::Result<(String, String)> {
-    // TODO: Implement writing to a bare Git repo tree safely (tree builder). For now, return an error.
-    anyhow::bail!("PUT not implemented in this build")
+fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[u8]) -> anyhow::Result<(String, String)> {
+    let repo = Repository::open_bare(repo_path)?;
+    let refname = format!("refs/heads/{}", branch);
+    let sig = Signature::now("relay", "relay@local")?;
+
+    // Current tree (or empty)
+    let (parent_commit, mut base_tree) = match repo.find_reference(&refname) {
+        Ok(r) => {
+            let c = r.peel_to_commit()?;
+            let t = c.tree()?;
+            (Some(c), t)
+        }
+        Err(_) => {
+            // new branch
+            let tb = repo.treebuilder(None)?;
+            let oid = tb.write()?;
+            let t = repo.find_tree(oid)?;
+            (None, t)
+        }
+    };
+
+    // Write blob
+    let blob_oid = repo.blob(content)?;
+
+    // Update tree recursively for the path
+    let mut components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if components.is_empty() { anyhow::bail!("empty path"); }
+    let filename = components.pop().unwrap().to_string();
+
+    // Helper to descend and produce updated subtree oid
+    fn upsert_path(repo: &Repository, tree: &git2::Tree, comps: &[&str], filename: &str, blob_oid: Oid) -> anyhow::Result<Oid> {
+        let mut tb = repo.treebuilder(Some(tree))?;
+        if comps.is_empty() {
+            // Insert file at this level
+            tb.insert(&filename, blob_oid, 0o100644)?;
+            return Ok(tb.write()?);
+        }
+        let head = comps[0];
+        // Find or create subtree for head
+        let subtree_oid = match tree.get_name(head) {
+            Some(entry) if entry.kind() == Some(ObjectType::Tree) => entry.id(),
+            _ => {
+                // create empty subtree
+                let empty = repo.treebuilder(None)?;
+                empty.write()?
+            }
+        };
+        let subtree = repo.find_tree(subtree_oid)?;
+        let new_sub_oid = upsert_path(repo, &subtree, &comps[1..], filename, blob_oid)?;
+        tb.insert(head, new_sub_oid, 0o040000)?;
+        Ok(tb.write()?)
+    }
+
+    let new_tree_oid = upsert_path(&repo, &base_tree, &components, &filename, blob_oid)?;
+    let new_tree = repo.find_tree(new_tree_oid)?;
+
+    // Create commit
+    let msg = format!("PUT {}", path);
+    let commit_oid = if let Some(parent) = parent_commit {
+        repo.commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[&parent])?
+    } else {
+        repo.commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[])?
+    };
+
+    Ok((commit_oid.to_string(), branch.to_string()))
 }
 
-fn delete_file_in_repo(_repo_path: &PathBuf, _branch: &str, _path: &str) -> Result<(String, String), ReadError> {
-    Err(ReadError::Other(anyhow::anyhow!("DELETE not implemented in this build")))
+fn delete_file_in_repo(repo_path: &PathBuf, branch: &str, path: &str) -> Result<(String, String), ReadError> {
+    let repo = Repository::open_bare(repo_path).map_err(|e| ReadError::Other(e.into()))?;
+    let refname = format!("refs/heads/{}", branch);
+    let sig = Signature::now("relay", "relay@local").map_err(|e| ReadError::Other(e.into()))?;
+    let (parent_commit, base_tree) = match repo.find_reference(&refname) {
+        Ok(r) => {
+            let c = r.peel_to_commit().map_err(|e| ReadError::Other(e.into()))?;
+            let t = c.tree().map_err(|e| ReadError::Other(e.into()))?;
+            (Some(c), t)
+        }
+        Err(_) => return Err(ReadError::NotFound),
+    };
+
+    // Recursively remove path
+    fn remove_path(repo: &Repository, tree: &git2::Tree, comps: &[&str], filename: &str) -> anyhow::Result<Option<Oid>> {
+        let mut tb = repo.treebuilder(Some(tree))?;
+        if comps.is_empty() {
+            // remove file
+            if tb.remove(filename).is_err() { return Ok(None); }
+            return Ok(Some(tb.write()?));
+        }
+        let head = comps[0];
+        let entry = match tree.get_name(head) { Some(e) => e, None => return Ok(None) };
+        if entry.kind() != Some(ObjectType::Tree) { return Ok(None); }
+        let subtree = repo.find_tree(entry.id())?;
+        if let Some(new_sub_oid) = remove_path(repo, &subtree, &comps[1..], filename)? {
+            let mut tb2 = repo.treebuilder(Some(tree))?;
+            tb2.insert(head, new_sub_oid, 0o040000)?;
+            return Ok(Some(tb2.write()?));
+        }
+        Ok(None)
+    }
+
+    let mut comps: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if comps.is_empty() { return Err(ReadError::NotFound); }
+    let filename = comps.pop().unwrap().to_string();
+    let new_oid_opt = remove_path(&repo, &base_tree, &comps, &filename).map_err(|e| ReadError::Other(e))?;
+    let new_oid = match new_oid_opt { Some(oid) => oid, None => return Err(ReadError::NotFound) };
+    let new_tree = repo.find_tree(new_oid).map_err(|e| ReadError::Other(e.into()))?;
+    let msg = format!("DELETE {}", path);
+    let commit_oid = if let Some(ref parent) = parent_commit {
+        repo
+            .commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[parent])
+            .map_err(|e| ReadError::Other(e.into()))?
+    } else {
+        repo
+            .commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[])
+            .map_err(|e| ReadError::Other(e.into()))?
+    };
+    Ok((commit_oid.to_string(), branch.to_string()))
 }

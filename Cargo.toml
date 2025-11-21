@@ -1,0 +1,8 @@
+[workspace]
+members = [
+  "apps/server",
+  "crates/hooks",
+  "crates/relay-lib",
+  "crates/relay-cli",
+]
+resolver = "2"

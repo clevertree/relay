@@ -8,7 +8,8 @@
     "dev:client": "pnpm -C apps/client tauri dev",
     "build:server": "cargo build --manifest-path apps/server/Cargo.toml",
     "start:server": "cargo run --manifest-path apps/server/Cargo.toml",
-    "test": "node scripts/run-all-tests.js"
+    "test": "cargo test --workspace",
+    "e2e": "node scripts/e2e/e2e.mjs"
   }
   ,"devDependencies":{
     "js-yaml":"^4.1.0",
