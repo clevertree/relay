@@ -6,7 +6,7 @@ title: Relay Repository Rules
 description: >-
   Rules file that defines what files and paths are allowed for new commits and
   the metadata format to enforce per repository. Servers and hooks read this
-  file from the repository root as `rules.yaml` and enforce it only for new
+  file from the repository root as `relay.yaml` and enforce it only for new
   commits.
 type: object
 properties:

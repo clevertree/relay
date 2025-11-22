@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 pub const HEADER_BRANCH: &str = "X-Relay-Branch";
 
+pub mod db;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub ok: bool,
@@ -96,4 +98,17 @@ pub async fn post_query(socket: &str, branch: &str, path: Option<&str>, body: Op
         return Err(anyhow!("QUERY failed: {}", res.status()));
     }
     Ok(res.json::<QueryResponse>().await?)
+}
+
+// Utilities for path normalization (forward-slash to OS path)
+pub fn normalize_os_path<S: AsRef<str>>(p: S) -> std::path::PathBuf {
+    let s = p.as_ref();
+    #[cfg(windows)]
+    {
+        std::path::PathBuf::from(s.replace('/', "\\"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::path::PathBuf::from(s)
+    }
 }

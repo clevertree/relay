@@ -20,7 +20,7 @@ Milestones
   - Evidence: `apps/tracker` README and APIs.
 - [x] Shared OpenAPI spec and `rules.schema.yaml`.
   - Evidence: `packages/protocol` contains `openapi.yaml` and `rules.schema.yaml`.
-- [x] Git hooks crate scaffolding to validate `rules.yaml` on new commits.
+- [x] Git hooks crate scaffolding to validate `relay.yaml` on new commits.
   - Evidence: `crates/hooks` exists and is referenced in README.
 - [x] Basic security guardrails (block .html/.htm/.js).
   - Evidence: Protocol and README note disallowed extensions.
@@ -40,9 +40,9 @@ Goal: Make it easy for repository owners to define content models and for users 
 Milestones
 - [x] `rules.db` declarative schema and query policy design.
   - Evidence: `rules.schema.yaml` and `packages/protocol` docs.
-- [ ] Provide example content repository ("movies") showcasing `rules.yaml`, `meta.json`, indexing with SQLite, and sample queries.
+- [ ] Provide example content repository ("movies") showcasing `relay.yaml`, `meta.json`, indexing with SQLite, and sample queries.
   - Why: Demonstrates end-to-end rules-driven indexing and `/query` usage.
-  - Recommended work: add `examples/movies/` with `rules.yaml`, sample `data/` files, and a test script to run a query.
+  - Recommended work: add `examples/movies/` with `relay.yaml`, sample `data/` files, and a test script to run a query.
 - [ ] Improve client UX for creating branches and editing meta (inline forms for `meta.json`).
   - Why: current client reads `.md` and allows edits, but doesn't expose structured meta editing.
 
@@ -87,7 +87,7 @@ Goal: Make `main` modifications only possible by a configured repository key and
 
 Milestones
 - [ ] Commit signature verification in `crates/hooks` and server-side enforcement for protected branches.
-- [ ] `rules.yaml` fields to declare required signer(s) for branches.
+- [ ] `relay.yaml` fields to declare required signer(s) for branches.
 - [ ] Key provisioning and rotation documentation.
 
 Acceptance criteria
@@ -128,7 +128,7 @@ These items should be addressed across phases.
 ---
 
 ## Suggested immediate next sprint (4 weeks)
-1. Add `examples/movies/` demonstrating `rules.yaml`, `meta.json`, sample data, and a script to run a `/query` against a local server (est. 1 week).
+1. Add `examples/movies/` demonstrating `relay.yaml`, `meta.json`, sample data, and a script to run a `/query` against a local server (est. 1 week).
 2. Implement commit-signature check in `crates/hooks` for a protected-branch demo (est. 1 week).
 3. Add PR API skeleton and a minimal client UI to open/close PRs (est. 1.5 weeks).
 4. Write design doc for peer replication and create a two-node proof-of-concept plan (est. 1 week parallel work).

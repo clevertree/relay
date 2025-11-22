@@ -11,7 +11,7 @@ use axum::{
 use tokio::net::TcpListener;
 use git2::{Oid, Repository, Signature, ObjectType};
 use percent_encoding::percent_decode_str as url_decode;
-use base64::Engine;
+// base64 no longer needed after removing SQLite row mapping
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info};
@@ -53,11 +53,15 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState { repo_path };
 
+    // Middleware to support custom QUERY method as an alias for POST /query/*
+    // If a request comes in with method "QUERY" to any path like "/foo/bar",
+    // we rewrite it to a POST request targeting "/query/foo/bar" (preserving the query string).
     let app = Router::new()
         .route("/status", post(post_status))
         .route("/query/*path", post(post_query))
         .route("/", get(get_root))
         .route("/*path", get(get_file).put(put_file).delete(delete_file))
+        .layer(axum::middleware::from_fn(query_alias_middleware))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -120,8 +124,8 @@ async fn post_status(State(state): State<AppState>) -> impl IntoResponse {
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
     let branches = list_branches(&repo);
-    // Try to read rules.yaml from default branch
-    let (rules_json, index_file) = match read_file_from_repo(&state.repo_path, DEFAULT_BRANCH, "rules.yaml") {
+    // Try to read relay.yaml from default branch
+    let (rules_json, index_file) = match read_file_from_repo(&state.repo_path, DEFAULT_BRANCH, "relay.yaml") {
         Ok(bytes) => {
             let rules_yaml = String::from_utf8_lossy(&bytes);
             match serde_yaml::from_str::<serde_json::Value>(&rules_yaml) {
@@ -146,15 +150,18 @@ async fn post_status(State(state): State<AppState>) -> impl IntoResponse {
     Json(body).into_response()
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize)]
 struct QueryRequest {
     #[serde(default)]
-    page: Option<usize>,
+    page: Option<u32>,
     #[serde(default, rename = "pageSize")]
-    page_size: Option<usize>,
+    page_size: Option<u32>,
     #[serde(default)]
-    params: Option<serde_json::Value>,
+    filter: Option<serde_json::Value>,
+    #[serde(default)]
+    sort: Option<Vec<relay_lib::db::SortSpec>>, // optional override
+    #[serde(default)]
+    params: Option<serde_json::Value>, // legacy alias for filter
 }
 
 #[derive(Serialize)]
@@ -173,129 +180,104 @@ async fn post_query(
     headers: HeaderMap,
     body: Option<Json<serde_json::Value>>,
 ) -> impl IntoResponse {
-    // Defaults
+    use relay_lib::db::{Db, DbSpec, QueryParams};
+    // Resolve branch (allow 'all')
     let branch = headers
         .get(HEADER_BRANCH)
         .and_then(|v| v.to_str().ok())
         .unwrap_or(DEFAULT_BRANCH)
         .to_string();
     let req: QueryRequest = match body {
-        Some(Json(v)) => serde_json::from_value(v).unwrap_or(QueryRequest { page: Some(0), page_size: Some(25), params: None }),
-        None => QueryRequest { page: Some(0), page_size: Some(25), params: None },
+        Some(Json(v)) => serde_json::from_value(v).unwrap_or(QueryRequest { page: Some(0), page_size: Some(25), filter: None, sort: None, params: None }),
+        None => QueryRequest { page: Some(0), page_size: Some(25), filter: None, sort: None, params: None },
     };
-    let page = req.page.unwrap_or(0);
-    let page_size = req.page_size.unwrap_or(25);
 
-    // Open repo and read rules
+    // Open repo and read rules (for db spec)
     let repo = match Repository::open_bare(&state.repo_path) {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
-    let rules_bytes = match read_file_from_repo(&state.repo_path, DEFAULT_BRANCH, "rules.yaml") {
+    let rules_bytes = match read_file_from_repo(&state.repo_path, DEFAULT_BRANCH, "relay.yaml") {
         Ok(b) => b,
-        Err(_) => return (StatusCode::BAD_REQUEST, "rules.yaml not found on default branch").into_response(),
+        Err(_) => return (StatusCode::BAD_REQUEST, "relay.yaml not found on default branch").into_response(),
     };
     let rules_yaml = String::from_utf8_lossy(&rules_bytes);
     let rules_val: serde_json::Value = match serde_yaml::from_str::<serde_json::Value>(&rules_yaml) {
         Ok(v) => v,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("invalid rules.yaml: {e}")).into_response(),
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("invalid relay.yaml: {e}")).into_response(),
     };
-    let db = match rules_val.get("db") {
-        Some(v) => v,
+    let db_val = match rules_val.get("db") {
+        Some(v) => v.clone(),
         None => return (StatusCode::BAD_REQUEST, "rules.db not defined").into_response(),
     };
-    let qp = match db.get("queryPolicy") {
-        Some(v) => v,
-        None => return (StatusCode::BAD_REQUEST, "rules.db.queryPolicy not defined").into_response(),
-    };
-    let stmt = match qp.get("statement").and_then(|v| v.as_str()) {
-        Some(s) => s.to_string(),
-        None => return (StatusCode::BAD_REQUEST, "rules.db.queryPolicy.statement missing").into_response(),
-    };
-    let count_stmt = qp.get("countStatement").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let page_size_param = qp.get("pageSizeParam").and_then(|v| v.as_str()).unwrap_or(":limit");
-    let page_offset_param = qp.get("pageOffsetParam").and_then(|v| v.as_str()).unwrap_or(":offset");
-
-    // Open SQLite database located alongside the bare repo
-    let db_path = repo.path().join("relay_index.sqlite");
-    let conn = match rusqlite::Connection::open(db_path) {
-        Ok(c) => c,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("open DB failed: {e}")).into_response(),
-    };
-
-    // Build named parameters
-    // Build positional SQL by replacing named parameters with ?1, ?2, ?3
-    let branch_param = branch.clone();
-    let limit_i64: i64 = page_size as i64;
-    let offset_i64: i64 = (page * page_size) as i64;
-    let mut sql_pos = stmt.clone();
-    // Replace all occurrences; order: :branch -> ?1, limit -> ?2, offset -> ?3
-    sql_pos = sql_pos.replace(":branch", "?1");
-    sql_pos = sql_pos.replace(page_size_param, "?2");
-    sql_pos = sql_pos.replace(page_offset_param, "?3");
-
-    // Prepare statement and execute
-    let mut stmt_main = match conn.prepare(&sql_pos) {
+    let spec: DbSpec = match serde_json::from_value(db_val) {
         Ok(s) => s,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("prepare failed: {e}")).into_response(),
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("invalid rules.db spec: {e}")).into_response(),
     };
-
-    // Execute and collect rows as JSON (positional params)
-    let rows_iter = match stmt_main.query(rusqlite::params![branch_param, limit_i64, offset_i64]) {
+    if spec.engine.to_lowercase() != "polodb" {
+        return (StatusCode::BAD_REQUEST, format!("unsupported db.engine: {}", spec.engine)).into_response();
+    }
+    // Resolve DB path: env RELAY_DB_PATH or default under repo git dir
+    let db_path = std::env::var("RELAY_DB_PATH").unwrap_or_else(|_| {
+        repo.path().join("relay_index.polodb").to_string_lossy().to_string()
+    });
+    let db = match Db::open(&db_path) { Ok(d) => d, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB open failed: {e}")).into_response() };
+    if let Err(e) = db.ensure_indexes(&spec) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("ensure indexes failed: {e}")).into_response();
+    }
+    // Build query params
+    let mut qp = QueryParams::default();
+    qp.page = req.page;
+    qp.page_size = req.page_size;
+    qp.sort = req.sort.clone();
+    qp.filter = if let Some(f) = req.filter { Some(f) } else { req.params };
+    let qr = match db.query(&spec, Some(&branch), &qp) {
         Ok(r) => r,
         Err(e) => return (StatusCode::BAD_REQUEST, format!("query failed: {e}")).into_response(),
     };
-
-    let mut cursor = rows_iter;
-    let mut items_arr: Vec<serde_json::Value> = Vec::new();
-    while let Ok(Some(row)) = cursor.next() {
-        match row_to_json(row) {
-            Ok(v) => items_arr.push(v),
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("row mapping failed: {e}")).into_response(),
-        }
-    }
-
-    // Count if provided
-    let mut total_opt: Option<i64> = None;
-    if let Some(cs) = count_stmt {
-        let count_sql = cs.replace(":branch", "?1");
-        match conn.prepare(&count_sql).and_then(|mut st| st.query_row(rusqlite::params![branch_param], |r| r.get::<_, i64>(0))) {
-            Ok(total) => total_opt = Some(total),
-            Err(e) => return (StatusCode::BAD_REQUEST, format!("count failed: {e}")).into_response(),
-        }
-    }
-
     let resp = QueryResponse {
-        items: serde_json::Value::Array(items_arr),
-        total: total_opt,
-        page,
-        page_size: page_size,
+        items: serde_json::Value::Array(qr.items),
+        total: Some(qr.total as i64),
+        page: qr.page as usize,
+        page_size: qr.page_size as usize,
         branch,
     };
     (StatusCode::OK, Json(resp)).into_response()
 }
 
-fn row_to_json(row: &rusqlite::Row) -> anyhow::Result<serde_json::Value> {
-    use rusqlite::types::ValueRef;
-    let mut obj = serde_json::Map::new();
-    let rowref = row.as_ref();
-    for i in 0..rowref.column_count() {
-        let name = rowref.column_name(i).unwrap_or("").to_string();
-        let v = row.get_ref(i)?;
-        let j = match v {
-            ValueRef::Null => serde_json::Value::Null,
-            ValueRef::Integer(n) => serde_json::Value::from(n),
-            ValueRef::Real(f) => serde_json::Value::from(f),
-            ValueRef::Text(t) => serde_json::Value::from(std::str::from_utf8(t)?.to_string()),
-            ValueRef::Blob(b) => {
-                use base64::engine::general_purpose::STANDARD as B64;
-                serde_json::Value::from(B64.encode(b))
-            }
-        };
-        obj.insert(name, j);
+// Middleware that rewrites custom HTTP method QUERY to POST /query/*
+async fn query_alias_middleware(
+    mut req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> impl IntoResponse {
+    use axum::http::{Method, Uri};
+    let is_query_method = req.method().as_str().eq_ignore_ascii_case("QUERY");
+    if is_query_method {
+        // Build the new path by prefixing "/query" to the existing path
+        let orig_path = req.uri().path();
+        let orig_query = req.uri().query();
+        let mut new_path = String::from("/query");
+        if orig_path.starts_with('/') {
+            new_path.push_str(orig_path);
+        } else {
+            new_path.push('/');
+            new_path.push_str(orig_path);
+        }
+        let new_pq = if let Some(q) = orig_query { format!("{}?{}", new_path, q) } else { new_path };
+        // Rebuild request with POST method and new URI path
+        let (mut parts, body) = req.into_parts();
+        parts.method = Method::POST;
+        parts.uri = Uri::builder()
+            .path_and_query(new_pq)
+            .build()
+            .unwrap_or_else(|_| Uri::from_static("/query"));
+        let req2 = axum::http::Request::from_parts(parts, body);
+        return next.run(req2).await;
     }
-    Ok(serde_json::Value::Object(obj))
+    next.run(req).await
 }
+
+// removed SQLite row_to_json helper
 
 #[cfg(test)]
 mod tests {
@@ -329,7 +311,7 @@ mod tests {
         let tree_oid = tb.write().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
 
-        let (ct, bytes) = directory_response(&tree, "", "");
+        let (ct, bytes) = directory_response(&tree, &tree, "", "", DEFAULT_BRANCH);
     assert!(ct.starts_with("text/html"), "ct was {}", ct);
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("<h1>Title</h1>") || s.contains("<a href=\"README.md\""));
@@ -348,37 +330,14 @@ mod tests {
         let tree_oid = tb.write().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
 
-        let (ct, bytes) = directory_response(&tree, "", "text/markdown");
+        let (ct, bytes) = directory_response(&tree, &tree, "", "text/markdown", DEFAULT_BRANCH);
         assert_eq!(ct, "text/markdown");
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("# Title") || s.contains("README.md"));
     }
     
     #[test]
-    fn test_row_to_json_basic_types() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute(
-            "CREATE TABLE t (id INTEGER, name TEXT, rating REAL, data BLOB)",
-            [],
-        )
-        .unwrap();
-        let blob: Vec<u8> = vec![1, 2, 3, 4];
-        conn.execute(
-            "INSERT INTO t (id, name, rating, data) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![1i64, "hello", 4.5f64, blob],
-        )
-        .unwrap();
-        let mut stmt = conn.prepare("SELECT id, name, rating, data FROM t").unwrap();
-        let mut rows = stmt.query([]).unwrap();
-        if let Some(row) = rows.next().unwrap() {
-            let v = row_to_json(row).unwrap();
-            assert_eq!(v["id"], 1);
-            assert_eq!(v["name"], "hello");
-            assert!(v["data"].as_str().unwrap().len() > 0); // base64
-        } else {
-            panic!("no row returned")
-        }
-    }
+    fn test_row_to_json_basic_types_removed() {}
 }
 
 fn disallowed(path: &str) -> bool {
@@ -452,7 +411,7 @@ async fn get_file(
             .get("accept")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        let (ct, body) = directory_response(&tree, rel, accept_hdr);
+        let (ct, body) = directory_response(&tree, &tree, rel, accept_hdr, &branch);
         return (StatusCode::OK, [("Content-Type", ct)], body).into_response();
     }
 
@@ -483,12 +442,16 @@ async fn get_file(
                         // Serve raw markdown
                         return (StatusCode::OK, [("Content-Type", "text/markdown")], content.to_vec()).into_response();
                     } else {
-                        // Render to HTML and serve; include charset to ensure UTF-8 is used
-                        let s = String::from_utf8_lossy(content);
-                        let parser = Parser::new(&s);
-                        let mut out = String::new();
-                        html::push_html(&mut out, parser);
-                        return (StatusCode::OK, [("Content-Type", "text/html; charset=utf-8")], out.into_bytes()).into_response();
+                        // Render to HTML, wrap with CSS links based on directory theme and site globals
+                        let html_frag = String::from_utf8(md_to_html_bytes(content)).unwrap_or_default();
+                        let base_dir = std::path::Path::new(rel)
+                            .parent()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "".to_string());
+                        let css = css_hrefs_for(&tree, &base_dir, &branch);
+                        let title = std::path::Path::new(rel).file_name().and_then(|s| s.to_str()).unwrap_or("Document");
+                        let wrapped = wrap_html_with_css(title, &html_frag, &css);
+                        return (StatusCode::OK, [("Content-Type", "text/html; charset=utf-8")], wrapped).into_response();
                     }
                     }
                     // Non-markdown: serve with detected mime
@@ -514,7 +477,7 @@ async fn get_file(
                 .get("accept")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-                let (ct, body) = directory_response(&sub_tree, rel, accept_hdr);
+                let (ct, body) = directory_response(&tree, &sub_tree, rel, accept_hdr, &branch);
                 (StatusCode::OK, [("Content-Type", ct)], body).into_response()
         }
         _ => render_404_markdown(&state.repo_path, &branch, rel),
@@ -561,7 +524,7 @@ async fn get_root(
         .get("accept")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let (ct, body) = directory_response(&tree, "", accept_hdr);
+    let (ct, body) = directory_response(&tree, &tree, "", accept_hdr, &branch);
     (StatusCode::OK, [("Content-Type", ct)], body).into_response()
 }
 
@@ -687,7 +650,7 @@ fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
     lines.join("\n").into_bytes()
 }
 
-// Convert markdown bytes to HTML bytes
+// Convert markdown bytes to HTML bytes (fragment — no head/body wrapping)
 fn md_to_html_bytes(bytes: &[u8]) -> Vec<u8> {
     let s = String::from_utf8_lossy(bytes);
     let parser = Parser::new(&s);
@@ -696,70 +659,114 @@ fn md_to_html_bytes(bytes: &[u8]) -> Vec<u8> {
     out.into_bytes()
 }
 
+// Build list of CSS hrefs to include for a given base directory in the repo tree.
+// theme.css in the same directory takes priority over /site/globals.css.
+fn css_hrefs_for(tree: &git2::Tree, base_dir: &str, branch: &str) -> Vec<String> {
+    use std::path::Path;
+    let mut hrefs: Vec<String> = Vec::new();
+    // 1) theme.css in same directory
+    let theme_rel = if base_dir.trim_matches('/').is_empty() {
+        "theme.css".to_string()
+    } else {
+        format!("{}/theme.css", base_dir.trim_matches('/'))
+    };
+    if tree.get_path(Path::new(&theme_rel)).ok().and_then(|e| e.kind()) == Some(ObjectType::Blob) {
+        hrefs.push(format!("/{}?branch={}", theme_rel, branch));
+    }
+    // 2) /site/globals.css at repo root
+    let globals_rel = "site/globals.css";
+    if tree.get_path(Path::new(globals_rel)).ok().and_then(|e| e.kind()) == Some(ObjectType::Blob) {
+        hrefs.push(format!("/{}?branch={}", globals_rel, branch));
+    }
+    hrefs
+}
+
+// Wrap an HTML fragment with a minimal page and linked stylesheets
+fn wrap_html_with_css(title: &str, body_html: &str, css_hrefs: &[String]) -> Vec<u8> {
+    let mut head = String::new();
+    head.push_str("<meta charset=\"utf-8\">\n");
+    for href in css_hrefs {
+        head.push_str(&format!("<link rel=\"stylesheet\" href=\"{}\">\n", href));
+    }
+    let html = format!(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<title>{}</title>\n{}\n</head>\n<body>\n<div class=\"markdown-body\">{}\n</div>\n</body>\n</html>",
+        title,
+        head,
+        body_html
+    );
+    html.into_bytes()
+}
+
 // Helper to return directory listing as HTML or markdown depending on Accept header
-fn directory_response(tree: &git2::Tree, base_path: &str, accept_hdr: &str) -> (String, Vec<u8>) {
-    let md = render_directory_markdown(tree, base_path);
+// root_tree is the tree at repo root (for CSS presence checks), listing_tree is the directory to list
+fn directory_response(root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str) -> (String, Vec<u8>) {
+    let md = render_directory_markdown(listing_tree, base_path);
     if accept_hdr.contains("text/markdown") {
         ("text/markdown".to_string(), md)
     } else {
-        ("text/html; charset=utf-8".to_string(), md_to_html_bytes(&md))
+        let body = String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
+        let css = css_hrefs_for(root_tree, base_path, branch);
+        ("text/html; charset=utf-8".to_string(), wrap_html_with_css("Directory", &body, &css))
     }
 }
 
 fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) -> Response {
-    // Try to read /404.md from the same branch
-    let custom = read_file_from_repo(repo_path, branch, "404.md").ok();
-    // helper to render markdown bytes to HTML bytes
-    fn md_to_html(bytes: &[u8]) -> Vec<u8> {
-        let s = String::from_utf8_lossy(bytes);
-        let parser = Parser::new(&s);
-        let mut out = String::new();
-        html::push_html(&mut out, parser);
-        out.into_bytes()
-    }
+    // Determine parent directory of the missing path for theme.css lookup
+    let parent_dir = {
+        let trimmed = missing_path.trim_matches('/');
+        std::path::Path::new(trimmed)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "".to_string())
+    };
+    // Try to read /site/404.md from the same branch
+    let custom = read_file_from_repo(repo_path, branch, "site/404.md").ok();
 
-    let body: Vec<u8> = match custom {
-        Some(bytes) => md_to_html(&bytes),
-        None => {
-            // Use bundled default 404 markdown and render to HTML
-            let mut out = md_to_html(DEFAULT_404_MD.as_bytes());
-            // Append a parent directory listing (rendered as HTML) where available
-            if let Ok(repo) = Repository::open_bare(repo_path) {
-                let refname = format!("refs/heads/{}", branch);
-                if let Ok(reference) = repo.find_reference(&refname) {
-                    if let Ok(commit) = reference.peel_to_commit() {
-                        if let Ok(root) = commit.tree() {
-                            let parent = missing_path.trim_matches('/');
-                            let parent_path = std::path::Path::new(parent).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "".to_string());
-                            let tree_to_list = if parent_path.is_empty() { Some(root) } else {
-                                match root.get_path(std::path::Path::new(&parent_path)) {
-                                    Ok(e) if e.kind() == Some(ObjectType::Tree) => repo.find_tree(e.id()).ok(),
-                                    _ => Some(root),
-                                }
-                            };
-                            if let Some(t) = tree_to_list {
-                                // render directory markdown then convert to HTML
-                                let md = render_directory_markdown(&t, &parent_path);
-                                let html = md_to_html(&md);
-                                out.extend_from_slice(b"\n\n");
-                                out.extend_from_slice(&html);
+    // We'll build the body HTML and the CSS hrefs while keeping repo lifetimes scoped
+    let used_custom = custom.is_some();
+    let mut body_html: String = match custom {
+        Some(ref bytes) => String::from_utf8(md_to_html_bytes(&bytes)).unwrap_or_default(),
+        None => String::from_utf8(md_to_html_bytes(DEFAULT_404_MD.as_bytes())).unwrap_or_default(),
+    };
+    let mut css_hrefs: Vec<String> = Vec::new();
+
+    if let Ok(repo) = Repository::open_bare(repo_path) {
+        let refname = format!("refs/heads/{}", branch);
+        if let Ok(reference) = repo.find_reference(&refname) {
+            if let Ok(commit) = reference.peel_to_commit() {
+                if let Ok(root) = commit.tree() {
+                    // Build CSS list from root
+                    css_hrefs = css_hrefs_for(&root, &parent_dir, branch);
+                    // If we used the default 404 content, append a parent directory listing
+                    if !used_custom {
+                        let tree_to_list = if parent_dir.is_empty() { Some(root) } else {
+                            match root.get_path(std::path::Path::new(&parent_dir)) {
+                                Ok(e) if e.kind() == Some(ObjectType::Tree) => repo.find_tree(e.id()).ok(),
+                                _ => Some(root),
                             }
+                        };
+                        if let Some(t) = tree_to_list {
+                            let md = render_directory_markdown(&t, &parent_dir);
+                            let dir_html = String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
+                            body_html.push_str("\n\n");
+                            body_html.push_str(&dir_html);
                         }
                     }
                 }
             }
-            out
         }
-    };
+    }
+
+    let wrapped = wrap_html_with_css("Not Found", &body_html, &css_hrefs);
     (
         StatusCode::NOT_FOUND,
         [("Content-Type", "text/html; charset=utf-8".to_string())],
-        body,
+        wrapped,
     )
     .into_response()
 }
 
-// Bundled default 404 markdown to use when repo doesn't contain /404.md
+// Bundled default 404 markdown to use when repo doesn't contain /site/404.md
 // Use the canonical package location instead of referencing files under apps/
 static DEFAULT_404_MD: &str = include_str!("../../../packages/protocol/404.md");
 
@@ -787,10 +794,10 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
     // Write blob
     let blob_oid = repo.blob(content)?;
 
-    // If this is a meta.json being written, validate against rules.metaSchema from default branch rules.yaml
+    // If this is a meta.json being written, validate against rules.metaSchema from default branch relay.yaml
     if path.ends_with("meta.json") {
-        // Attempt to read rules.yaml from default branch
-        if let Ok(bytes) = read_file_from_repo(repo_path, DEFAULT_BRANCH, "rules.yaml") {
+        // Attempt to read relay.yaml from default branch
+        if let Ok(bytes) = read_file_from_repo(repo_path, DEFAULT_BRANCH, "relay.yaml") {
             if let Ok(rules_yaml) = String::from_utf8(bytes) {
                 if let Ok(rules_val) = serde_yaml::from_str::<serde_json::Value>(&rules_yaml) {
                     if let Some(meta_schema) = rules_val.get("metaSchema") {
@@ -798,7 +805,7 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
                         // Leak to satisfy jsonschema static lifetime requirement
                         let leaked_schema: &'static serde_json::Value = Box::leak(Box::new(meta_schema.clone()));
                         let compiled = jsonschema::JSONSchema::compile(leaked_schema)
-                            .map_err(|e| anyhow::anyhow!("invalid metaSchema in rules.yaml: {}", e))?;
+                            .map_err(|e| anyhow::anyhow!("invalid metaSchema in relay.yaml: {}", e))?;
                         let meta_json: serde_json::Value = serde_json::from_slice(content)
                             .map_err(|e| anyhow::anyhow!("meta.json is not valid JSON: {}", e))?;
                         if !compiled.is_valid(&meta_json) {

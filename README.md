@@ -13,13 +13,13 @@ What is the Relay API?
 
 The Relay API describes CRUD operations on any repository path while selecting a Git branch via header. It also includes POST /status for server metadata and capabilities. Certain file types (html, js) are blocked for security.
 
-Repository rules (rules.yaml)
+Repository rules (relay.yaml)
 
-- Each repository may contain a `rules.yaml` at its root describing what files are allowed to be inserted, the JSON Schema for `meta.json`, and a declarative database policy.
+- Each repository may contain a `relay.yaml` at its root describing what files are allowed to be inserted, the JSON Schema for `meta.json`, and a declarative database policy.
 - These rules are enforced only for new commits (existing files are not retroactively validated).
-- The JSON Schema for `rules.yaml` lives at `packages/protocol/rules.schema.yaml`.
+- The JSON Schema for `relay.yaml` lives at `packages/protocol/rules.schema.yaml`.
 - The Relay server returns the parsed rules (as JSON) in `POST /status`, and honors the optional `indexFile` setting to suggest a default document.
-- The commit hooks crate (`crates/hooks`) validates pushes using `rules.yaml` and rejects violations.
+- The commit hooks crate (`crates/hooks`) validates pushes using `relay.yaml` and rejects violations.
 - The rules `db` section enables fully declarative indexing and querying using SQLite. All SQL features are allowed. The system binds named params like `:branch`, `:path`, `:meta_dir`, `:meta_json`, and `:meta_<field>` for top-level meta fields.
 
 Example (movies) highlights:

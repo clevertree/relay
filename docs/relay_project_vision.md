@@ -58,7 +58,7 @@ Relay incorporates blockchain‑style cryptographic controls:
 - Git commits may be signed using **certificate‑based cryptographic keys**.
 - Eventually, **only the private key used to create the repository** can authorize main‑branch modifications.
 - This allows the repository’s creator to retain ultimate control, even in a fully distributed network.
-- Master peer nodes enforce security rules defined in **rules.yaml**, such as:
+- Master peer nodes enforce security rules defined in **relay.yaml**, such as:
   - Which branches can be edited
   - Which actions require signatures
   - Which parts of the repository correspond to which public keys

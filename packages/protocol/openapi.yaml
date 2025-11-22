@@ -154,7 +154,7 @@ components:
             index: index.md
         rules:
           type: object
-          description: JSON representation of the repo rules.yaml if present. Includes optional indexFile used by clients as default path.
+          description: JSON representation of the repo relay.yaml if present. Includes optional indexFile used by clients as default path.
         capabilities:
           type: array
           items:

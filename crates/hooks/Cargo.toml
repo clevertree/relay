@@ -16,7 +16,7 @@ serde_yaml = "0.9"
 regex = "1"
 jsonschema = "0.17"
 globset = "0.4"
-rusqlite = { version = "0.31", features = ["bundled"] }
+relay-lib = { path = "../relay-lib" }
 
 [dev-dependencies]
 tempfile = "3"

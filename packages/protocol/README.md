@@ -5,12 +5,12 @@ Provides the shared OpenAPI 3.0 spec for the Relay API and a few common constant
 Contents
 - openapi.yaml — API spec
 - index.ts — exports path and constants
-- rules.schema.yaml — JSON Schema (YAML) for per-repo rules.yaml files
+- rules.schema.yaml — JSON Schema (YAML) for per-repo relay.yaml files
 
 API Highlights
 - Header X-Relay-Branch selects branch, default main
 - CRUD on any path (except .html/.htm/.js)
-- POST /status returns status, branches, sample paths, capabilities [git, torrent, ipfs, http], and includes `rules` if the repo contains a `rules.yaml` (JSON form). Clients may use `rules.indexFile` to choose a default document.
+- POST /status returns status, branches, sample paths, capabilities [git, torrent, ipfs, http], and includes `rules` if the repo contains a `relay.yaml` (JSON form). Clients may use `rules.indexFile` to choose a default document.
 - POST /query — policy-driven query using `rules.db.queryPolicy`. Default pagination pageSize=25; `X-Relay-Branch` may be a branch or `all`.
 
 Rules schema notes
