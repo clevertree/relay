@@ -16,7 +16,7 @@ use tracing::{error, info, warn, Level};
 #[command(version, about = "Relay Git hooks runner: validates rules.yaml and enforces whitelist/meta for new commits")]
 struct Args {
     /// Hook name (e.g., pre-receive, update)
-    #[arg(short, long)]
+    #[arg(long)]
     hook: String,
 }
 
@@ -386,6 +386,50 @@ fn maintain_local_index(
 mod tests {
     use super::*;
     use rusqlite::{Connection, named_params};
+    use tempfile::tempdir;
+    use std::path::Path;
+    use git2::Repository as Git2Repo;
+
+    // URL of the canonical template used for tests (guaranteed to include rules.yaml)
+    const TEMPLATE_REPO: &str = "https://github.com/clevertree/relay-template.git";
+
+    #[test]
+    fn test_load_rules_from_template() -> Result<()> {
+        // Clone the template repo into a temp dir and assert that load_rules finds rules.yaml
+        let td = tempdir()?;
+        // Note: if network/clone fails this test will error; this enforces using the template
+        let repo = match Git2Repo::clone(TEMPLATE_REPO, td.path()) {
+            Ok(r) => r,
+            Err(e) => anyhow::bail!("failed to clone template repo {}: {}", TEMPLATE_REPO, e),
+        };
+        // Resolve HEAD tree
+        let obj = repo.revparse_single("HEAD^{tree}")?;
+        let tree = obj.peel_to_tree()?;
+        // Should find rules.yaml
+        let val = load_rules(&repo, &tree)?;
+        assert!(val.is_object());
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_rules_missing() -> Result<()> {
+        // Create a new empty repo (not from template) and assert load_rules fails
+        let td = tempdir()?;
+        let repo = Git2Repo::init(td.path())?;
+        // create an initial commit so HEAD exists
+        let sig = git2::Signature::now("tester", "tester@example.com")?;
+        let mut index = repo.index()?;
+        let tree_oid = index.write_tree()?;
+        let tree = repo.find_tree(tree_oid)?;
+        // commit with no rules.yaml
+        let _oid = repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])?;
+        // get tree
+        let obj = repo.revparse_single("HEAD^{tree}")?;
+        let tree = obj.peel_to_tree()?;
+        let res = load_rules(&repo, &tree);
+        assert!(res.is_err(), "expected load_rules to error when rules.yaml missing");
+        Ok(())
+    }
     #[test]
     fn test_build_globset_and_match() {
         let gs = build_globset(&vec!["data/**/meta.json".into(), "data/**/assets/**".into()]).unwrap();

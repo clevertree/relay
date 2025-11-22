@@ -55,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/status", post(post_status))
         .route("/query/*path", post(post_query))
+        .route("/", get(get_root))
         .route("/*path", get(get_file).put(put_file).delete(delete_file))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -350,11 +351,14 @@ async fn get_file(
     Path(path): Path<String>,
     query: Option<Query<HashMap<String, String>>>,
 )-> impl IntoResponse {
+    info!(%path, "get_file called");
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
+    info!(decoded = %decoded, "decoded path");
     if disallowed(&decoded) {
         return (StatusCode::FORBIDDEN, "Disallowed file type").into_response();
     }
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
+    info!(%branch, "resolved branch");
 
     // Open repo and branch
     let repo = match Repository::open_bare(&state.repo_path) {
@@ -428,6 +432,46 @@ async fn get_file(
         }
         _ => render_404_markdown(&state.repo_path, &branch, rel),
     }
+}
+
+async fn get_root(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: Option<Query<HashMap<String, String>>>,
+) -> impl IntoResponse {
+    // Explicitly implement root directory listing to avoid extractor mismatch
+    let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
+    info!(%branch, "get_root resolved branch");
+    let repo = match Repository::open_bare(&state.repo_path) {
+        Ok(r) => r,
+        Err(e) => {
+            error!(?e, "open repo error");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let refname = format!("refs/heads/{}", branch);
+    let reference = match repo.find_reference(&refname) {
+        Ok(r) => r,
+        Err(_) => {
+            return render_404_markdown(&state.repo_path, &branch, "");
+        }
+    };
+    let commit = match reference.peel_to_commit() {
+        Ok(c) => c,
+        Err(e) => {
+            error!(?e, "peel to commit error");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let tree = match commit.tree() {
+        Ok(t) => t,
+        Err(e) => {
+            error!(?e, "tree error");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let body = render_directory_markdown(&tree, "");
+    (StatusCode::OK, [("Content-Type", "text/markdown".to_string())], body).into_response()
 }
 
 async fn put_file(
@@ -555,7 +599,7 @@ fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
 fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) -> Response {
     // Try to read /404.md from the same branch
     let custom = read_file_from_repo(repo_path, branch, "404.md").ok();
-    let mut body: Vec<u8> = match custom {
+    let body: Vec<u8> = match custom {
         Some(bytes) => bytes,
         None => {
             // Build detailed 404 with cause and parent listing
@@ -563,31 +607,24 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) ->
             s.push_str("# 404 — Not Found\n\n");
             // Determine cause
             let repo = Repository::open_bare(repo_path);
-            let mut cause = String::new();
-            if let Ok(repo) = repo {
+            let cause = if let Ok(repo) = repo {
                 let refname = format!("refs/heads/{}", branch);
                 match repo.find_reference(&refname) {
-                    Ok(reference) => {
-                        match reference.peel_to_commit().and_then(|c| c.tree()) {
-                            Ok(root) => {
-                                if root.is_empty() {
-                                    cause = format!("Branch `{}` is empty.", branch);
-                                } else {
-                                    cause = format!("Path `/{}\u{201d}` not found on branch `{}`.", missing_path.trim_matches('/'), branch);
-                                }
-                            }
-                            Err(_) => {
-                                cause = format!("Unable to read branch `{}` tree.", branch);
+                    Ok(reference) => match reference.peel_to_commit().and_then(|c| c.tree()) {
+                        Ok(root) => {
+                            if root.is_empty() {
+                                format!("Branch `{}` is empty.", branch)
+                            } else {
+                                format!("Path `/{}\u{201d}` not found on branch `{}`.", missing_path.trim_matches('/'), branch)
                             }
                         }
-                    }
-                    Err(_) => {
-                        cause = format!("Branch `{}` does not exist.", branch);
-                    }
+                        Err(_) => format!("Unable to read branch `{}` tree.", branch),
+                    },
+                    Err(_) => format!("Branch `{}` does not exist.", branch),
                 }
             } else {
-                cause = "Repository open failure".to_string();
-            }
+                "Repository open failure".to_string()
+            };
             s.push_str(&cause);
             s.push_str("\n\n");
             // Parent directory listing

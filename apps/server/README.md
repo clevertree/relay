@@ -27,6 +27,10 @@ Rules
 - Rules are enforced for new commits by the Git hooks crate (`crates/hooks`). Existing files are not retroactively validated.
  - The `rules.db` section declares the SQLite schema and policies. The server executes `rules.db.queryPolicy` for `/query`.
 
+Testing policy
+- For all tests that require a repository with `rules.yaml`, tests will clone from the canonical template repository: `https://github.com/clevertree/relay-template/`.
+- The hooks runner enforces that `rules.yaml` exists and validates it; writes/commits will be rejected if `rules.yaml` is missing or invalid.
+
 Run
 1) Build everything
    cargo build --workspace
