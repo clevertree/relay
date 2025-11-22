@@ -6,3 +6,4 @@ apps/server/Cargo.lock
 node_modules/
 dist/
 tmp/
+data/

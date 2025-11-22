@@ -1,0 +1,61 @@
+# Relay - Server & Tracker
+
+###
+# group: Server - System
+# @name POST /status
+POST {{relay_base_url}}/status
+Content-Type: application/json
+
+{}
+
+###
+# group: Server - Files
+# @name GET /{path}
+GET {{relay_base_url}}/{{path}}
+X-Relay-Branch: {{branch}}
+
+###
+# group: Server - Files
+# @name PUT /{path}
+PUT {{relay_base_url}}/{{path}}
+X-Relay-Branch: {{branch}}
+Content-Type: application/octet-stream
+
+# E2E Test
+
+Hello Relay!
+
+
+###
+# group: Server - Files
+# @name DELETE /{path}
+DELETE {{relay_base_url}}/{{path}}
+X-Relay-Branch: {{branch}}
+
+###
+# group: Server - Files
+# @name POST /query/{path}
+POST {{relay_base_url}}/query/{{path}}
+Content-Type: application/json
+X-Relay-Branch: {{branch}}
+
+{
+  "page": 0,
+  "pageSize": 25
+}
+
+###
+# group: Tracker
+# @name GET /api/peers
+GET {{tracker_base_url}}/api/peers
+
+###
+# group: Tracker
+# @name POST /api/peers/upsert
+POST {{tracker_base_url}}/api/peers/upsert
+Content-Type: application/json
+
+{
+  "socket": "127.0.0.1:4001",
+  "id": "peer-1"
+}

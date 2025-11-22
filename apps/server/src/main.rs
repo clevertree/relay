@@ -4,7 +4,7 @@ use axum::{
     body::Bytes,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -333,18 +333,78 @@ async fn get_file(
         return (StatusCode::FORBIDDEN, "Disallowed file type").into_response();
     }
     let branch = branch_from(&headers);
-    match read_file_from_repo(&state.repo_path, &branch, &decoded) {
-        Ok(bytes) => (
-            StatusCode::OK,
-            [("Content-Type", mime_guess::from_path(&decoded).first_or_octet_stream().essence_str().to_string())],
-            bytes,
-        )
-            .into_response(),
-        Err(ReadError::NotFound) => StatusCode::NOT_FOUND.into_response(),
+
+    // Open repo and branch
+    let repo = match Repository::open_bare(&state.repo_path) {
+        Ok(r) => r,
         Err(e) => {
-            error!(?e, "read error");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error!(?e, "open repo error");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
+    };
+    let refname = format!("refs/heads/{}", branch);
+    let reference = match repo.find_reference(&refname) {
+        Ok(r) => r,
+        Err(_) => {
+            return render_404_markdown(&state.repo_path, &branch, &decoded);
+        }
+    };
+    let commit = match reference.peel_to_commit() {
+        Ok(c) => c,
+        Err(e) => {
+            error!(?e, "peel to commit error");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let tree = match commit.tree() {
+        Ok(t) => t,
+        Err(e) => {
+            error!(?e, "tree error");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Empty path or root → directory listing of root
+    let rel = decoded.trim_matches('/');
+    if rel.is_empty() {
+        let body = render_directory_markdown(&tree, rel);
+        return (StatusCode::OK, [("Content-Type", "text/markdown".to_string())], body).into_response();
+    }
+
+    // Try to resolve path within tree
+    let path_obj = std::path::Path::new(rel);
+    let entry = match tree.get_path(path_obj) {
+        Ok(e) => e,
+        Err(_) => {
+            return render_404_markdown(&state.repo_path, &branch, rel);
+        }
+    };
+    match entry.kind() {
+        Some(ObjectType::Blob) => {
+            match repo.find_blob(entry.id()) {
+                Ok(blob) => {
+                    let ct = mime_guess::from_path(rel).first_or_octet_stream().essence_str().to_string();
+                    (StatusCode::OK, [("Content-Type", ct)], blob.content().to_vec()).into_response()
+                }
+                Err(e) => {
+                    error!(?e, "blob read error");
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                }
+            }
+        }
+        Some(ObjectType::Tree) => {
+            // Directory listing
+            let sub_tree = match repo.find_tree(entry.id()) {
+                Ok(t) => t,
+                Err(e) => {
+                    error!(?e, "subtree error");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            };
+            let body = render_directory_markdown(&sub_tree, rel);
+            (StatusCode::OK, [("Content-Type", "text/markdown".to_string())], body).into_response()
+        }
+        _ => render_404_markdown(&state.repo_path, &branch, rel),
     }
 }
 
@@ -415,6 +475,59 @@ fn read_file_from_repo(repo_path: &PathBuf, branch: &str, path: &str) -> Result<
     let entry = tree.get_path(std::path::Path::new(path)).map_err(|_| ReadError::NotFound)?;
     let blob = repo.find_blob(entry.id()).map_err(|e| ReadError::Other(e.into()))?;
     Ok(blob.content().to_vec())
+}
+
+fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
+    let mut lines: Vec<String> = Vec::new();
+    let title_path = if base_path.is_empty() { "/".to_string() } else { format!("/{}", base_path.trim_matches('/')) };
+    lines.push(format!("# Directory listing: {}", title_path));
+    lines.push(String::from(""));
+    // Build sorted list: directories first then files
+    let mut dirs: Vec<String> = Vec::new();
+    let mut files: Vec<String> = Vec::new();
+    for entry in tree.iter() {
+        let name = match entry.name() { Some(n) => n.to_string(), None => continue };
+        match entry.kind() {
+            Some(git2::ObjectType::Tree) => {
+                let href = if base_path.is_empty() { format!("{}", name) } else { format!("{}/{}", base_path.trim_matches('/'), name) };
+                dirs.push(format!("- [{0}/]({0}/)", href));
+            }
+            Some(git2::ObjectType::Blob) => {
+                let href = if base_path.is_empty() { format!("{}", name) } else { format!("{}/{}", base_path.trim_matches('/'), name) };
+                files.push(format!("- [{0}]({0})", href));
+            }
+            _ => {}
+        }
+    }
+    dirs.sort();
+    files.sort();
+    lines.extend(dirs);
+    lines.extend(files);
+    if lines.len() <= 2 {
+        lines.push(String::from("(empty directory)"));
+    }
+    lines.join("\n").into_bytes()
+}
+
+fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) -> Response {
+    // Try to read /404.md from the same branch
+    let custom = read_file_from_repo(repo_path, branch, "404.md").ok();
+    let body: Vec<u8> = match custom {
+        Some(bytes) => bytes,
+        None => {
+            let mut s = String::new();
+            s.push_str("# 404 — Not Found\n\n");
+            s.push_str(&format!("The requested path `/{}` was not found on branch `{}”.\n\n", missing_path.trim_matches('/'), branch));
+            s.push_str("If you expected content here, ensure the file or directory exists and is committed.\n");
+            s.into_bytes()
+        }
+    };
+    (
+        StatusCode::NOT_FOUND,
+        [("Content-Type", "text/markdown".to_string())],
+        body,
+    )
+        .into_response()
 }
 
 fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[u8]) -> anyhow::Result<(String, String)> {
