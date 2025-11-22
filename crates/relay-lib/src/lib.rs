@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub const HEADER_BRANCH: &str = "X-Relay-Branch";
 
 pub mod db;
+pub mod assets;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {

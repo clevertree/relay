@@ -1,0 +1,129 @@
+%YAML 1.2
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://relay/protocol/rules.schema.yaml"
+title: Relay Repository Rules
+description: >-
+  Rules file that defines what files and paths are allowed for new commits and
+  the metadata format to enforce per repository. Servers and hooks read this
+  file from the repository root as `relay.yaml` and enforce it only for new
+  commits. The `db` section configures the local index storage (currently Polodb).
+type: object
+properties:
+  indexFile:
+    type: string
+    default: index.md
+    description: Optional default index file for the repository (clients may use this as the default path).
+  allowedPaths:
+    type: array
+    minItems: 1
+    description: >-
+      Whitelist of glob-like path patterns that are allowed for new files.
+      Patterns are repository-relative and use `**` and `*` segments. Examples:
+      `data/**/meta.json`, `data/**/index.md`, `data/**/assets/**`.
+    items:
+      type: string
+  insertTemplate:
+    type: string
+    description: >-
+      A string template that clients can use to suggest the PUT path for new inserts.
+      The template language is client-defined (e.g., JS template literals) and may
+      reference fields from the prospective `meta.json` document.
+  metaSchema:
+    type: object
+    description: >-
+      JSON Schema describing the contents of `meta.json` placed alongside content.
+      Hooks use this schema to validate new inserts (server rejects invalid meta.json on PUT).
+    additionalProperties: true
+  db:
+    type: object
+    description: >-
+      Declarative database configuration used by the relay to build and query a local index.
+      The only supported engine at the moment is `polodb`.
+    properties:
+      engine:
+        type: string
+        enum: [polodb]
+        description: Storage engine identifier.
+      collection:
+        type: string
+        description: Name of the collection/table to store documents.
+      unique:
+        type: array
+        description: List of field names forming the uniqueness key (may include `_branch`).
+        items: { type: string }
+      indexes:
+        type: array
+        items:
+          type: object
+          properties:
+            fields:
+              type: array
+              minItems: 1
+              items: { type: string }
+          required: [fields]
+          additionalProperties: false
+      mapping:
+        type: array
+        description: Mapping rules from meta.json to stored document fields.
+        items:
+          type: object
+          properties:
+            name: { type: string }
+            from: { type: string }
+            type: { type: string }
+            derive:
+              type: object
+              properties:
+                fn: { type: string }
+                args:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      from: { type: string }
+                      value: {}
+                      type: { type: string }
+                    additionalProperties: false
+              required: [fn]
+              additionalProperties: false
+          required: [name]
+          additionalProperties: false
+      queryPolicy:
+        type: object
+        description: Query configuration for filtering, sorting, and pagination.
+        properties:
+          fields:
+            type: array
+            items:
+              type: object
+              properties:
+                name: { type: string }
+                ops:
+                  type: array
+                  items: { type: string }
+              required: [name]
+              additionalProperties: false
+          sort:
+            type: array
+            items:
+              type: object
+              properties:
+                field: { type: string }
+                dir:
+                  type: string
+                  enum: [asc, desc]
+                  default: asc
+              required: [field]
+              additionalProperties: false
+          pagination:
+            type: object
+            properties:
+              defaultPageSize: { type: integer, minimum: 1 }
+              maxPageSize: { type: integer, minimum: 1 }
+            additionalProperties: false
+        additionalProperties: false
+    required: [engine, collection]
+    additionalProperties: false
+required: [allowedPaths, insertTemplate, metaSchema, db]
+additionalProperties: false

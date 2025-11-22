@@ -187,8 +187,9 @@ fn load_rules(repo: &Repository, tree: &git2::Tree) -> Result<JsonValue> {
 }
 
 fn validate_rules_schema(rules: &JsonValue) -> Result<()> {
-    static SCHEMA_STR: &str = include_str!("../../../packages/protocol/rules.schema.yaml");
-    let schema_json: JsonValue = serde_yaml::from_str(SCHEMA_STR).context("parse rules.schema.yaml")?;
+    // Use bundled schema from relay-lib so the crate is self-contained
+    let schema_yaml = relay_lib::assets::RULES_SCHEMA_YAML;
+    let schema_json: JsonValue = serde_yaml::from_str(schema_yaml).context("parse rules.schema.yaml")?;
     // Leak to satisfy 'static lifetime required by validator internals in jsonschema 0.17
     let leaked_schema: &'static JsonValue = Box::leak(Box::new(schema_json));
     let compiled = JSONSchema::compile(leaked_schema).context("compile rules schema")?;

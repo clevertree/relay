@@ -6,7 +6,7 @@ This monorepo hosts the Relay Network reference implementation:
 - apps/server — Rust Relay Server that serves and commits files directly from a Git repository via a simple HTTP API.
 - apps/client — Tauri (Rust) + React + TypeScript + Tailwind desktop client.
 - apps/tracker — Next.js tracker that lists recent master peer sockets (already provided/deployed).
-- packages/protocol — Shared OpenAPI spec describing the Relay API used by both Node and Rust.
+- crates/relay-lib — Shared Rust library with HTTP client helpers and bundled assets (OpenAPI, rules schema, default HTML template, 404 page).
 - crates/hooks — Rust crate used by Git hooks to validate repository rules and enforce insert constraints.
 
 What is the Relay API?
@@ -17,7 +17,7 @@ Repository rules (relay.yaml)
 
 - Each repository may contain a `relay.yaml` at its root describing what files are allowed to be inserted, the JSON Schema for `meta.json`, and a declarative database policy.
 - These rules are enforced only for new commits (existing files are not retroactively validated).
-- The JSON Schema for `relay.yaml` lives at `packages/protocol/rules.schema.yaml`.
+- The JSON Schema for `relay.yaml` is bundled in `crates/relay-lib/assets/rules.schema.yaml` and exposed via the `relay_lib::assets` module for Rust.
 - The Relay server returns the parsed rules (as JSON) in `POST /status`, and honors the optional `indexFile` setting to suggest a default document.
 - The commit hooks crate (`crates/hooks`) validates pushes using `relay.yaml` and rejects violations.
 - The rules `db` section enables fully declarative indexing and querying using SQLite. All SQL features are allowed. The system binds named params like `:branch`, `:path`, `:meta_dir`, `:meta_json`, and `:meta_<field>` for top-level meta fields.
@@ -103,6 +103,18 @@ API Summary
 Security
 
 - Disallowed file extensions for CRUD: .html, .htm, .js
+- Although HTML and JavaScript are forbidden from insertion rules, as long as they already exist in the repo, the server may render/serve them (e.g., via an HTML template). The rules forbid modifying files outside of what `relay.yaml` allows, so JavaScript can't be modified after the initial repo release through the API. In a later phase we will implement public-key signatures to allow secure modification of a small set of files via an admin key.
+
+Bundled assets and templating
+- The server and hooks do not access repo-local files from the source tree at runtime. Instead, shared assets are bundled inside `relay-lib`:
+  - `assets/openapi.yaml`
+  - `assets/rules.schema.yaml`
+  - `assets/template.html` (placeholders: `{title}`, `{head}`, `{body}`)
+  - `assets/404.md`
+- The server resolves an HTML template in this order when rendering markdown or error pages:
+  1. File named by env `RELAY_REPO_PATH_TEMPLATE_HTML` (defaults to `template.html`) in the same repo directory as the requested asset
+  2. Ascend parent directories up to repo root looking for the file
+  3. Fallback to bundled `relay-lib/assets/template.html`
 
 Notes
 

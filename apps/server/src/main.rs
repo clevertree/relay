@@ -311,7 +311,8 @@ mod tests {
         let tree_oid = tb.write().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
 
-        let (ct, bytes) = directory_response(&tree, &tree, "", "", DEFAULT_BRANCH);
+        let repo_path = dir.path().to_path_buf();
+        let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "", DEFAULT_BRANCH);
     assert!(ct.starts_with("text/html"), "ct was {}", ct);
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("<h1>Title</h1>") || s.contains("<a href=\"README.md\""));
@@ -330,7 +331,8 @@ mod tests {
         let tree_oid = tb.write().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
 
-        let (ct, bytes) = directory_response(&tree, &tree, "", "text/markdown", DEFAULT_BRANCH);
+        let repo_path = dir.path().to_path_buf();
+        let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "text/markdown", DEFAULT_BRANCH);
         assert_eq!(ct, "text/markdown");
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("# Title") || s.contains("README.md"));
@@ -411,7 +413,7 @@ async fn get_file(
             .get("accept")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        let (ct, body) = directory_response(&tree, &tree, rel, accept_hdr, &branch);
+        let (ct, body) = directory_response(&state.repo_path, &tree, &tree, rel, accept_hdr, &branch);
         return (StatusCode::OK, [("Content-Type", ct)], body).into_response();
     }
 
@@ -442,15 +444,16 @@ async fn get_file(
                         // Serve raw markdown
                         return (StatusCode::OK, [("Content-Type", "text/markdown")], content.to_vec()).into_response();
                     } else {
-                        // Render to HTML, wrap with CSS links based on directory theme and site globals
+                        // Render to HTML, wrap with CSS links and global JS module based on directory theme and site globals
                         let html_frag = String::from_utf8(md_to_html_bytes(content)).unwrap_or_default();
                         let base_dir = std::path::Path::new(rel)
                             .parent()
                             .map(|p| p.to_string_lossy().to_string())
                             .unwrap_or_else(|| "".to_string());
-                        let css = css_hrefs_for(&tree, &base_dir, &branch);
+                        // let css = css_hrefs_for(&tree, &base_dir, &branch);
+                        // let js = js_hrefs_for(&tree, &branch);
                         let title = std::path::Path::new(rel).file_name().and_then(|s| s.to_str()).unwrap_or("Document");
-                        let wrapped = wrap_html_with_css(title, &html_frag, &css);
+                        let wrapped = wrap_html_with_assets(title, &html_frag, &branch, &state.repo_path, &base_dir);
                         return (StatusCode::OK, [("Content-Type", "text/html; charset=utf-8")], wrapped).into_response();
                     }
                     }
@@ -477,7 +480,7 @@ async fn get_file(
                 .get("accept")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-                let (ct, body) = directory_response(&tree, &sub_tree, rel, accept_hdr, &branch);
+                let (ct, body) = directory_response(&state.repo_path, &tree, &sub_tree, rel, accept_hdr, &branch);
                 (StatusCode::OK, [("Content-Type", ct)], body).into_response()
         }
         _ => render_404_markdown(&state.repo_path, &branch, rel),
@@ -524,7 +527,7 @@ async fn get_root(
         .get("accept")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let (ct, body) = directory_response(&tree, &tree, "", accept_hdr, &branch);
+    let (ct, body) = directory_response(&state.repo_path, &tree, &tree, "", accept_hdr, &branch);
     (StatusCode::OK, [("Content-Type", ct)], body).into_response()
 }
 
@@ -659,54 +662,66 @@ fn md_to_html_bytes(bytes: &[u8]) -> Vec<u8> {
     out.into_bytes()
 }
 
-// Build list of CSS hrefs to include for a given base directory in the repo tree.
-// theme.css in the same directory takes priority over /site/globals.css.
-fn css_hrefs_for(tree: &git2::Tree, base_dir: &str, branch: &str) -> Vec<String> {
-    use std::path::Path;
-    let mut hrefs: Vec<String> = Vec::new();
-    // 1) theme.css in same directory
-    let theme_rel = if base_dir.trim_matches('/').is_empty() {
-        "theme.css".to_string()
-    } else {
-        format!("{}/theme.css", base_dir.trim_matches('/'))
-    };
-    if tree.get_path(Path::new(&theme_rel)).ok().and_then(|e| e.kind()) == Some(ObjectType::Blob) {
-        hrefs.push(format!("/{}?branch={}", theme_rel, branch));
-    }
-    // 2) /site/globals.css at repo root
-    let globals_rel = "site/globals.css";
-    if tree.get_path(Path::new(globals_rel)).ok().and_then(|e| e.kind()) == Some(ObjectType::Blob) {
-        hrefs.push(format!("/{}?branch={}", globals_rel, branch));
-    }
-    hrefs
-}
 
-// Wrap an HTML fragment with a minimal page and linked stylesheets
-fn wrap_html_with_css(title: &str, body_html: &str, css_hrefs: &[String]) -> Vec<u8> {
+// Wrap an HTML fragment using a template resolved from the repo (or bundled fallback)
+// Template lookup order:
+// 1) Env RELAY_REPO_PATH_TEMPLATE_HTML (filename, default "template.html") in the same directory as the requested asset
+// 2) Walk parent directories up to repo root looking for the filename
+// 3) Fallback to bundled relay-lib/assets/template.html
+// Variables replaced by name: {title}, {head}, {body}
+fn wrap_html_with_assets(title: &str, body: &str, branch: &str, repo_path: &PathBuf, base_dir: &str) -> Vec<u8> {
+    fn join_rel(base: &str, name: &str) -> String {
+        if base.is_empty() { name.to_string() } else { format!("{}/{}", base.trim_matches('/'), name) }
+    }
+    // Determine template file name
+    let tmpl_name = std::env::var("RELAY_REPO_PATH_TEMPLATE_HTML").unwrap_or_else(|_| "template.html".to_string());
+    // Try to read template from same dir then ascend
+    let mut current = base_dir.trim_matches('/').to_string();
+    let template_html: String = loop {
+        let candidate_rel = join_rel(&current, &tmpl_name);
+        match read_file_from_repo(repo_path, branch, &candidate_rel) {
+            Ok(bytes) => {
+                break String::from_utf8(bytes).unwrap_or_else(|_| relay_lib::assets::TEMPLATE_HTML.to_string());
+            }
+            Err(_) => {
+                // Ascend
+                if current.is_empty() {
+                    // Try at repo root explicitly with just the filename
+                    if let Ok(bytes) = read_file_from_repo(repo_path, branch, &tmpl_name) {
+                        break String::from_utf8(bytes).unwrap_or_else(|_| relay_lib::assets::TEMPLATE_HTML.to_string());
+                    }
+                    break relay_lib::assets::TEMPLATE_HTML.to_string();
+                } else {
+                    if let Some(parent) = std::path::Path::new(&current).parent() {
+                        current = parent.to_string_lossy().to_string();
+                    } else {
+                        current.clear();
+                    }
+                }
+            }
+        }
+    };
+    // Compose head: meta + branch marker; callers can extend later if needed
     let mut head = String::new();
     head.push_str("<meta charset=\"utf-8\">\n");
-    for href in css_hrefs {
-        head.push_str(&format!("<link rel=\"stylesheet\" href=\"{}\">\n", href));
-    }
-    let html = format!(
-        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<title>{}</title>\n{}\n</head>\n<body>\n<div class=\"markdown-body\">{}\n</div>\n</body>\n</html>",
-        title,
-        head,
-        body_html
-    );
+    head.push_str(&format!("<meta name=\"relay-branch\" content=\"{}\">\n", branch));
+    // Do named replacement
+    let html = template_html
+        .replace("{title}", title)
+        .replace("{head}", &head)
+        .replace("{body}", body);
     html.into_bytes()
 }
 
 // Helper to return directory listing as HTML or markdown depending on Accept header
 // root_tree is the tree at repo root (for CSS presence checks), listing_tree is the directory to list
-fn directory_response(root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str) -> (String, Vec<u8>) {
+fn directory_response(repo_path: &PathBuf, root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str) -> (String, Vec<u8>) {
     let md = render_directory_markdown(listing_tree, base_path);
     if accept_hdr.contains("text/markdown") {
         ("text/markdown".to_string(), md)
     } else {
         let body = String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
-        let css = css_hrefs_for(root_tree, base_path, branch);
-        ("text/html; charset=utf-8".to_string(), wrap_html_with_css("Directory", &body, &css))
+        ("text/html; charset=utf-8".to_string(), wrap_html_with_assets("Directory", &body, branch, repo_path, base_path))
     }
 }
 
@@ -726,17 +741,14 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) ->
     let used_custom = custom.is_some();
     let mut body_html: String = match custom {
         Some(ref bytes) => String::from_utf8(md_to_html_bytes(&bytes)).unwrap_or_default(),
-        None => String::from_utf8(md_to_html_bytes(DEFAULT_404_MD.as_bytes())).unwrap_or_default(),
+        None => String::from_utf8(md_to_html_bytes(relay_lib::assets::DEFAULT_404_MD.as_bytes())).unwrap_or_default(),
     };
-    let mut css_hrefs: Vec<String> = Vec::new();
 
     if let Ok(repo) = Repository::open_bare(repo_path) {
         let refname = format!("refs/heads/{}", branch);
         if let Ok(reference) = repo.find_reference(&refname) {
             if let Ok(commit) = reference.peel_to_commit() {
                 if let Ok(root) = commit.tree() {
-                    // Build CSS list from root
-                    css_hrefs = css_hrefs_for(&root, &parent_dir, branch);
                     // If we used the default 404 content, append a parent directory listing
                     if !used_custom {
                         let tree_to_list = if parent_dir.is_empty() { Some(root) } else {
@@ -757,7 +769,7 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) ->
         }
     }
 
-    let wrapped = wrap_html_with_css("Not Found", &body_html, &css_hrefs);
+    let wrapped = wrap_html_with_assets("Not Found", &body_html, branch, repo_path, &parent_dir);
     (
         StatusCode::NOT_FOUND,
         [("Content-Type", "text/html; charset=utf-8".to_string())],
@@ -766,9 +778,7 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) ->
     .into_response()
 }
 
-// Bundled default 404 markdown to use when repo doesn't contain /site/404.md
-// Use the canonical package location instead of referencing files under apps/
-static DEFAULT_404_MD: &str = include_str!("../../../packages/protocol/404.md");
+// Use bundled default 404 markdown from relay-lib assets
 
 fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[u8]) -> anyhow::Result<(String, String)> {
     let repo = Repository::open_bare(repo_path)?;

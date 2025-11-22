@@ -1,0 +1,26 @@
+//! Embedded static assets bundled with relay-lib.
+//! These are available to binaries and other crates without accessing repo files.
+
+/// Bundled OpenAPI spec (YAML)
+pub const OPENAPI_YAML: &str = include_str!("../assets/openapi.yaml");
+
+/// Bundled rules JSON schema (YAML)
+pub const RULES_SCHEMA_YAML: &str = include_str!("../assets/rules.schema.yaml");
+
+/// Bundled default HTML template
+pub const TEMPLATE_HTML: &str = include_str!("../assets/template.html");
+
+/// Bundled default 404 markdown page
+pub const DEFAULT_404_MD: &str = include_str!("../assets/404.md");
+
+/// Get a bundled asset by canonical name.
+/// Names: "openapi.yaml", "rules.schema.yaml", "template.html", "404.md"
+pub fn get_asset(name: &str) -> Option<&'static str> {
+    match name {
+        "openapi.yaml" => Some(OPENAPI_YAML),
+        "rules.schema.yaml" => Some(RULES_SCHEMA_YAML),
+        "template.html" => Some(TEMPLATE_HTML),
+        "404.md" => Some(DEFAULT_404_MD),
+        _ => None,
+    }
+}
