@@ -34,7 +34,8 @@ RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay
 
 # Entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Ensure entrypoint has Unix line endings inside the image (fixes CRLF from Windows hosts)
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 8088 9418 4001 5001 8080 58846 58946 58946/udp
 
