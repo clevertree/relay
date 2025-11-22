@@ -15,6 +15,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info};
+use pulldown_cmark::{html, Parser};
 use std::collections::HashMap;
 use tower_http::trace::TraceLayer;
 use tracing_appender::rolling;
@@ -299,6 +300,60 @@ fn row_to_json(row: &rusqlite::Row) -> anyhow::Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use git2::Repository;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_md_to_html_bytes_basic() {
+        let md = b"# Hello\n\nThis is *markdown*.";
+        let html = md_to_html_bytes(md);
+        let s = String::from_utf8(html).expect("utf8");
+        assert!(s.contains("<h1>"));
+        assert!(s.contains("<em>markdown</em>"));
+    }
+
+    #[test]
+    fn test_directory_response_html_default() {
+        // create a temporary git repo with a README.md at root
+        let dir = tempdir().unwrap();
+        let repo = Repository::init_bare(dir.path()).unwrap();
+
+    // create an in-memory tree with README.md blob
+        let oid = repo
+            .blob("# Title\n\nSome content".as_bytes())
+            .expect("create blob");
+        // we need to create a tree that references the blob. For tests, we'll
+        // just build a tree manually using TreeBuilder
+        let mut tb = repo.treebuilder(None).unwrap();
+        tb.insert("README.md", oid, 0o100644).unwrap();
+        let tree_oid = tb.write().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+
+        let (ct, bytes) = directory_response(&tree, "", "");
+    assert!(ct.starts_with("text/html"), "ct was {}", ct);
+        let s = String::from_utf8(bytes).unwrap();
+        assert!(s.contains("<h1>Title</h1>") || s.contains("<a href=\"README.md\""));
+    }
+
+    #[test]
+    fn test_directory_response_markdown_requested() {
+        let dir = tempdir().unwrap();
+        let repo = Repository::init_bare(dir.path()).unwrap();
+
+        let mut tb = repo.treebuilder(None).unwrap();
+        let oid = repo
+            .blob("# Title\n\nSome content".as_bytes())
+            .expect("create blob");
+        tb.insert("README.md", oid, 0o100644).unwrap();
+        let tree_oid = tb.write().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+
+        let (ct, bytes) = directory_response(&tree, "", "text/markdown");
+        assert_eq!(ct, "text/markdown");
+        let s = String::from_utf8(bytes).unwrap();
+        assert!(s.contains("# Title") || s.contains("README.md"));
+    }
+    
     #[test]
     fn test_row_to_json_basic_types() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -393,8 +448,12 @@ async fn get_file(
     // Empty path or root → directory listing of root
     let rel = decoded.trim_matches('/');
     if rel.is_empty() {
-        let body = render_directory_markdown(&tree, rel);
-        return (StatusCode::OK, [("Content-Type", "text/markdown".to_string())], body).into_response();
+        let accept_hdr = headers
+            .get("accept")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let (ct, body) = directory_response(&tree, rel, accept_hdr);
+        return (StatusCode::OK, [("Content-Type", ct)], body).into_response();
     }
 
     // Try to resolve path within tree
@@ -409,6 +468,30 @@ async fn get_file(
         Some(ObjectType::Blob) => {
             match repo.find_blob(entry.id()) {
                 Ok(blob) => {
+                    // If file looks like markdown (.md, .markdown), decide whether to
+                    // serve raw markdown or render to HTML depending on Accept header.
+                    let lower = rel.to_ascii_lowercase();
+                    let is_md = lower.ends_with(".md") || lower.ends_with(".markdown");
+                    let accept_hdr = headers
+                        .get("accept")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    let wants_markdown = accept_hdr.contains("text/markdown");
+                    if is_md {
+                        let content = blob.content();
+                    if wants_markdown {
+                        // Serve raw markdown
+                        return (StatusCode::OK, [("Content-Type", "text/markdown")], content.to_vec()).into_response();
+                    } else {
+                        // Render to HTML and serve; include charset to ensure UTF-8 is used
+                        let s = String::from_utf8_lossy(content);
+                        let parser = Parser::new(&s);
+                        let mut out = String::new();
+                        html::push_html(&mut out, parser);
+                        return (StatusCode::OK, [("Content-Type", "text/html; charset=utf-8")], out.into_bytes()).into_response();
+                    }
+                    }
+                    // Non-markdown: serve with detected mime
                     let ct = mime_guess::from_path(rel).first_or_octet_stream().essence_str().to_string();
                     (StatusCode::OK, [("Content-Type", ct)], blob.content().to_vec()).into_response()
                 }
@@ -427,8 +510,12 @@ async fn get_file(
                     return StatusCode::INTERNAL_SERVER_ERROR.into_response();
                 }
             };
-            let body = render_directory_markdown(&sub_tree, rel);
-            (StatusCode::OK, [("Content-Type", "text/markdown".to_string())], body).into_response()
+            let accept_hdr = headers
+                .get("accept")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+                let (ct, body) = directory_response(&sub_tree, rel, accept_hdr);
+                (StatusCode::OK, [("Content-Type", ct)], body).into_response()
         }
         _ => render_404_markdown(&state.repo_path, &branch, rel),
     }
@@ -470,8 +557,12 @@ async fn get_root(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    let body = render_directory_markdown(&tree, "");
-    (StatusCode::OK, [("Content-Type", "text/markdown".to_string())], body).into_response()
+    let accept_hdr = headers
+        .get("accept")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let (ct, body) = directory_response(&tree, "", accept_hdr);
+    (StatusCode::OK, [("Content-Type", ct)], body).into_response()
 }
 
 async fn put_file(
@@ -596,38 +687,43 @@ fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
     lines.join("\n").into_bytes()
 }
 
+// Convert markdown bytes to HTML bytes
+fn md_to_html_bytes(bytes: &[u8]) -> Vec<u8> {
+    let s = String::from_utf8_lossy(bytes);
+    let parser = Parser::new(&s);
+    let mut out = String::new();
+    html::push_html(&mut out, parser);
+    out.into_bytes()
+}
+
+// Helper to return directory listing as HTML or markdown depending on Accept header
+fn directory_response(tree: &git2::Tree, base_path: &str, accept_hdr: &str) -> (String, Vec<u8>) {
+    let md = render_directory_markdown(tree, base_path);
+    if accept_hdr.contains("text/markdown") {
+        ("text/markdown".to_string(), md)
+    } else {
+        ("text/html; charset=utf-8".to_string(), md_to_html_bytes(&md))
+    }
+}
+
 fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) -> Response {
     // Try to read /404.md from the same branch
     let custom = read_file_from_repo(repo_path, branch, "404.md").ok();
+    // helper to render markdown bytes to HTML bytes
+    fn md_to_html(bytes: &[u8]) -> Vec<u8> {
+        let s = String::from_utf8_lossy(bytes);
+        let parser = Parser::new(&s);
+        let mut out = String::new();
+        html::push_html(&mut out, parser);
+        out.into_bytes()
+    }
+
     let body: Vec<u8> = match custom {
-        Some(bytes) => bytes,
+        Some(bytes) => md_to_html(&bytes),
         None => {
-            // Build detailed 404 with cause and parent listing
-            let mut s = String::new();
-            s.push_str("# 404 — Not Found\n\n");
-            // Determine cause
-            let repo = Repository::open_bare(repo_path);
-            let cause = if let Ok(repo) = repo {
-                let refname = format!("refs/heads/{}", branch);
-                match repo.find_reference(&refname) {
-                    Ok(reference) => match reference.peel_to_commit().and_then(|c| c.tree()) {
-                        Ok(root) => {
-                            if root.is_empty() {
-                                format!("Branch `{}` is empty.", branch)
-                            } else {
-                                format!("Path `/{}\u{201d}` not found on branch `{}`.", missing_path.trim_matches('/'), branch)
-                            }
-                        }
-                        Err(_) => format!("Unable to read branch `{}` tree.", branch),
-                    },
-                    Err(_) => format!("Branch `{}` does not exist.", branch),
-                }
-            } else {
-                "Repository open failure".to_string()
-            };
-            s.push_str(&cause);
-            s.push_str("\n\n");
-            // Parent directory listing
+            // Use bundled default 404 markdown and render to HTML
+            let mut out = md_to_html(DEFAULT_404_MD.as_bytes());
+            // Append a parent directory listing (rendered as HTML) where available
             if let Ok(repo) = Repository::open_bare(repo_path) {
                 let refname = format!("refs/heads/{}", branch);
                 if let Ok(reference) = repo.find_reference(&refname) {
@@ -642,25 +738,30 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) ->
                                 }
                             };
                             if let Some(t) = tree_to_list {
-                                s.push_str(&format!("## Parent directory: /{}\n\n", parent_path));
-                                let md = String::from_utf8_lossy(&render_directory_markdown(&t, &parent_path)).to_string();
-                                s.push_str(&md);
-                                s.push('\n');
+                                // render directory markdown then convert to HTML
+                                let md = render_directory_markdown(&t, &parent_path);
+                                let html = md_to_html(&md);
+                                out.extend_from_slice(b"\n\n");
+                                out.extend_from_slice(&html);
                             }
                         }
                     }
                 }
             }
-            s.into_bytes()
+            out
         }
     };
     (
         StatusCode::NOT_FOUND,
-        [("Content-Type", "text/markdown".to_string())],
+        [("Content-Type", "text/html; charset=utf-8".to_string())],
         body,
     )
-        .into_response()
+    .into_response()
 }
+
+// Bundled default 404 markdown to use when repo doesn't contain /404.md
+// Use the canonical package location instead of referencing files under apps/
+static DEFAULT_404_MD: &str = include_str!("../../../packages/protocol/404.md");
 
 fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[u8]) -> anyhow::Result<(String, String)> {
     let repo = Repository::open_bare(repo_path)?;

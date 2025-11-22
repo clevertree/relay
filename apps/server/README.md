@@ -2,6 +2,9 @@ Relay Server (Rust)
 
 Implements the Relay API over a bare Git repository.
 
+Repository policy
+- Never import or reference files directly from `apps/` other than code in this crate; prefer shared assets and data in `packages/` (for example, the default 404 markdown is stored in `packages/protocol/404.md`).
+
 Endpoints
 - POST /status — returns status, branches, sample paths, capabilities
   - Includes `rules` if the repository contains a `rules.yaml` at root (returned as JSON)
