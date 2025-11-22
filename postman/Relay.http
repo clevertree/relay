@@ -11,13 +11,15 @@ Content-Type: application/json
 ###
 # group: Server - Files
 # @name GET /{path}
-GET {{relay_base_url}}/{{path}}
+# You can specify branch via header or query: ?branch={{branch}}
+GET {{relay_base_url}}/{{path}}?branch={{branch}}
 X-Relay-Branch: {{branch}}
 
 ###
 # group: Server - Files
 # @name PUT /{path}
-PUT {{relay_base_url}}/{{path}}
+# You can specify branch via header or query: ?branch={{branch}}
+PUT {{relay_base_url}}/{{path}}?branch={{branch}}
 X-Relay-Branch: {{branch}}
 Content-Type: application/octet-stream
 
@@ -29,7 +31,8 @@ Hello Relay!
 ###
 # group: Server - Files
 # @name DELETE /{path}
-DELETE {{relay_base_url}}/{{path}}
+# You can specify branch via header or query: ?branch={{branch}}
+DELETE {{relay_base_url}}/{{path}}?branch={{branch}}
 X-Relay-Branch: {{branch}}
 
 ###

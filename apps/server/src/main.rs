@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf, str::FromStr};
 
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -14,7 +14,11 @@ use percent_encoding::percent_decode_str as url_decode;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::{debug, error, info};
+use std::collections::HashMap;
+use tower_http::trace::TraceLayer;
+use tracing_appender::rolling;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
 struct AppState {
@@ -27,8 +31,18 @@ const DISALLOWED: &[&str] = &[".html", ".htm", ".js"];
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    // Set up logging: stdout + rolling file appender
+    // Ensure logs directory exists
+    let _ = std::fs::create_dir_all("logs");
+    let file_appender = rolling::daily("logs", "server.log");
+    let (file_nb, _guard) = tracing_appender::non_blocking(file_appender);
+    let env_filter = tracing_subscriber::EnvFilter::from_default_env();
+    let stdout_layer = fmt::layer().with_target(true).with_thread_ids(false).with_thread_names(false).compact();
+    let file_layer = fmt::layer().with_writer(file_nb).with_target(true).compact();
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stdout_layer)
+        .with(file_layer)
         .init();
 
     let repo_path = std::env::var("RELAY_REPO_PATH")
@@ -42,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/status", post(post_status))
         .route("/query/*path", post(post_query))
         .route("/*path", get(get_file).put(put_file).delete(delete_file))
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     let bind = std::env::var("RELAY_BIND").unwrap_or_else(|_| "0.0.0.0:8088".into());
@@ -315,7 +330,13 @@ fn disallowed(path: &str) -> bool {
     DISALLOWED.iter().any(|ext| lower.ends_with(ext))
 }
 
-fn branch_from(headers: &HeaderMap) -> String {
+fn branch_from(headers: &HeaderMap, query: &Option<HashMap<String, String>>) -> String {
+    // Priority: query ?branch= -> header X-Relay-Branch -> default
+    if let Some(q) = query {
+        if let Some(b) = q.get("branch").filter(|s| !s.is_empty()) {
+            return b.to_string();
+        }
+    }
     headers
         .get(HEADER_BRANCH)
         .and_then(|v| v.to_str().ok())
@@ -327,12 +348,13 @@ async fn get_file(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(path): Path<String>,
+    query: Option<Query<HashMap<String, String>>>,
 )-> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
     if disallowed(&decoded) {
         return (StatusCode::FORBIDDEN, "Disallowed file type").into_response();
     }
-    let branch = branch_from(&headers);
+    let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
 
     // Open repo and branch
     let repo = match Repository::open_bare(&state.repo_path) {
@@ -412,18 +434,25 @@ async fn put_file(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(path): Path<String>,
+    query: Option<Query<HashMap<String, String>>>,
     body: Bytes,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
     if disallowed(&decoded) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Disallowed file type"}))).into_response();
     }
-    let branch = branch_from(&headers);
+    // Allow branch from query string too
+    let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
     match write_file_to_repo(&state.repo_path, &branch, &decoded, &body) {
         Ok((commit, branch)) => Json(serde_json::json!({"commit": commit, "branch": branch, "path": decoded})).into_response(),
         Err(e) => {
             error!(?e, "write error");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            let msg = e.to_string();
+            if msg.contains("rejected by hooks") {
+                (StatusCode::BAD_REQUEST, msg).into_response()
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response()
+            }
         }
     }
 }
@@ -432,12 +461,13 @@ async fn delete_file(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(path): Path<String>,
+    query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
     if disallowed(&decoded) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Disallowed file type"}))).into_response();
     }
-    let branch = branch_from(&headers);
+    let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
     match delete_file_in_repo(&state.repo_path, &branch, &decoded) {
         Ok((commit, branch)) => Json(serde_json::json!({"commit": commit, "branch": branch, "path": decoded})).into_response(),
         Err(ReadError::NotFound) => StatusCode::NOT_FOUND.into_response(),
@@ -481,6 +511,19 @@ fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
     let mut lines: Vec<String> = Vec::new();
     let title_path = if base_path.is_empty() { "/".to_string() } else { format!("/{}", base_path.trim_matches('/')) };
     lines.push(format!("# Directory listing: {}", title_path));
+    // Breadcrumbs
+    let mut crumb = String::new();
+    crumb.push_str("[/](/)");
+    let trimmed = base_path.trim_matches('/');
+    if !trimmed.is_empty() {
+        let mut acc = String::new();
+        for (i, seg) in trimmed.split('/').enumerate() {
+            if i == 0 { acc.push_str(seg); } else { acc.push('/'); acc.push_str(seg); }
+            crumb.push_str(" › ");
+            crumb.push_str(&format!("[{}]({}/)", seg, acc));
+        }
+    }
+    lines.push(crumb);
     lines.push(String::from(""));
     // Build sorted list: directories first then files
     let mut dirs: Vec<String> = Vec::new();
@@ -512,13 +555,65 @@ fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
 fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) -> Response {
     // Try to read /404.md from the same branch
     let custom = read_file_from_repo(repo_path, branch, "404.md").ok();
-    let body: Vec<u8> = match custom {
+    let mut body: Vec<u8> = match custom {
         Some(bytes) => bytes,
         None => {
+            // Build detailed 404 with cause and parent listing
             let mut s = String::new();
             s.push_str("# 404 — Not Found\n\n");
-            s.push_str(&format!("The requested path `/{}` was not found on branch `{}”.\n\n", missing_path.trim_matches('/'), branch));
-            s.push_str("If you expected content here, ensure the file or directory exists and is committed.\n");
+            // Determine cause
+            let repo = Repository::open_bare(repo_path);
+            let mut cause = String::new();
+            if let Ok(repo) = repo {
+                let refname = format!("refs/heads/{}", branch);
+                match repo.find_reference(&refname) {
+                    Ok(reference) => {
+                        match reference.peel_to_commit().and_then(|c| c.tree()) {
+                            Ok(root) => {
+                                if root.is_empty() {
+                                    cause = format!("Branch `{}` is empty.", branch);
+                                } else {
+                                    cause = format!("Path `/{}\u{201d}` not found on branch `{}`.", missing_path.trim_matches('/'), branch);
+                                }
+                            }
+                            Err(_) => {
+                                cause = format!("Unable to read branch `{}` tree.", branch);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        cause = format!("Branch `{}` does not exist.", branch);
+                    }
+                }
+            } else {
+                cause = "Repository open failure".to_string();
+            }
+            s.push_str(&cause);
+            s.push_str("\n\n");
+            // Parent directory listing
+            if let Ok(repo) = Repository::open_bare(repo_path) {
+                let refname = format!("refs/heads/{}", branch);
+                if let Ok(reference) = repo.find_reference(&refname) {
+                    if let Ok(commit) = reference.peel_to_commit() {
+                        if let Ok(root) = commit.tree() {
+                            let parent = missing_path.trim_matches('/');
+                            let parent_path = std::path::Path::new(parent).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "".to_string());
+                            let tree_to_list = if parent_path.is_empty() { Some(root) } else {
+                                match root.get_path(std::path::Path::new(&parent_path)) {
+                                    Ok(e) if e.kind() == Some(ObjectType::Tree) => repo.find_tree(e.id()).ok(),
+                                    _ => Some(root),
+                                }
+                            };
+                            if let Some(t) = tree_to_list {
+                                s.push_str(&format!("## Parent directory: /{}\n\n", parent_path));
+                                let md = String::from_utf8_lossy(&render_directory_markdown(&t, &parent_path)).to_string();
+                                s.push_str(&md);
+                                s.push('\n');
+                            }
+                        }
+                    }
+                }
+            }
             s.into_bytes()
         }
     };
@@ -615,13 +710,49 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
     let new_tree_oid = upsert_path(&repo, &base_tree, &components, &filename, blob_oid)?;
     let new_tree = repo.find_tree(new_tree_oid)?;
 
-    // Create commit
+    // Create commit object without updating ref yet
     let msg = format!("PUT {}", path);
-    let commit_oid = if let Some(parent) = parent_commit {
-        repo.commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[&parent])?
+    let commit_oid = if let Some(parent) = &parent_commit {
+        repo.commit(None, &sig, &sig, &msg, &new_tree, &[parent])?
     } else {
-        repo.commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[])?
+        repo.commit(None, &sig, &sig, &msg, &new_tree, &[])?
     };
+
+    debug!(%commit_oid, %branch, path = %path, "created commit candidate");
+
+    // Run pre-receive hook via relay-hooks binary
+    // Provide stdin: "<old> <new> <ref>\n"
+    let old_oid = parent_commit.as_ref().map(|c| c.id()).unwrap_or_else(|| Oid::zero());
+    let hook_input = format!("{} {} {}\n", old_oid, commit_oid, &refname);
+    let hook_bin = std::env::var("RELAY_HOOKS_BIN").unwrap_or_else(|_| "relay-hooks".to_string());
+    let mut cmd = std::process::Command::new(hook_bin);
+    cmd.arg("--hook").arg("pre-receive")
+        .env("GIT_DIR", repo.path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| anyhow::anyhow!("failed to spawn relay-hooks: {}", e))?;
+    if let Some(mut stdin) = child.stdin.take() { use std::io::Write; let _ = stdin.write_all(hook_input.as_bytes()); }
+    let output = child.wait_with_output().map_err(|e| anyhow::anyhow!("failed waiting for relay-hooks: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        error!(%stderr, status = ?output.status, "pre-receive hook rejected commit");
+        anyhow::bail!("commit rejected by hooks: {}", stderr.trim());
+    }
+
+    // Update ref to new commit
+    match repo.find_reference(&refname) {
+        Ok(mut r) => { r.set_target(commit_oid, &msg)?; },
+        Err(_) => { repo.reference(&refname, commit_oid, true, &msg)?; }
+    }
+
+    // Optional: run update hook (best-effort)
+    let _ = std::process::Command::new(std::env::var("RELAY_HOOKS_BIN").unwrap_or_else(|_| "relay-hooks".to_string()))
+        .arg("--hook").arg("update")
+        .env("GIT_DIR", repo.path())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 
     Ok((commit_oid.to_string(), branch.to_string()))
 }
