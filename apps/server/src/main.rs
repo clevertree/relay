@@ -28,7 +28,9 @@ struct AppState {
 
 const HEADER_BRANCH: &str = "X-Relay-Branch";
 const DEFAULT_BRANCH: &str = "main";
-const DISALLOWED: &[&str] = &[".html", ".htm", ".js"];
+// Disallowed extensions for general access; JavaScript is now allowed to be loaded (GET)
+// but remains blocked for writes via PUT/DELETE (enforced below and by hooks).
+const DISALLOWED: &[&str] = &[".html", ".htm"];
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -58,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
     // we rewrite it to a POST request targeting "/query/foo/bar" (preserving the query string).
     let app = Router::new()
         .route("/status", post(post_status))
+        .route("/openapi.yaml", get(get_openapi_yaml))
         .route("/query/*path", post(post_query))
         .route("/", get(get_root))
         .route("/*path", get(get_file).put(put_file).delete(delete_file))
@@ -71,6 +74,15 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     axum::serve(listener, app.into_make_service()).await?;
     Ok(())
+}
+
+// Serve the bundled OpenAPI YAML specification
+async fn get_openapi_yaml() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [("Content-Type", "application/yaml")],
+        relay_lib::assets::OPENAPI_YAML,
+    )
 }
 
 fn ensure_bare_repo(path: &PathBuf) -> anyhow::Result<()> {
@@ -247,7 +259,7 @@ async fn post_query(
 
 // Middleware that rewrites custom HTTP method QUERY to POST /query/*
 async fn query_alias_middleware(
-    mut req: axum::http::Request<axum::body::Body>,
+    req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
 ) -> impl IntoResponse {
     use axum::http::{Method, Uri};
@@ -345,6 +357,12 @@ mod tests {
 fn disallowed(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     DISALLOWED.iter().any(|ext| lower.ends_with(ext))
+}
+
+// For write operations we continue to disallow JavaScript in addition to HTML
+fn write_disallowed(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".js") || DISALLOWED.iter().any(|ext| lower.ends_with(ext))
 }
 
 fn branch_from(headers: &HeaderMap, query: &Option<HashMap<String, String>>) -> String {
@@ -539,7 +557,7 @@ async fn put_file(
     body: Bytes,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
-    if disallowed(&decoded) {
+    if write_disallowed(&decoded) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Disallowed file type"}))).into_response();
     }
     // Allow branch from query string too
@@ -565,7 +583,7 @@ async fn delete_file(
     query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
-    if disallowed(&decoded) {
+    if write_disallowed(&decoded) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Disallowed file type"}))).into_response();
     }
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
@@ -715,7 +733,7 @@ fn wrap_html_with_assets(title: &str, body: &str, branch: &str, repo_path: &Path
 
 // Helper to return directory listing as HTML or markdown depending on Accept header
 // root_tree is the tree at repo root (for CSS presence checks), listing_tree is the directory to list
-fn directory_response(repo_path: &PathBuf, root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str) -> (String, Vec<u8>) {
+fn directory_response(repo_path: &PathBuf, _root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str) -> (String, Vec<u8>) {
     let md = render_directory_markdown(listing_tree, base_path);
     if accept_hdr.contains("text/markdown") {
         ("text/markdown".to_string(), md)

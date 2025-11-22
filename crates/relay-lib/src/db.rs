@@ -91,6 +91,7 @@ pub struct SortSpec {
 fn default_sort_dir() -> String { "asc".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[allow(non_snake_case)] // Keep camelCase to match YAML/JSON field names in user-facing config
 pub struct PaginationSpec {
     #[serde(default = "default_page_size")] 
     pub defaultPageSize: u32,

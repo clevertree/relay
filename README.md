@@ -102,7 +102,8 @@ API Summary
 
 Security
 
-- Disallowed file extensions for CRUD: .html, .htm, .js
+- Disallowed file extensions for write operations (PUT/DELETE): .html, .htm, .js
+- JavaScript files that already exist in the repo can be loaded (GET) by clients. The commit hooks and server write rules prevent new JS from being added or modified via the API.
 - Although HTML and JavaScript are forbidden from insertion rules, as long as they already exist in the repo, the server may render/serve them (e.g., via an HTML template). The rules forbid modifying files outside of what `relay.yaml` allows, so JavaScript can't be modified after the initial repo release through the API. In a later phase we will implement public-key signatures to allow secure modification of a small set of files via an admin key.
 
 Bundled assets and templating
