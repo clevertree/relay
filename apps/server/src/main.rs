@@ -61,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/status", post(post_status))
         .route("/openapi.yaml", get(get_openapi_yaml))
+        .route("/env", post(post_env))
         .route("/query/*path", post(post_query))
         .route("/", get(get_root))
         .route("/*path", get(get_file).put(put_file).delete(delete_file))
@@ -83,6 +84,57 @@ async fn get_openapi_yaml() -> impl IntoResponse {
         [("Content-Type", "application/yaml")],
         relay_lib::assets::OPENAPI_YAML,
     )
+}
+
+/// Parse simple KEY=VALUE lines from a .env-like string. Ignores comments and blank lines.
+fn parse_dotenv(s: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    for line in s.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        let mut parts = line.splitn(2, '=');
+        let k = parts.next().unwrap_or("").trim();
+        let v = parts.next().unwrap_or("").trim();
+        if k.is_empty() { continue; }
+        // Strip surrounding quotes if present
+        let val = if (v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')) {
+            v[1..v.len().saturating_sub(1)].to_string()
+        } else { v.to_string() };
+        map.insert(k.to_string(), val);
+    }
+    map
+}
+
+/// POST /env — returns a JSON object of environment variables whitelisted by prefix
+/// Whitelist: keys starting with "RELAY_PUBLIC_" only.
+/// Merge order (lowest to highest precedence): .env -> .env.local -> OS env
+async fn post_env(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: Option<Query<HashMap<String, String>>>,
+) -> impl IntoResponse {
+    let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
+    // Read .env and .env.local from the repo at this branch
+    let mut merged: HashMap<String, String> = HashMap::new();
+    let from_repo = |name: &str| -> Option<String> {
+        read_file_from_repo(&state.repo_path, &branch, name).ok().and_then(|b| String::from_utf8(b).ok())
+    };
+    if let Some(env_txt) = from_repo(".env") {
+        for (k, v) in parse_dotenv(&env_txt) { merged.entry(k).or_insert(v); }
+    }
+    if let Some(env_local_txt) = from_repo(".env.local") {
+        for (k, v) in parse_dotenv(&env_local_txt) { merged.insert(k, v); }
+    }
+    // Overlay OS env
+    for (k, v) in std::env::vars() {
+        merged.insert(k, v);
+    }
+    // Whitelist: only RELAY_PUBLIC_*
+    let filtered: HashMap<String, String> = merged
+        .into_iter()
+        .filter(|(k, _)| k.starts_with("RELAY_PUBLIC_"))
+        .collect();
+    (StatusCode::OK, Json(filtered))
 }
 
 fn ensure_bare_repo(path: &PathBuf) -> anyhow::Result<()> {
