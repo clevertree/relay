@@ -2977,7 +2977,7 @@ snapshots:
       sharp: 0.34.5
     transitivePeerDependencies:
       - '@babel/core'
-      - babel-plugin-macros
+      - babel-tmdb-macros
 
   node-releases@2.0.27: {}
 

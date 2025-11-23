@@ -1217,7 +1217,7 @@ snapshots:
       sharp: 0.34.5
     transitivePeerDependencies:
       - '@babel/core'
-      - babel-plugin-macros
+      - babel-tmdb-macros
 
   normalize-path@3.0.0: {}
 
