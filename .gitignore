@@ -6,5 +6,7 @@ apps/server/Cargo.lock
 node_modules/
 dist/
 tmp/
+.tmp/
 data/
 logs/
+pnpm-lock.yaml

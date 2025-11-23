@@ -13,7 +13,9 @@ const config = {
   ],
   staticDirs: [
     // Serve the template directory at the web root so /site/tailwind.css is available
-    { from: "../template", to: "/" }
+    { from: "../template", to: "/" },
+    // Serve story-specific mocks for the template repo
+    { from: "../template/.storybook", to: "/.storybook" }
   ],
   framework: {
     name: "@storybook/web-components-vite",

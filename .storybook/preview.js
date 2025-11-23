@@ -8,6 +8,33 @@ const preview = {
       },
     },
   },
+  globalTypes: {
+    device: {
+      name: 'Device',
+      description: 'Switch device preview',
+      defaultValue: 'desktop',
+      toolbar: {
+        icon: 'mirror',
+        items: [
+          { value: 'desktop', title: 'Desktop' },
+          { value: 'mobile', title: 'Mobile' }
+        ]
+      }
+    }
+  },
+  decorators: [
+    (Story, context) => {
+      const device = context.globals.device || 'desktop';
+      document.documentElement.classList.toggle('mobile-mode', device === 'mobile');
+      // Allow stories to have container width control by a wrapper element
+      const el = Story();
+      if (el && el.style) {
+        el.style.maxWidth = device === 'mobile' ? '420px' : '';
+        el.style.margin = device === 'mobile' ? '12px auto' : '24px auto';
+      }
+      return el;
+    }
+  ],
 };
 
   // Inject the compiled globals stylesheet (Tailwind output) so stories get the
