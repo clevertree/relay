@@ -10,6 +10,17 @@ tauri-build = { version = "2" }
 tauri = { version = "2", features = ["shell-open"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+streaming-files = { path = "../../../crates/streaming-files", features = ["client"] }
+tauri-plugin-dialog = { version = "2" }
+# Note: Ensure the videoplayer plugin is added to the workspace; if not available, this can be added later.
+# Using optional to avoid build break until the plugin is present.
+tauri-plugin-videoplayer = { version = "2", optional = true }
+async-trait = "0.1"
+tokio = { version = "1", features = ["sync", "macros", "rt-multi-thread"] }
+
+[features]
+default = []
+videoplayer = ["tauri-plugin-videoplayer"]
 
 [[bin]]
 name = "relay-client"

@@ -4,5 +4,6 @@ members = [
   "crates/hooks",
   "crates/relay-lib",
   "crates/relay-cli",
+  "crates/streaming-files",
 ]
 resolver = "2"

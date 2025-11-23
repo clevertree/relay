@@ -1,0 +1,28 @@
+[package]
+name = "streaming-files"
+version = "0.1.0"
+edition = "2021"
+description = "Shared streaming file management (torrents/IPFS) for Relay desktop client and server"
+license = "MIT OR Apache-2.0"
+
+[features]
+# Enable helpers that require UI interaction (prompts), used by client
+client = []
+# Server mode keeps things headless (no UI prompts); both can be combined
+server = []
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+directories = "5.0"
+time = { version = "0.3", features = ["formatting"] }
+async-trait = "0.1"
+dirs = "5.0"
+reqwest = { version = "0.12", features = ["json", "cookies"] }
+tokio = { version = "1.39", features = ["time" ] }
+
+[dev-dependencies]
+tempfile = "3.10"
+tokio = { version = "1.39", features = ["macros", "rt-multi-thread"] }
+httpmock = "0.7"
