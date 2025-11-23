@@ -2,8 +2,9 @@
 
 /** @type { import('@storybook/web-components-vite').StorybookConfig } */
 const config = {
+  // Only load JS/TS stories here. MDX pages can be added back selectively if
+  // they are known to be compatible with the web-components renderer.
   stories: [
-    "../stories/**/*.mdx",
     "../stories/**/*.stories.@(js|jsx|mjs|ts|tsx)"
   ],
   addons: [

@@ -10,19 +10,19 @@ const preview = {
   },
 };
 
-// Inject Tailwind stylesheet globally for all stories
-if (typeof window !== 'undefined') {
-  const ensureCss = (href) => {
-    if ([...document.styleSheets].some(s => s.href && s.href.endsWith(href))) return;
-    if ([...document.querySelectorAll('link[rel="stylesheet"]')].some(l => (l.getAttribute('href')||'').endsWith(href))) return;
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = href;
-    document.head.appendChild(link);
-  };
-  ensureCss('/site/tailwind.css');
-  // Globals are intentionally kept minimal, but load if present
-  ensureCss('/site/globals.css');
+  // Inject the compiled globals stylesheet (Tailwind output) so stories get the
+  // same styles as the app template. This points at the compiled file produced
+  // by `pnpm run tailwind:build` -> template/site/globals.generated.css served at /site/globals.generated.css
+  if (typeof window !== 'undefined') {
+    const ensureCss = (href) => {
+      if ([...document.styleSheets].some(s => s.href && s.href.endsWith(href))) return;
+      if ([...document.querySelectorAll('link[rel="stylesheet"]')].some(l => (l.getAttribute('href')||'').endsWith(href))) return;
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = href;
+      document.head.appendChild(link);
+    };
+    ensureCss('/site/globals.generated.css');
 
   // Provide simple stubs so components that perform fetches don't error in Storybook
   const originalFetch = window.fetch?.bind(window) || fetch;
