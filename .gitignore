@@ -10,3 +10,35 @@ tmp/
 data/
 logs/
 pnpm-lock.yaml
+
+# Storybook static output
+storybook-static/
+
+# Tailwind / generated CSS
+**/globals.generated.css
+
+# build / cache folders
+.cache/
+.vite/
+.parcel-cache/
+.turbo/
+build/
+release/
+
+# coverage and reports
+coverage/
+reports/
+
+# editor/temp files
+*.swp
+*.swo
+*.log
+*.tmp
+
+# lockfiles (pnpm uses pnpm-lock.yaml, but ignore package-lock if present)
+package-lock.json
+
+# environment files
+.env
+.env.local
+.env.*.local

@@ -5,11 +5,12 @@ const config = {
   // Only load JS/TS stories here. MDX pages can be added back selectively if
   // they are known to be compatible with the web-components renderer.
   stories: [
-    "../stories/**/*.stories.@(js|jsx|mjs|ts|tsx)"
+    "../template/.storybook/stories/**/*.stories.@(js|jsx|mjs|ts|tsx)"
   ],
   addons: [
     "@chromatic-com/storybook",
-    "@storybook/addon-docs"
+    "@storybook/addon-docs",
+    "@storybook/addon-a11y"
   ],
   staticDirs: [
     // Serve the template directory at the web root so /site/tailwind.css is available

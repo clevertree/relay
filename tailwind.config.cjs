@@ -1,11 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    './template/**/*.html',
-    './template/**/*.md',
+    './template/**/*.{html,md,js}',
+    './template/.storybook/**/*.{html,js}',
     './template/site/**/*.js',
-    './stories/**/*.css',
-    './stories/**/*.js',
   ],
   theme: {
     extend: {
@@ -14,13 +12,6 @@ module.exports = {
       },
     },
   },
-  safelist: [
-    'movie-card',
-    'movie-poster',
-    'movie-meta',
-    'movie-title',
-    'movie-sub',
-    'movies-grid'
-  ],
+  safelist: [],
   plugins: [],
 };

@@ -62,7 +62,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/status", post(post_status))
         .route("/openapi.yaml", get(get_openapi_yaml))
         .route("/env", post(post_env))
-        .route("/query/*path", post(post_query))
+        // Accept any HTTP method for /query/*path; middleware will rewrite custom
+        // METHOD QUERY to POST /query/* and other clients may call POST directly.
+        .route("/query/*path", axum::routing::any(post_query))
         .route("/", get(get_root))
         .route("/*path", get(get_file).put(put_file).delete(delete_file))
         .layer(axum::middleware::from_fn(query_alias_middleware))
