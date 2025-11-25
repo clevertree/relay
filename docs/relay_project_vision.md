@@ -1,105 +1,112 @@
-# Relay Project Vision
+# Relay Project Vision (Updated)
 
 ## Overview
-Relay is a decentralized, branch‑oriented web platform that allows users to browse, edit, and collaboratively evolve websites through Git‑powered functionality. It creates a safe, interactive, and high‑performance environment where public participation and administrative workflows coexist securely.
+Relay is a decentralized, Git‑driven web platform enabling interactive browsing, safe contribution, AI‑assisted management, and decentralized hosting through a network of master peer nodes.
 
 ---
 
-## Interactive Branch‑Based Browsing
-Relay allows users to browse websites in a highly interactive way:
-- When browsing the **main branch**, users see the published, authoritative version of a website.
-- Because Relay uses Git repositories under the hood, users can **switch to other branches**.
-- On branches where they have permission, users can **edit any visible file**.
-- Some branches are publicly editable, enabling community contributions.
-- Users can submit **pull/merge requests** to propose updates to the main branch.
+## Interactive Branch-Based Browsing
+- Main branch shows the authoritative deployed site.
+- Users can switch to other branches (e.g., development, staging) for broader access.
+- Public branches allow anonymous contributions.
+- Pull/merge requests synchronize differences between branches.
 
 ---
 
 ## Decentralization
-Relay operates as a decentralized network of master peer nodes:
-- Each master peer node contains a **full copy of every branch** of each repository.
-- When a user makes an edit to a branch, it **synchronizes across the Relay network**.
-- This ensures consistency and resilience while still enabling distributed hosting and contributions.
+- Every master peer contains a full copy of every branch.
+- Edits synchronize across the network.
+- Repositories remain resilient and globally available.
 
 ---
 
 ## Use Cases
+### 1. User Websites Without Hosting
+- Users create Markdown-based sites in a public repo.
+- Security prevents raw HTML/JS; users instead rely on Markdown components.
+- Users can only modify areas tied to their identity key.
 
-### 1. **User‑Hosted Websites Without Traditional Hosting**
-Users can create personal websites without owning any server or hosting service:
-- Users place their files (Markdown index, CSS assets, media, etc.) in the **public user repo**.
-- Their website becomes browsable across the decentralized Relay network.
-- **Security restrictions apply:**
-  - Users cannot host raw JavaScript or HTML, preventing common exploit avenues.
-  - Instead, they use **Markdown components**—HTML‑like elements expressed in Markdown that enable safe, interactive client functionality.
-- Users may only modify files tied to their public identity key, ensuring isolation and integrity.
+### 2. Movie Repository TMDB Integration
+- Users add missing movies via TMDB plugin into a beta branch.
+- Edits persist while browsing that branch.
 
-### 2. **Movie Repository Editing via TMDB Plugin**
-A user browsing the movie repository notices a missing movie:
-- They use the **TMDB plugin** to search for the movie.
-- They press a button to insert that movie into the **beta branch** (where they have permission).
-- As they browse the beta branch, they will see their newly inserted movie entry.
-
-### 3. **Voting and Review Branches**
-Relay supports a voting system through a dedicated plugin:
-- When voting is initiated on a repository, the server automatically **creates a voting branch** from main.
-- A special voting/review file—normally disallowed on main—is placed into this branch.
-- Users can:
-  - Leave reviews
-  - Submit complaints
-  - Create voting items related to any part of the site
-- These interactions do **not modify main**, preserving website integrity.
-- Voting and review mechanics will be defined further, but the branch enables structured community feedback.
+### 3. Voting & Review Branches
+- Servers auto‑create a voting branch when needed.
+- Special files enable reviews, complaints, and structured feedback.
+- Voting doesn’t modify the main branch.
 
 ---
 
-## Blockchain Security
-Relay incorporates blockchain‑style cryptographic controls:
-- Git commits may be signed using **certificate‑based cryptographic keys**.
-- Eventually, **only the private key used to create the repository** can authorize main‑branch modifications.
-- This allows the repository’s creator to retain ultimate control, even in a fully distributed network.
-- Master peer nodes enforce security rules defined in **relay.yaml**, such as:
-  - Which branches can be edited
-  - Which actions require signatures
-  - Which parts of the repository correspond to which public keys
-- **Most actions do not require private keys.** Anonymous edits are allowed except in cases requiring permission.
+## Blockchain-Style Security
+- Commits can be signed with certificates.
+- Only the private key holder can authorize main-branch changes.
+- rules.yaml defines what actions are allowed and by whom.
+- Most actions allow anonymous users; identity is only required for restricted operations.
 
 ---
 
 ## Pull Requests
-Relay implements semi‑automatic pull request mechanics:
-- When a branch becomes out of sync with main, a potential **pull request** becomes visible.
-- Users and admins can see all open or suggested pull requests.
-- An admin typically approves merges, but servers may be configured to:
-  - Allow merges if a sufficient number of registered non‑admin users approve.
-- This creates a hybrid model of community governance and administrative oversight.
+- Branch drift reveals potential pull requests.
+- Users and admins can see all active PRs.
+- Admin approval is default, but rules may allow merge based on community votes.
 
 ---
 
-## Performance Focus
-Relay is designed with performance as a top priority:
-- Rust powers the core system, ensuring high‑efficiency transaction and synchronization handling.
-- Rendering performance is optimized to deliver responsive user experiences.
-
-### Zero‑Downtime, Instant Deployment
-Relay redefines deployment:
-- Traditional CI/CD pipelines are unnecessary.
-- As soon as a commit is accepted by the server, **the website is effectively deployed**.
-- The HTTP server reads **directly from the Git repository**, enabling:
-  - Zero delay deployments
-  - Zero downtime
-  - Continuous, seamless updates
+## Performance
+- Relay is built in Rust for maximal performance.
+- Zero‑delay, zero‑downtime deployment—HTTP server reads directly from Git.
 
 ---
 
-## Security Summary
-Relay enables users to engage in website administration safely:
-- By default, Relay **blocks risky content** such as raw HTML and JavaScript.
-- Users are forced into safe, rule‑governed formats like Markdown components.
-- Built‑in branch and identity rules reduce opportunities for malicious behavior.
+## Hosting & Sponsorship
+- Master nodes can host any repository but may not store all repos.
+- Repositories require sponsorship from at least one master node.
+- As long as repos follow size rules, they receive free hosting indefinitely.
+- Public‑private keys enforce permissions for sensitive files.
+- Creators can rotate keys via upstream (e.g., GitHub) if necessary.
+- Lost keys allow forking and reasserting ownership without losing history.
+
+### Relay Server Binary
+- Relay server is a high‑performance Rust HTTP server reading directly from Git.
+- Requires environments that allow running binaries; Docker is primary solution.
+- Anyone can run a Dockerized Relay node.
+- Nodes connect through a tracker (future versions may decentralize this).
+
+---
+
+## The Relay Promise
+A standard set of web protocols guaranteed by all Relay master nodes:
+- Supports GET, POST, PUT, DELETE, and QUERY.
+- Any client can interact with Relay as long as it follows these protocols.
+- Any website built on Relay protocols is accessible by any client implementing them.
+- Relay does not enforce UI or specific clients—fully open ecosystem.
+
+---
+
+## Decentralization Without Expensive Hardware
+- Master nodes can run advanced services: Git, HTTP, IPFS, torrent, Docker workloads, game servers.
+- Websites gain capabilities far beyond static/dynamic hosting.
+- Idle hardware across the network can be used to support demanding tasks.
+
+---
+
+## AI-Capable Future
+- Relay data will be accessible through a standardized AI model.
+- Idle hardware will power a shared Relay LLM.
+- AI will assist with repo setup, rule management, QA, abuse detection, and automation.
+- Keeps costs zero by distributing compute across idle nodes.
+
+---
+
+## Branching Strategy
+- Main branch: deployed content.
+- Development branch: anonymous, messy, experimental contributions.
+- Staging branch: controlled QA and volunteer reviews.
+- PR process governs merges into main.
+- Relay does not mandate branch names or patterns but guarantees a place for anonymous contribution.
 
 ---
 
 ## Final Summary
-Relay is a decentralized, Git‑driven platform that transforms website interaction, contribution, and administration. It merges security, community participation, and cryptographic control with a high‑performance system engineered for instant deployment and seamless collaboration. Users gain unprecedented abilities to participate in the evolution of websites—without compromising safety or stability.
+Relay is a secure, decentralized, high‑performance collaborative web platform. It empowers users to contribute safely, host websites without infrastructure, participate in governance, and eventually leverage AI assistance—all while keeping the network open, resilient, and community‑driven.
 
