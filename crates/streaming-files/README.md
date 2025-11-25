@@ -8,7 +8,7 @@ Features
 - Normalized torrent status and file listings
 - Playback decision logic based on configurable buffer thresholds (play while downloading)
 - Optional UI prompt traits for desktop (Tauri) integration
-- Two playback methods: Tauri video player (feature-gated) or OS default app (system-open)
+- Playback via the OS default app (system-open)
 
 Crate features
 - client: enables UI-related traits/helpers (prompts) used by the desktop client
@@ -35,7 +35,7 @@ Persistent config (streaming.json)
   - resume_poll_interval_sec (default 5)
   - resume_timeout_min (default 30)
   - preferred_backend (auto|qbt|transmission)
-  - playback_target (auto|tauri|system) — default auto
+  - playback_target (auto|system) — default system
   - optional endpoint overrides (qbt_host, qbt_port, qbt_base, tr_host, tr_port, tr_path)
   - torrents {}
 - Migration: older `config_version` values are updated on load

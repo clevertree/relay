@@ -1,15 +1,19 @@
-use crate::config as cfgmod;
-use crate::config::{default_download_dir, load_or_default, save, set_download_dir, StreamingConfig};
+use crate::config::{load_or_default, save, StreamingConfig};
 use crate::env::load_env;
 use crate::errors::{Result, StreamingError};
-use crate::model::{AddResult, PlayDecision, TorrentFile, TorrentState, TorrentStatus};
+use crate::model::{AddResult, TorrentFile, TorrentStatus};
 use crate::rpc::{NullClient, TorrentClient};
-use crate::playback::is_playable_by_thresholds;
 use crate::rpc::qbit::QBitClient;
 use crate::rpc::transmission::TransmissionClient;
 
 #[cfg(feature = "client")]
 use crate::ui::UiPrompt;
+#[cfg(feature = "client")]
+use crate::playback::is_playable_by_thresholds;
+#[cfg(feature = "client")]
+use crate::config::{default_download_dir, set_download_dir};
+#[cfg(feature = "client")]
+use crate::model::PlayDecision;
 
 use std::sync::Arc;
 
@@ -142,7 +146,7 @@ impl StreamingService {
         };
 
         // Helper to read u32 with clamping
-        let mut u32_field = |key: &str, min: u32, max: u32, apply: &mut dyn FnMut(u32)| -> Result<()> {
+        let u32_field = |key: &str, min: u32, max: u32, apply: &mut dyn FnMut(u32)| -> Result<()> {
             if let Some(v) = obj.get(key) {
                 let n = match v {
                     V::Number(n) => n.as_u64().ok_or_else(|| StreamingError::Invalid(format!("{key} must be a non-negative integer")))? as u32,
@@ -323,6 +327,7 @@ fn extract_btih(s: &str) -> Option<&str> {
     None
 }
 
+#[cfg(feature = "client")]
 fn pick_file(files: Vec<TorrentFile>, index: Option<usize>) -> Option<(usize, TorrentFile)> {
     if let Some(i) = index {
         files.into_iter().enumerate().find(|(idx, _)| *idx == i)

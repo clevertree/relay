@@ -17,12 +17,21 @@ impl QBitClient {
             .expect("reqwest client");
         // normalize: ensure trailing slash
         let mut b = base_url.into();
-        if !b.ends_with('/') { b.push('/'); }
-        Self { base_url: b, client }
+        if !b.ends_with('/') {
+            b.push('/');
+        }
+        Self {
+            base_url: b,
+            client,
+        }
     }
 
     fn url(&self, path: &str) -> String {
-        if path.starts_with('/') { format!("{}{}", self.base_url.trim_end_matches('/'), path) } else { format!("{}{}", self.base_url, path) }
+        if path.starts_with('/') {
+            format!("{}{}", self.base_url.trim_end_matches('/'), path)
+        } else {
+            format!("{}{}", self.base_url, path)
+        }
     }
 }
 
@@ -53,19 +62,35 @@ fn map_state(s: &str) -> TorrentState {
     // qBittorrent states (subset): "stalledDL", "downloading", "pausedDL", "queuedDL",
     // "checkingDL", "metaDL", "stalledUP", "uploading", "pausedUP", "queuedUP", "checkingUP", "error"
     let ls = s.to_ascii_lowercase();
-    if ls.contains("error") { return TorrentState::Error; }
-    if ls.contains("checking") { return TorrentState::Checking; }
-    if ls.contains("upload") || ls.contains("up") { return TorrentState::Seeding; }
-    if ls.contains("stalleddl") { return TorrentState::Stalled; }
-    if ls.contains("down") || ls.contains("meta") { return TorrentState::Downloading; }
-    if ls.contains("paused") { return TorrentState::Paused; }
-    if ls.contains("complete") { return TorrentState::Completed; }
+    if ls.contains("error") {
+        return TorrentState::Error;
+    }
+    if ls.contains("checking") {
+        return TorrentState::Checking;
+    }
+    if ls.contains("upload") || ls.contains("up") {
+        return TorrentState::Seeding;
+    }
+    if ls.contains("stalleddl") {
+        return TorrentState::Stalled;
+    }
+    if ls.contains("down") || ls.contains("meta") {
+        return TorrentState::Downloading;
+    }
+    if ls.contains("paused") {
+        return TorrentState::Paused;
+    }
+    if ls.contains("complete") {
+        return TorrentState::Completed;
+    }
     TorrentState::Unknown
 }
 
 #[async_trait::async_trait]
 impl TorrentClient for QBitClient {
-    fn name(&self) -> &'static str { "qbt" }
+    fn name(&self) -> &'static str {
+        "qbt"
+    }
     async fn healthy(&self) -> Result<bool> {
         let url = self.url("api/v2/app/version");
         let resp = self.client.get(url).send().await;
@@ -75,26 +100,56 @@ impl TorrentClient for QBitClient {
         }
     }
 
-    async fn add_magnet(&self, magnet: &str, save_path: Option<&str>, seeding: Option<bool>) -> Result<AddResult> {
+    async fn add_magnet(
+        &self,
+        magnet: &str,
+        save_path: Option<&str>,
+        seeding: Option<bool>,
+    ) -> Result<AddResult> {
         let url = self.url("api/v2/torrents/add");
         let mut form = vec![("urls", magnet.to_string())];
-        if let Some(p) = save_path { form.push(("savepath", p.to_string())); }
+        if let Some(p) = save_path {
+            form.push(("savepath", p.to_string()));
+        }
         // If seeding explicitly on, force start; if off, paused add
         if let Some(on) = seeding {
-            if on { form.push(("autoTMM", "false".into())); form.push(("paused", "false".into())); form.push(("skip_checking", "true".into())); form.push(("sequentialDownload", "false".into())); }
-            else { form.push(("paused", "true".into())); }
+            if on {
+                form.push(("autoTMM", "false".into()));
+                form.push(("paused", "false".into()));
+                form.push(("skip_checking", "true".into()));
+                form.push(("sequentialDownload", "false".into()));
+            } else {
+                form.push(("paused", "true".into()));
+            }
         }
-        let resp = self.client.post(url).form(&form).send().await.map_err(|e| StreamingError::RpcUnavailable(format!("qbt add failed: {}", e)))?;
+        let resp = self
+            .client
+            .post(url)
+            .form(&form)
+            .send()
+            .await
+            .map_err(|e| StreamingError::RpcUnavailable(format!("qbt add failed: {}", e)))?;
         if !resp.status().is_success() {
-            return Err(StreamingError::RpcUnavailable(format!("qbt add failed: HTTP {}", resp.status())));
+            return Err(StreamingError::RpcUnavailable(format!(
+                "qbt add failed: HTTP {}",
+                resp.status()
+            )));
         }
         // qBittorrent does not return info hash here; require caller to poll status by magnet/info hash if known.
-        Ok(AddResult { info_hash: String::new(), name: None })
+        Ok(AddResult {
+            info_hash: String::new(),
+            name: None,
+        })
     }
 
     async fn status(&self, info_hash: &str) -> Result<TorrentStatus> {
         let url = self.url(&format!("api/v2/torrents/info?hashes={}", info_hash));
-        let resp = self.client.get(url).send().await.map_err(|e| StreamingError::RpcUnavailable(format!("qbt status: {}", e)))?;
+        let resp = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| StreamingError::RpcUnavailable(format!("qbt status: {}", e)))?;
         if resp.status() == StatusCode::NOT_FOUND {
             return Ok(TorrentStatus {
                 exists: false,
@@ -112,14 +167,29 @@ impl TorrentClient for QBitClient {
             });
         }
         if !resp.status().is_success() {
-            return Err(StreamingError::RpcUnavailable(format!("qbt status http {}", resp.status())));
+            return Err(StreamingError::RpcUnavailable(format!(
+                "qbt status http {}",
+                resp.status()
+            )));
         }
-        let list: Vec<QbtInfoItem> = resp.json().await.map_err(|e| StreamingError::RpcUnavailable(format!("qbt status decode: {}", e)))?;
-        let it = list.into_iter().find(|i| i.hash.as_deref().unwrap_or("").eq_ignore_ascii_case(info_hash));
+        let list: Vec<QbtInfoItem> = resp
+            .json()
+            .await
+            .map_err(|e| StreamingError::RpcUnavailable(format!("qbt status decode: {}", e)))?;
+        let it = list.into_iter().find(|i| {
+            i.hash
+                .as_deref()
+                .unwrap_or("")
+                .eq_ignore_ascii_case(info_hash)
+        });
         if let Some(i) = it {
             let size = i.total_size.or(i.size).unwrap_or(0);
             let downloaded = i.downloaded.unwrap_or(0);
-            let state = i.state.as_deref().map(map_state).unwrap_or(TorrentState::Unknown);
+            let state = i
+                .state
+                .as_deref()
+                .map(map_state)
+                .unwrap_or(TorrentState::Unknown);
             let progress = i.progress.unwrap_or(0.0) as f32;
             return Ok(TorrentStatus {
                 exists: true,
@@ -154,24 +224,39 @@ impl TorrentClient for QBitClient {
 
     async fn list_files(&self, info_hash: &str) -> Result<Vec<TorrentFile>> {
         let url = self.url(&format!("api/v2/torrents/files?hash={}", info_hash));
-        let resp = self.client.get(url).send().await.map_err(|e| StreamingError::RpcUnavailable(format!("qbt files: {}", e)))?;
+        let resp = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| StreamingError::RpcUnavailable(format!("qbt files: {}", e)))?;
         if !resp.status().is_success() {
-            return Err(StreamingError::RpcUnavailable(format!("qbt files http {}", resp.status())));
+            return Err(StreamingError::RpcUnavailable(format!(
+                "qbt files http {}",
+                resp.status()
+            )));
         }
-        let files: Vec<QbtFileItem> = resp.json().await.map_err(|e| StreamingError::RpcUnavailable(format!("qbt files decode: {}", e)))?;
-        let out = files.into_iter().enumerate().map(|(idx, f)| {
-            let downloaded = (f.size as f64 * f.progress).round() as u64;
-            let name = f.name;
-            let is_media = crate::model::is_media_path(&name);
-            TorrentFile {
-                index: idx,
-                path: name,
-                length: f.size,
-                downloaded,
-                priority: f.priority.max(0) as u8,
-                is_media,
-            }
-        }).collect();
+        let files: Vec<QbtFileItem> = resp
+            .json()
+            .await
+            .map_err(|e| StreamingError::RpcUnavailable(format!("qbt files decode: {}", e)))?;
+        let out = files
+            .into_iter()
+            .enumerate()
+            .map(|(idx, f)| {
+                let downloaded = (f.size as f64 * f.progress).round() as u64;
+                let name = f.name;
+                let is_media = crate::model::is_media_path(&name);
+                TorrentFile {
+                    index: idx,
+                    path: name,
+                    length: f.size,
+                    downloaded,
+                    priority: f.priority.max(0) as u8,
+                    is_media,
+                }
+            })
+            .collect();
         Ok(out)
     }
 
@@ -181,20 +266,52 @@ impl TorrentClient for QBitClient {
             let url1 = self.url(&format!("api/v2/torrents/resume?hashes={}", info_hash));
             let _ = self.client.post(url1).send().await;
             let url2 = self.url("api/v2/torrents/setForceStart");
-            let _ = self.client.post(url2).form(&[("hashes", info_hash), ("value", "true")]).send().await;
+            let _ = self
+                .client
+                .post(url2)
+                .form(&[("hashes", info_hash), ("value", "true")])
+                .send()
+                .await;
             Ok(())
         } else {
             let url = self.url(&format!("api/v2/torrents/pause?hashes={}", info_hash));
-            let resp = self.client.post(url).send().await.map_err(|e| StreamingError::RpcUnavailable(format!("qbt pause: {}", e)))?;
-            if resp.status().is_success() { Ok(()) } else { Err(StreamingError::RpcUnavailable(format!("qbt pause http {}", resp.status()))) }
+            let resp = self
+                .client
+                .post(url)
+                .send()
+                .await
+                .map_err(|e| StreamingError::RpcUnavailable(format!("qbt pause: {}", e)))?;
+            if resp.status().is_success() {
+                Ok(())
+            } else {
+                Err(StreamingError::RpcUnavailable(format!(
+                    "qbt pause http {}",
+                    resp.status()
+                )))
+            }
         }
     }
 
     async fn save_path(&self, info_hash: &str) -> Result<Option<String>> {
         let url = self.url(&format!("api/v2/torrents/info?hashes={}", info_hash));
-        let resp = self.client.get(url).send().await.map_err(|e| StreamingError::RpcUnavailable(format!("qbt save_path: {}", e)))?;
-        if !resp.status().is_success() { return Ok(None); }
+        let resp = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| StreamingError::RpcUnavailable(format!("qbt save_path: {}", e)))?;
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
         let list: Vec<QbtInfoItem> = resp.json().await.unwrap_or_default();
-        Ok(list.into_iter().find(|i| i.hash.as_deref().unwrap_or("").eq_ignore_ascii_case(info_hash)).and_then(|i| i.save_path))
+        Ok(list
+            .into_iter()
+            .find(|i| {
+                i.hash
+                    .as_deref()
+                    .unwrap_or("")
+                    .eq_ignore_ascii_case(info_hash)
+            })
+            .and_then(|i| i.save_path))
     }
 }

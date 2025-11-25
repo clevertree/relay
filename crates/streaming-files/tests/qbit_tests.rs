@@ -1,6 +1,6 @@
 use httpmock::{Method::GET, MockServer};
-use streaming_files::rpc::TorrentClient; // bring trait into scope for method calls
 use streaming_files::rpc::qbit::QBitClient;
+use streaming_files::rpc::TorrentClient; // bring trait into scope for method calls
 
 #[tokio::test]
 async fn qbit_healthy_true_on_version_ok() {

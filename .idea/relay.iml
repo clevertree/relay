@@ -8,6 +8,10 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/relay-cli/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/relay-lib/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/template" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/streaming-files/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/streaming-files/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/client-iced/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/client/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/apps/server/target" />
       <excludeFolder url="file://$MODULE_DIR$/crates/hooks/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />

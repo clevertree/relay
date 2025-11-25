@@ -20,9 +20,10 @@ time = { version = "0.3", features = ["formatting"] }
 async-trait = "0.1"
 dirs = "5.0"
 reqwest = { version = "0.12", features = ["json", "cookies"] }
-tokio = { version = "1.39", features = ["time" ] }
+tokio = { version = "1.39", features = ["time"] }
 
 [dev-dependencies]
 tempfile = "3.10"
 tokio = { version = "1.39", features = ["macros", "rt-multi-thread"] }
 httpmock = "0.7"
+url = "2.5"

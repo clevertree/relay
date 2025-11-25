@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, options},
     Json, Router,
 };
 use tokio::net::TcpListener;
@@ -65,8 +65,8 @@ async fn main() -> anyhow::Result<()> {
         // Accept any HTTP method for /query/*path; middleware will rewrite custom
         // METHOD QUERY to POST /query/* and other clients may call POST directly.
         .route("/query/*path", axum::routing::any(post_query))
-        .route("/", get(get_root))
-        .route("/*path", get(get_file).put(put_file).delete(delete_file))
+        .route("/", get(get_root).options(options_capabilities))
+        .route("/*path", get(get_file).put(put_file).delete(delete_file).options(options_capabilities))
         .layer(axum::middleware::from_fn(query_alias_middleware))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -214,6 +214,27 @@ async fn post_status(State(state): State<AppState>) -> impl IntoResponse {
         capabilities: vec!["git", "torrent", "ipfs", "http"],
     };
     Json(body).into_response()
+}
+
+/// OPTIONS handler — advertise server capabilities and available branches
+async fn options_capabilities(State(state): State<AppState>) -> impl IntoResponse {
+    // Open repo to list branches
+    let branches = match Repository::open_bare(&state.repo_path) {
+        Ok(repo) => list_branches(&repo),
+        Err(_) => Vec::new(),
+    };
+    // Keep capabilities aligned with /status
+    let capabilities = vec!["git", "torrent", "ipfs", "http"];
+    // Methods generally supported on file paths
+    let allow = "GET, PUT, DELETE, OPTIONS";
+    (
+        StatusCode::OK,
+        [("Allow", allow.to_string())],
+        Json(serde_json::json!({
+            "capabilities": capabilities,
+            "branches": branches,
+        })),
+    )
 }
 
 #[derive(Deserialize)]
@@ -420,17 +441,24 @@ fn write_disallowed(path: &str) -> bool {
 }
 
 fn branch_from(headers: &HeaderMap, query: &Option<HashMap<String, String>>) -> String {
-    // Priority: query ?branch= -> header X-Relay-Branch -> default
+    // Priority: query ?branch= -> header X-Relay-Branch -> cookie relay-branch -> default
     if let Some(q) = query {
         if let Some(b) = q.get("branch").filter(|s| !s.is_empty()) {
             return b.to_string();
         }
     }
-    headers
-        .get(HEADER_BRANCH)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(DEFAULT_BRANCH)
-        .to_string()
+    if let Some(h) = headers.get(HEADER_BRANCH).and_then(|v| v.to_str().ok()) {
+        if !h.is_empty() { return h.to_string(); }
+    }
+    if let Some(cookie_hdr) = headers.get("cookie").and_then(|v| v.to_str().ok()) {
+        for part in cookie_hdr.split(';') {
+            let mut kv = part.trim().splitn(2, '=');
+            let k = kv.next().unwrap_or("").trim();
+            let v = kv.next().unwrap_or("");
+            if k == "relay-branch" && !v.is_empty() { return v.to_string(); }
+        }
+    }
+    DEFAULT_BRANCH.to_string()
 }
 
 async fn get_file(
@@ -486,7 +514,12 @@ async fn get_file(
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         let (ct, body) = directory_response(&state.repo_path, &tree, &tree, rel, accept_hdr, &branch);
-        return (StatusCode::OK, [("Content-Type", ct)], body).into_response();
+        return (
+            StatusCode::OK,
+            [("Content-Type", ct), (HEADER_BRANCH, branch.clone())],
+            body,
+        )
+            .into_response();
     }
 
     // Try to resolve path within tree
@@ -514,7 +547,12 @@ async fn get_file(
                         let content = blob.content();
                     if wants_markdown {
                         // Serve raw markdown
-                        return (StatusCode::OK, [("Content-Type", "text/markdown")], content.to_vec()).into_response();
+                        return (
+                            StatusCode::OK,
+                            [("Content-Type", "text/markdown".to_string()), (HEADER_BRANCH, branch.clone())],
+                            content.to_vec(),
+                        )
+                            .into_response();
                     } else {
                         // Render to HTML, wrap with CSS links and global JS module based on directory theme and site globals
                         let html_frag = String::from_utf8(md_to_html_bytes(content)).unwrap_or_default();
@@ -526,12 +564,17 @@ async fn get_file(
                         // let js = js_hrefs_for(&tree, &branch);
                         let title = std::path::Path::new(rel).file_name().and_then(|s| s.to_str()).unwrap_or("Document");
                         let wrapped = wrap_html_with_assets(title, &html_frag, &branch, &state.repo_path, &base_dir);
-                        return (StatusCode::OK, [("Content-Type", "text/html; charset=utf-8")], wrapped).into_response();
+                        return (
+                            StatusCode::OK,
+                            [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.clone())],
+                            wrapped,
+                        )
+                            .into_response();
                     }
                     }
                     // Non-markdown: serve with detected mime
                     let ct = mime_guess::from_path(rel).first_or_octet_stream().essence_str().to_string();
-                    (StatusCode::OK, [("Content-Type", ct)], blob.content().to_vec()).into_response()
+                    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone())], blob.content().to_vec()).into_response()
                 }
                 Err(e) => {
                     error!(?e, "blob read error");
@@ -553,7 +596,7 @@ async fn get_file(
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
                 let (ct, body) = directory_response(&state.repo_path, &tree, &sub_tree, rel, accept_hdr, &branch);
-                (StatusCode::OK, [("Content-Type", ct)], body).into_response()
+                (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone())], body).into_response()
         }
         _ => render_404_markdown(&state.repo_path, &branch, rel),
     }
@@ -600,7 +643,7 @@ async fn get_root(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let (ct, body) = directory_response(&state.repo_path, &tree, &tree, "", accept_hdr, &branch);
-    (StatusCode::OK, [("Content-Type", ct)], body).into_response()
+    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone())], body).into_response()
 }
 
 async fn put_file(
@@ -844,7 +887,7 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) ->
     let wrapped = wrap_html_with_assets("Not Found", &body_html, branch, repo_path, &parent_dir);
     (
         StatusCode::NOT_FOUND,
-        [("Content-Type", "text/html; charset=utf-8".to_string())],
+        [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.to_string())],
         wrapped,
     )
     .into_response()

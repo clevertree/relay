@@ -155,7 +155,7 @@ fn migrate(cfg: &mut StreamingConfig) {
     }
     if cfg.config_version == 2 {
         // v3 introduces auto_open_player_on_allow defaulting to true
-        if cfg.auto_open_player_on_allow == false {
+        if !cfg.auto_open_player_on_allow {
             // We only set it to true if the field wasn't present; serde default would leave it false here if missing.
             // To avoid flipping explicit false, check that it's effectively uninitialized by detecting absence is not trivial here.
             // Conservative: set true when upgrading to v3.
@@ -236,4 +236,4 @@ fn default_play_min_total_percent() -> u32 { 1 }
 fn default_resume_poll_interval_sec() -> u32 { 5 }
 fn default_resume_timeout_min() -> u32 { 30 }
 fn default_preferred_backend() -> String { "auto".to_string() }
-fn default_playback_target() -> String { "auto".to_string() }
+fn default_playback_target() -> String { "system".to_string() }

@@ -1,9 +1,10 @@
 [workspace]
 members = [
-  "apps/server",
-  "crates/hooks",
-  "crates/relay-lib",
-  "crates/relay-cli",
-  "crates/streaming-files",
+    "apps/server",
+    "apps/client",
+    "crates/hooks",
+    "crates/relay-lib",
+    "crates/relay-cli",
+    "crates/streaming-files",
 ]
 resolver = "2"

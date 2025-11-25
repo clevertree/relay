@@ -5,7 +5,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Relay CLI client")] 
+#[command(version, about = "Relay CLI client")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -14,7 +14,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Connect to a relay server and print status
-    Connect { 
+    Connect {
         /// Server socket, e.g. http://localhost:8088 or localhost:8088
         socket: String,
     },
@@ -68,7 +68,12 @@ async fn main() -> Result<()> {
             let status = relay_lib::connect_status(&socket).await?;
             println!("{}", serde_json::to_string_pretty(&status)?);
         }
-        Commands::Get { socket, filepath, branch, out } => {
+        Commands::Get {
+            socket,
+            filepath,
+            branch,
+            out,
+        } => {
             let bytes = relay_lib::get_file(&socket, &filepath, &branch).await?;
             if let Some(path) = out {
                 fs::write(path, &bytes)?;
@@ -76,7 +81,12 @@ async fn main() -> Result<()> {
                 io::stdout().write_all(&bytes)?;
             }
         }
-        Commands::Put { socket, filepath, branch, from } => {
+        Commands::Put {
+            socket,
+            filepath,
+            branch,
+            from,
+        } => {
             let data: Vec<u8> = if let Some(p) = from {
                 fs::read(p)?
             } else {
@@ -87,14 +97,21 @@ async fn main() -> Result<()> {
             let resp = relay_lib::put_file(&socket, &filepath, &branch, Bytes::from(data)).await?;
             println!("{}", serde_json::to_string_pretty(&resp)?);
         }
-        Commands::Query { socket, path, branch, body } => {
+        Commands::Query {
+            socket,
+            path,
+            branch,
+            body,
+        } => {
             let body_json = if let Some(b) = body {
                 // Try parse as JSON, else wrap as { q: string }
                 match serde_json::from_str::<serde_json::Value>(&b) {
                     Ok(v) => Some(v),
                     Err(_) => Some(serde_json::json!({"q": b})),
                 }
-            } else { None };
+            } else {
+                None
+            };
             let resp = relay_lib::post_query(&socket, &branch, path.as_deref(), body_json).await?;
             println!("{}", serde_json::to_string_pretty(&resp)?);
         }

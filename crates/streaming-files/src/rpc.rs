@@ -4,12 +4,19 @@ use crate::model::{AddResult, TorrentFile, TorrentState, TorrentStatus};
 #[async_trait::async_trait]
 pub trait TorrentClient: Send + Sync {
     async fn healthy(&self) -> Result<bool>;
-    async fn add_magnet(&self, magnet: &str, save_path: Option<&str>, seeding: Option<bool>) -> Result<AddResult>;
+    async fn add_magnet(
+        &self,
+        magnet: &str,
+        save_path: Option<&str>,
+        seeding: Option<bool>,
+    ) -> Result<AddResult>;
     async fn status(&self, info_hash: &str) -> Result<TorrentStatus>;
     async fn list_files(&self, info_hash: &str) -> Result<Vec<TorrentFile>>;
     async fn set_seeding(&self, info_hash: &str, on: bool) -> Result<()>;
     async fn save_path(&self, info_hash: &str) -> Result<Option<String>>;
-    fn name(&self) -> &'static str { "unknown" }
+    fn name(&self) -> &'static str {
+        "unknown"
+    }
 }
 
 // Placeholder no-op client used until real adapters (qBittorrent / Transmission) are wired
@@ -17,10 +24,19 @@ pub struct NullClient;
 
 #[async_trait::async_trait]
 impl TorrentClient for NullClient {
-    async fn healthy(&self) -> Result<bool> { Ok(false) }
+    async fn healthy(&self) -> Result<bool> {
+        Ok(false)
+    }
 
-    async fn add_magnet(&self, _magnet: &str, _save_path: Option<&str>, _seeding: Option<bool>) -> Result<AddResult> {
-        Err(StreamingError::RpcUnavailable("no torrent backend configured".into()))
+    async fn add_magnet(
+        &self,
+        _magnet: &str,
+        _save_path: Option<&str>,
+        _seeding: Option<bool>,
+    ) -> Result<AddResult> {
+        Err(StreamingError::RpcUnavailable(
+            "no torrent backend configured".into(),
+        ))
     }
 
     async fn status(&self, info_hash: &str) -> Result<TorrentStatus> {
@@ -40,13 +56,21 @@ impl TorrentClient for NullClient {
         })
     }
 
-    async fn list_files(&self, _info_hash: &str) -> Result<Vec<TorrentFile>> { Ok(vec![]) }
+    async fn list_files(&self, _info_hash: &str) -> Result<Vec<TorrentFile>> {
+        Ok(vec![])
+    }
 
-    async fn set_seeding(&self, _info_hash: &str, _on: bool) -> Result<()> { Ok(()) }
+    async fn set_seeding(&self, _info_hash: &str, _on: bool) -> Result<()> {
+        Ok(())
+    }
 
-    async fn save_path(&self, _info_hash: &str) -> Result<Option<String>> { Ok(None) }
+    async fn save_path(&self, _info_hash: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
 
-    fn name(&self) -> &'static str { "none" }
+    fn name(&self) -> &'static str {
+        "none"
+    }
 }
 
 pub mod qbit;

@@ -9,7 +9,12 @@ pub struct PlayConfirm {
 #[async_trait::async_trait]
 pub trait UiPrompt: Send + Sync {
     async fn pick_download_dir(&self, suggested: Option<&str>) -> Result<Option<String>>;
-    async fn confirm_play(&self, title: &str, file_path: &str, size_bytes: u64) -> Result<PlayConfirm>;
+    async fn confirm_play(
+        &self,
+        title: &str,
+        file_path: &str,
+        size_bytes: u64,
+    ) -> Result<PlayConfirm>;
 }
 
 // Optional video player abstraction (client feature)
