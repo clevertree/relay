@@ -1,0 +1,26 @@
+FROM debian:bookworm-slim
+LABEL org.opencontainers.image.source="https://github.com/clevertree/relay"
+WORKDIR /srv/relay
+
+# Install runtime deps: git-daemon, deluge, curl, tar, tini, nginx, certbot
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git git-daemon-run deluged deluge-web curl tar ca-certificates tini \
+    nginx certbot python3-certbot-nginx jq python3 python3-requests \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy prebuilt server binary from build context
+COPY target/release/relay-server /usr/local/bin/relay-server
+
+# Copy entrypoint script
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+
+RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay
+
+EXPOSE 80 443 8088 9418 4001 5001 8080
+
+ENV RELAY_REPO_PATH=/srv/relay/data/repo.git \
+    RELAY_BIND=0.0.0.0:8088 \
+    RELAY_TEMPLATE_URL=https://github.com/clevertree/relay-template
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

@@ -1,0 +1,36 @@
+# Ignore Git and editor metadata
+.git
+.gitignore
+.vscode
+.idea
+
+# Node/Next artifacts (not needed for Rust server build)
+node_modules
+**/node_modules
+.next
+storybook-static
+dist
+
+# Rust build output
+target
+!target/release/relay-server
+
+# pnpm/npm lock and caches
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+.pnpm-store
+
+# Docker and OS artifacts
+.DS_Store
+Dockerfile*
+docker-compose*.yml
+
+# Logs and temp
+logs
+*.log
+tmp
+
+# Built site and static assets
+site
+build
