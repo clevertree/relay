@@ -70,17 +70,94 @@ Run the Client (Tauri desktop)
 
 Docker (all-in-one)
 
-Build and run an all-in-one image with Git daemon, Deluge (BitTorrent), IPFS, and the Relay server.
+Build and run an all-in-one image with Git daemon, Deluge (BitTorrent), IPFS, nginx SSL proxy, and the Relay server.
+
+## Environment Variables
+
+### Core Configuration
+- `RELAY_REPO_PATH` — Path to bare Git repository (default: `/srv/relay/data/repo.git`)
+- `RELAY_BIND` — Server bind address (default: `0.0.0.0:8088`)
+- `RELAY_TEMPLATE_URL` — URL to clone initial repository from (default: `https://github.com/clevertree/relay-template`)
+
+### SSL & DNS Configuration
+- `RELAY_CERTBOT_EMAIL` — Email for Let's Encrypt SSL certificates (required for HTTPS)
+- `RELAY_DNS_DOMAIN` — Domain for DNS registration (default: `relaynet.online`)
+- `RELAY_DNS_SUBDOMAIN` — Subdomain for this node (default: `node1`)
+- `RELAY_CERTBOT_STAGING` — Use Let's Encrypt staging environment (set to `true` for testing)
+
+### Vercel DNS Integration
+- `VERCEL_API_TOKEN` — Vercel API token for DNS management
+- `VERCEL_TEAM_ID` — Vercel team ID (optional)
+
+## Build & Run
 
 Build:
+```bash
 docker build -t relay-all-in-one .
+```
 
-Run (insecure; no auth):
+Run (basic, no SSL):
+```bash
 docker run --rm -p 8088:8088 -p 9418:9418 \
   -p 4001:4001 -p 5001:5001 -p 8080:8080 \
   -p 58846:58846 -p 58946:58946 -p 58946:58946/udp \
-  -v %cd%/data:/srv/relay/data \
+  -v $(pwd)/data:/srv/relay/data \
   relay-all-in-one
+```
+
+Run (with SSL and DNS):
+```bash
+docker run --rm \
+  -p 80:80 -p 443:443 \
+  -p 8088:8088 -p 9418:9418 \
+  -p 4001:4001 -p 5001:5001 -p 8080:8080 \
+  -p 58846:58846 -p 58946:58946 -p 58946:58946/udp \
+  -e RELAY_CERTBOT_EMAIL="your-email@example.com" \
+  -e RELAY_DNS_SUBDOMAIN="your-node" \
+  -e VERCEL_API_TOKEN="your-vercel-token" \
+  -v $(pwd)/data:/srv/relay/data \
+  relay-all-in-one
+```
+
+## Kubernetes Deployment
+
+The project includes Terraform configuration for deploying to Kubernetes with automatic SSL certificates:
+
+```bash
+cd terraform/rackspace-spot
+terraform init
+terraform apply
+```
+
+### DaemonSet Configuration
+
+The Kubernetes DaemonSet (`k8s/relay-daemonset.yaml`) deploys one pod per node with:
+- Host networking for direct port access
+- Automatic SSL certificate provisioning via Let's Encrypt
+- DNS registration with Vercel API
+- Persistent volume for repository data
+
+### Troubleshooting
+
+**SSL Certificate Issues:**
+- Ensure `RELAY_CERTBOT_EMAIL` is set to a valid email
+- Check certbot logs: `kubectl logs <pod-name>`
+- Certificates are stored at `/etc/letsencrypt/live/<domain>/`
+
+**Repository Not Serving:**
+- Verify relay-server is running: `kubectl exec <pod> -- ps aux | grep relay`
+- Check nginx proxy config: `kubectl exec <pod> -- cat /etc/nginx/sites-enabled/default`
+- Ensure repository exists: `kubectl exec <pod> -- ls -la /srv/relay/data/`
+
+**DNS Issues:**
+- Verify Vercel API token has DNS management permissions
+- Check DNS propagation: `dig <subdomain>.<domain>`
+- Pod IP should match DNS A record
+
+**Entrypoint Failures:**
+- The entrypoint script handles repository initialization, SSL setup, and DNS registration
+- Check logs for specific failure points
+- Manual intervention may be needed for complex network setups
 
 Repository Layout
 

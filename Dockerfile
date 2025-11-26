@@ -32,13 +32,28 @@ COPY --from=builder /work/target/release/relay-server /usr/local/bin/relay-serve
 # Create dirs
 RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay
 
-# Entrypoint script
+# Entrypoint script handles:
+# - Repository initialization from RELAY_TEMPLATE_URL
+# - IPFS, Deluge, and Git daemon startup
+# - Relay server startup on RELAY_BIND port
+# - DNS registration via Vercel API (if VERCEL_API_TOKEN set)
+# - SSL certificate provisioning via Let's Encrypt (if RELAY_CERTBOT_EMAIL set)
+# - Nginx proxy configuration for HTTPS
 COPY docker/entrypoint.sh /entrypoint.sh
 # Ensure entrypoint has Unix line endings inside the image (fixes CRLF from Windows hosts)
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
+# Expose ports:
+# 80, 443 - HTTP/HTTPS (nginx proxy)
+# 8088 - Relay server direct access
+# 9418 - Git daemon
+# 4001 - IPFS swarm
+# 5001 - IPFS API
+# 8080 - IPFS gateway
+# 58846, 58946 - Deluge daemon and web UI
 EXPOSE 80 443 8088 9418 4001 5001 8080 58846 58946 58946/udp
 
+# Core configuration
 ENV RELAY_REPO_PATH=/srv/relay/data/repo.git \
     RELAY_BIND=0.0.0.0:8088 \
     RELAY_TEMPLATE_URL=https://github.com/clevertree/relay-template
