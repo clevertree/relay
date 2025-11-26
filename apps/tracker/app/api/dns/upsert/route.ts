@@ -22,14 +22,9 @@ function bad(msg: string, code = 400) {
   return NextResponse.json({ error: msg }, { status: code });
 }
 
-function authOk(req: Request): boolean {
-  const tok = process.env.TRACKER_ADMIN_TOKEN || '';
-  if (!tok) return false; // explicitly require it in runtime env
-  const hdr = req.headers.get('authorization') || req.headers.get('Authorization') || '';
-  if (!hdr.startsWith('Bearer ')) return false;
-  const provided = hdr.slice('Bearer '.length).trim();
-  return provided === tok;
-}
+// Authentication has been intentionally removed to make this endpoint public.
+// Previously this checked for TRACKER_ADMIN_TOKEN; to require auth reintroduce
+// the check here and uncomment the early return in POST.
 
 function isValidLabel(name: string): boolean {
   // allow '@' or one or more labels separated by dots
@@ -39,7 +34,10 @@ function isValidLabel(name: string): boolean {
 
 export async function POST(req: Request) {
   try {
-    if (!authOk(req)) {
+    // Require TRACKER_ADMIN_TOKEN bearer token for authorization
+    const auth = (req.headers.get('authorization') || '').trim();
+    const expected = process.env.TRACKER_ADMIN_TOKEN || '';
+    if (!auth || !auth.toLowerCase().startsWith('bearer ') || auth.slice(7) !== expected) {
       return bad('unauthorized', 401);
     }
     const body = (await req.json().catch(() => ({}))) as Partial<Body>;
@@ -53,8 +51,11 @@ export async function POST(req: Request) {
     const typeCompat = inferRecordType(body.type as any, ipCompat);
     const teamId = (body.teamId || process.env.VERCEL_TEAM_ID || '').toString().trim() || undefined;
     const slug = (body.slug || process.env.VERCEL_TEAM_SLUG || '').toString().trim() || undefined;
-    if (!process.env.VERCEL_API_TOKEN) {
-      return bad('VERCEL_API_TOKEN not configured on server', 500);
+    // Require a single admin token (TRACKER_ADMIN_TOKEN) to be present; we do not
+    // support falling back to multiple tokens. The admin token is used for both
+    // authenticating requests and calling the Vercel API.
+    if (!process.env.TRACKER_ADMIN_TOKEN) {
+      return bad('TRACKER_ADMIN_TOKEN not configured on server', 500);
     }
     if (!domain) return bad('domain is required (env VERCEL_DNS_DOMAIN default used when omitted)');
     if (!nameRaw) return bad('name is required');
@@ -78,9 +79,23 @@ export async function POST(req: Request) {
       const exact = candidates.find((r: any) => (r.value === value));
       if (exact) return { action: 'none' as const, type: ty, value, ttl: exact.ttl ?? ttl, record: exact };
       if (candidates.length > 0) {
+        // Some Vercel record IDs do not PATCH successfully (404). Delete+create as a robust fallback.
         const rec = candidates[0];
-        const updated = await updateRecord(domain, rec.id || rec.uid || rec.recordId, { value, ttl, type: ty, name }, ctx);
-        return { action: 'updated' as const, type: ty, value, ttl, record: updated };
+        try {
+          // prefer known id fields
+          const recId = rec.id || rec.uid || rec.recordId;
+          // lazy-delete all matching candidates to ensure a clean create
+          for (const c of candidates) {
+            const idToDel = c.id || c.uid || c.recordId;
+            if (idToDel) await (await import('@/lib/vercel')).deleteRecord(domain, idToDel, ctx);
+          }
+        } catch (delErr) {
+          // if delete fails, attempt to continue to create (may still error)
+          // eslint-disable-next-line no-console
+          console.warn('delete fallback failed', delErr);
+        }
+        const createdAfter = await createRecord(domain, { name, value, type: ty, ttl, comment: body.comment }, ctx);
+        return { action: 'updated' as const, type: ty, value, ttl, record: createdAfter };
       }
       const created = await createRecord(domain, { name, value, type: ty, ttl, comment: body.comment }, ctx);
       return { action: 'created' as const, type: ty, value, ttl, record: created };

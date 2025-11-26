@@ -3,28 +3,40 @@ import 'reflect-metadata';
 export const runtime = 'nodejs';
 import { ensureDb } from '@/lib/db';
 
+import TrackerToolsClient from './tracker-tools-client';
+import PeersStatusClient from './peers-status-client';
+
 export default async function Page() {
-  // During `next build` we may not have a DATABASE_URL configured.
-  // Avoid instantiating the DB in that case so prerendering doesn't
-  // require DB drivers. Show an empty list when no DB is configured.
+  // Require DATABASE_URL during render; fail fast if DB is not available.
+  // This enforces that server builds and renders only when a DB is configured.
   let peers: any[] = [];
-  if (process.env.DATABASE_URL && process.env.SKIP_DB_DURING_PRERENDER !== '1') {
-    await ensureDb();
-    const { dbModelsReady } = await import('@/lib/db');
-    if (dbModelsReady()) {
-      const { Peer } = await import('@/models/Peer');
-      peers = await Peer.findAll({ order: [['updatedAt', 'DESC']], limit: 200 });
-    } else {
-      // Models weren't registered successfully; return empty list for build.
-      peers = [];
-    }
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is required during render');
   }
+  await ensureDb();
+  const { dbModelsReady } = await import('@/lib/db');
+  if (dbModelsReady()) {
+    const { Peer } = await import('@/models/Peer');
+    peers = await Peer.findAll({ order: [['updatedAt', 'DESC']], limit: 200 });
+  } else {
+    // Models weren't registered successfully; throw to surface the problem during build.
+    throw new Error('Database models not registered during render');
+  }
+
   return (
-    <main>
+    <main style={{ padding: 20, fontFamily: 'sans-serif' }}>
       <h1>Relay Peer Server</h1>
       <p>Track sockets and their last update time.</p>
       <AddPeerForm />
-      <h2>Recent Peers</h2>
+
+      <section style={{ marginTop: 32 }}>
+        <h2>Tracker Tools</h2>
+        <TrackerToolsClient />
+      </section>
+
+      <h2 style={{ marginTop: 32 }}>Recent Peers</h2>
+      {/* Client-side status checks for peers (OPTIONS -> GET fallback) */}
+      <PeersStatusClient peers={peers} />
       {peers.length === 0 ? (
         <p>No peers yet.</p>
       ) : (

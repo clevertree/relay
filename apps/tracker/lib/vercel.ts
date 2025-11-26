@@ -3,9 +3,9 @@ import { Vercel } from '@vercel/sdk';
 export type TeamCtx = { teamId?: string; slug?: string };
 
 export function getVercelClient(): Vercel {
-  const token = process.env.VERCEL_API_TOKEN || '';
+  const token = process.env.TRACKER_ADMIN_TOKEN || '';
   if (!token) {
-    throw new Error('VERCEL_API_TOKEN is not set');
+    throw new Error('TRACKER_ADMIN_TOKEN is not set');
   }
   return new Vercel({ bearerToken: token });
 }
@@ -32,7 +32,7 @@ export function normalizeRecordName(name: string, domain: string): string {
 }
 
 export async function listRecords(domain: string, ctx?: TeamCtx): Promise<any[]> {
-  const token = process.env.VERCEL_API_TOKEN || '';
+  const token = process.env.TRACKER_ADMIN_TOKEN || '';
   const qs = new URLSearchParams();
   if (ctx?.teamId) qs.set('teamId', ctx.teamId);
   if (ctx?.slug) qs.set('slug', ctx.slug);
@@ -46,7 +46,7 @@ export async function listRecords(domain: string, ctx?: TeamCtx): Promise<any[]>
 }
 
 export async function createRecord(domain: string, data: { name: string; value: string; type: string; ttl?: number; comment?: string }, ctx?: TeamCtx): Promise<any> {
-  const token = process.env.VERCEL_API_TOKEN || '';
+  const token = process.env.TRACKER_ADMIN_TOKEN || '';
   const qs = new URLSearchParams();
   if (ctx?.teamId) qs.set('teamId', ctx.teamId);
   if (ctx?.slug) qs.set('slug', ctx.slug);
@@ -64,7 +64,7 @@ export async function createRecord(domain: string, data: { name: string; value: 
 }
 
 export async function updateRecord(domain: string, recordId: string, data: { name?: string; value?: string; type?: string; ttl?: number; comment?: string }, ctx?: TeamCtx): Promise<any> {
-  const token = process.env.VERCEL_API_TOKEN || '';
+  const token = process.env.TRACKER_ADMIN_TOKEN || '';
   const qs = new URLSearchParams();
   if (ctx?.teamId) qs.set('teamId', ctx.teamId);
   if (ctx?.slug) qs.set('slug', ctx.slug);
@@ -79,4 +79,21 @@ export async function updateRecord(domain: string, recordId: string, data: { nam
     throw new Error(`Vercel updateRecord failed: HTTP ${res.status} ${text}`);
   }
   return res.json();
+}
+
+export async function deleteRecord(domain: string, recordId: string, ctx?: TeamCtx): Promise<void> {
+  const token = process.env.TRACKER_ADMIN_TOKEN || '';
+  const qs = new URLSearchParams();
+  if (ctx?.teamId) qs.set('teamId', ctx.teamId);
+  if (ctx?.slug) qs.set('slug', ctx.slug);
+  const url = `https://api.vercel.com/v2/domains/${encodeURIComponent(domain)}/records/${encodeURIComponent(recordId)}?${qs.toString()}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Vercel deleteRecord failed: HTTP ${res.status} ${text}`);
+  }
+  return;
 }

@@ -1,0 +1,50 @@
+{
+  "info": {
+    "name": "Relay Tracker",
+    "_postman_id": "",
+    "description": "Lightweight Postman collection for the Relay Tracker API (GET /api/peers, POST /api/peers/upsert)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "tracker_base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "GET /api/peers",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{tracker_base_url}}/api/peers",
+          "host": ["{{tracker_base_url}}"],
+          "path": ["api", "peers"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/peers/upsert",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"socket\": \"ws://localhost:4001\",\n  \"repos\": [\"my/repo\"]\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{tracker_base_url}}/api/peers/upsert",
+          "host": ["{{tracker_base_url}}"],
+          "path": ["api", "peers", "upsert"]
+        }
+      },
+      "response": []
+    }
+  ]
+}

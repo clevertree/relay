@@ -59,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
     // Build router (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
     let app = Router::new()
         .route("/openapi.yaml", get(get_openapi_yaml))
+        .route("/swagger-ui", get(get_swagger_ui))
         .route("/env", axum::routing::post(post_env))
         .route("/", get(get_root).options(options_capabilities))
         .route("/*path", get(get_file).put(put_file).delete(delete_file).options(options_capabilities))
@@ -275,6 +276,46 @@ async fn get_openapi_yaml() -> impl IntoResponse {
         StatusCode::OK,
         [("Content-Type", "application/yaml")],
         relay_lib::assets::OPENAPI_YAML,
+    )
+}
+
+// Serve Swagger UI HTML page
+async fn get_swagger_ui() -> impl IntoResponse {
+    let html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="SwaggerUI" />
+    <title>SwaggerUI</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js" crossorigin></script>
+<script>
+    window.onload = () => {
+        window.ui = SwaggerUIBundle({
+            url: '/openapi.yaml',
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            presets: [
+                SwaggerUIBundle.presets.apis,
+                SwaggerUIBundle.presets.standalone
+            ],
+            plugins: [
+                SwaggerUIBundle.plugins.DownloadUrl
+            ],
+            layout: "BaseLayout"
+        });
+    };
+</script>
+</body>
+</html>"#;
+    (
+        StatusCode::OK,
+        [("Content-Type", "text/html")],
+        html,
     )
 }
 
