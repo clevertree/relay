@@ -5,8 +5,20 @@ WORKDIR /srv/relay
 # Install runtime deps: git-daemon, deluge, curl, tar, tini, nginx, certbot
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git git-daemon-run deluged deluge-web curl tar ca-certificates tini \
-    nginx certbot python3-certbot-nginx jq python3 python3-requests \
+    nginx certbot python3-certbot-nginx jq python3 python3-requests wget gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Install go-ipfs (so /entrypoint.sh can call `ipfs`)
+ARG IPFS_VERSION=v0.18.1
+RUN set -eux; \
+    ARCH=amd64; \
+    TARFILE="go-ipfs_${IPFS_VERSION}_linux-${ARCH}.tar.gz"; \
+    URL="https://dist.ipfs.io/go-ipfs/${IPFS_VERSION}/${TARFILE}"; \
+    wget -q "$URL" -O /tmp/$TARFILE; \
+    tar -xzf /tmp/$TARFILE -C /tmp; \
+    mv /tmp/go-ipfs/ipfs /usr/local/bin/ipfs; \
+    chmod +x /usr/local/bin/ipfs; \
+    rm -rf /tmp/go-ipfs /tmp/$TARFILE
 
 # Copy prebuilt server binary from build context
 COPY target/release/relay-server /usr/local/bin/relay-server
