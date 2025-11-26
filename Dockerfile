@@ -9,7 +9,7 @@ COPY . /work
 WORKDIR /work/apps/server
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 LABEL org.opencontainers.image.source="https://github.com/your-org/relay"
 WORKDIR /srv/relay
 
