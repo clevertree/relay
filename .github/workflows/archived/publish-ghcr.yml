@@ -1,0 +1,19 @@
+name: publish-ghcr (archived)
+
+on:
+  # Archived: triggers removed to prevent accidental runs. Original file saved here.
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: clevertree/relay
+
+jobs:
+  archived:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Archived
+        run: echo "This workflow has been archived and moved to .github/workflows/archived/"

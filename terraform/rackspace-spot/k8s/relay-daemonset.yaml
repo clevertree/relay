@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: relay-daemon
+  labels:
+    app: relay
+spec:
+  selector:
+    matchLabels:
+      app: relay
+  template:
+    metadata:
+      labels:
+        app: relay
+    spec:
+      hostNetwork: true
+      hostPID: false
+      tolerations:
+        - operator: "Exists"
+      containers:
+        - name: relay
+          image: ghcr.io/clevertree/relay:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RELAY_DNS_SUBDOMAIN
+              value: ""
+            - name: CERTBOT_EMAIL
+              value: ""
+          ports:
+            - containerPort: 80
+            - containerPort: 443
+          securityContext:
+            runAsUser: 0
+            privileged: false

@@ -8,6 +8,9 @@ provider "spot" {
   token = local.spot_token
 }
 
+// Data source to list available server classes and their metadata (used for debugging)
+data "spot_serverclasses" "all" {}
+
 resource "spot_cloudspace" "cs" {
   cloudspace_name   = var.cloudspace_name
   region            = var.region

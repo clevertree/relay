@@ -77,69 +77,6 @@ PY
     echo "Allocated ephemeral port ${EPHEMERAL_PORT} and set RELAY_BIND=${RELAY_BIND}"
   fi
 
-  # If DNS vars are present, attempt to upsert via tracker DNS API before starting
-  if [ -n "${RELAY_DNS_SUBDOMAIN:-}" ]; then
-    DNS_DOMAIN=${RELAY_DNS_DOMAIN:-relaynet.online}
-    DNS_URL=${TRACKER_DNS_URL:-https://relaynet.online/api/dns/upsert}
-    # Get external IPv4
-    EXTERNAL_IPV4=$(curl -s https://api.ipify.org?format=json | jq -r .ip 2>/dev/null || echo "")
-    PAYLOAD=$(jq -n --arg name "$RELAY_DNS_SUBDOMAIN" --arg domain "$DNS_DOMAIN" --arg ipv4 "$EXTERNAL_IPV4" '{name: $name, domain: $domain, ipv4: $ipv4}')
-    echo "Requesting DNS upsert to $DNS_URL with payload: $PAYLOAD"
-    # If TRACKER_ADMIN_TOKEN is set, include it
-    if [ -n "${TRACKER_ADMIN_TOKEN:-}" ]; then
-      AUTH_HEADER="Authorization: Bearer ${TRACKER_ADMIN_TOKEN}"
-    else
-      AUTH_HEADER=""
-    fi
-    if [ -n "$AUTH_HEADER" ]; then
-      RES=$(curl -s -o /tmp/dns_res -w "%{http_code}" -X POST -H "Content-Type: application/json" -H "$AUTH_HEADER" -d "$PAYLOAD" "$DNS_URL")
-    else
-      RES=$(curl -s -o /tmp/dns_res -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$DNS_URL")
-    fi
-    if [ "$RES" -lt 200 ] || [ "$RES" -ge 300 ]; then
-      echo "DNS upsert failed (status=$RES), response:" && cat /tmp/dns_res
-      echo "Exiting container due to DNS upsert failure"
-      exit 1
-    fi
-    echo "DNS upsert succeeded: " && cat /tmp/dns_res
-
-    # Write a minimal nginx site config to proxy the subdomain to the relay server
-    SERVER_NAME="${RELAY_DNS_SUBDOMAIN}.${DNS_DOMAIN}"
-    cat > /etc/nginx/sites-available/relay <<EOF
-server {
-    listen 80;
-    server_name ${SERVER_NAME};
-
-    location / {
-        proxy_pass http://127.0.0.1:8088;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-}
-EOF
-    ln -sf /etc/nginx/sites-available/relay /etc/nginx/sites-enabled/relay || true
-    # Start nginx so certbot can talk to it
-    nginx
-
-    # If CERTBOT_EMAIL is set, try to obtain certs via certbot --nginx
-    if [ -n "${CERTBOT_EMAIL:-}" ]; then
-      # Optionally use staging to avoid rate limits
-      STAGING_FLAG=""
-      if [ "${CERTBOT_STAGING:-}" = "1" ] || [ "${CERTBOT_STAGING:-}" = "true" ]; then
-        STAGING_FLAG="--staging"
-      fi
-      echo "Requesting TLS certificate for ${SERVER_NAME} via certbot"
-      if ! certbot --nginx $STAGING_FLAG --non-interactive --agree-tos --email "$CERTBOT_EMAIL" -d "$SERVER_NAME"; then
-        echo "certbot failed"
-        nginx -s stop || true
-        echo "Exiting container due to certbot failure"
-        exit 1
-      fi
-      echo "certbot succeeded"
-    fi
-  fi
-
   # Start the relay server in background so we can perform post-start tasks (peer upsert)
   echo "Starting relay-server with RELAY_BIND=${RELAY_BIND}"
   /usr/local/bin/relay-server &
