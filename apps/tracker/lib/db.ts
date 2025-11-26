@@ -12,13 +12,14 @@ let sequelize: Sequelize | null = null;
 export function getSequelize(): Sequelize {
     if (sequelize) return sequelize;
     const databaseUrl = process.env.DATABASE_URL;
+    if(!databaseUrl)
+        throw new Error('DATABASE_URL is not set');
         // Create the Sequelize instance without registering models yet to avoid
         // circular import/initialization issues in environments like Next.js build.
-        if (databaseUrl) {
             sequelize = new Sequelize(databaseUrl, {
                 dialect: 'postgres',
                 dialectModule: pg,
-                logging: false,
+                logging: true,
                 define: {
                     timestamps: true,
                     underscored: false,
@@ -29,18 +30,7 @@ export function getSequelize(): Sequelize {
                         : undefined,
                 },
             });
-        } else {
-            // Fallback to in-memory sqlite during build/prerender.
-            sequelize = new Sequelize({
-                dialect: 'sqlite',
-                storage: ':memory:',
-                logging: false,
-                define: {
-                    timestamps: true,
-                    underscored: false,
-                },
-            } as any);
-        }
+            sequelize.sync({ alter: process.env.RELAY_DB_ALTER === 'true' });
 
             // Models will be registered later in ensureDb() to avoid import side-effects
             // during module initialization (which can happen during Next.js build).
