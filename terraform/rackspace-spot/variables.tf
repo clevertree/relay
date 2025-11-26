@@ -28,3 +28,11 @@ variable "rackspace_spot_token" {
   sensitive   = true
   default     = null
 }
+
+# Vercel API token for DNS automation (used by Docker entrypoint inside the VM)
+variable "vercel_api_token" {
+  description = "Vercel API token for managing DNS records"
+  type        = string
+  sensitive   = true
+  default     = null
+}

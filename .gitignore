@@ -42,3 +42,10 @@ package-lock.json
 .env
 .env.local
 .env.*.local
+
+# Terraform secrets (do not commit)
+terraform/**/.terraform/
+terraform/**/terraform.tfstate*
+terraform/**/terraform.tfvars
+terraform/**/secrets.auto.tfvars
+terraform/**/*.secrets.tfvars

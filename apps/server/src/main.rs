@@ -66,8 +66,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    // Start background tracker registration task if env is configured
-    start_tracker_registration().await;
+    // Peer tracker removed; no background registration
 
     let bind = std::env::var("RELAY_BIND").unwrap_or_else(|_| "0.0.0.0:8088".into());
     let addr = SocketAddr::from_str(&bind)?;
@@ -77,81 +76,20 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Spawn a background task that periodically registers this server's socket and repos to the tracker.
-async fn start_tracker_registration() {
-    let tracker_url = std::env::var("RELAY_TRACKER_URL").ok();
-    let socket_url = std::env::var("RELAY_SOCKET_URL").ok();
-    if tracker_url.is_none() || socket_url.is_none() {
-        info!("tracker registration disabled (RELAY_TRACKER_URL or RELAY_SOCKET_URL not set)");
-        return;
-    }
-    let tracker = tracker_url.unwrap();
-    let socket = socket_url.unwrap();
-    let repo_path = std::env::var("RELAY_REPO_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("data/repo.git"));
-    let branch_env = std::env::var("RELAY_REGISTER_BRANCH").unwrap_or_else(|_| DEFAULT_BRANCH.to_string());
-    // Allow static repo list override via env (comma-separated)
-    let repos_env = std::env::var("RELAY_REPOS").ok();
+// Peer tracker removed; no background registration function
 
-    tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        loop {
-            let repos_list: Vec<String> = if let Some(env_list) = &repos_env {
-                env_list
-                    .split(',')
-                    .map(|s| s.trim().trim_matches('/').to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            } else {
-                // Discover by reading top-level directories on selected branch
-                match list_repos(&repo_path, &branch_env) {
-                    Ok(v) => v,
-                    Err(_) => Vec::new(),
-                }
-            };
-            // Build branches array with commit heads for each branch, optionally expand per repo
-            let heads = list_branch_heads(&repo_path)
-                .into_iter()
-                .map(|(branch, commit)| serde_json::json!({"branch": branch, "commit": commit}))
-                .collect::<Vec<_>>();
-            // Expand heads per repo to include repo name for tracker schema
-            let mut branches_per_repo: Vec<serde_json::Value> = Vec::new();
-            for r in &repos_list {
-                for h in &heads {
-                    let mut obj = h.clone();
-                    if let Some(map) = obj.as_object_mut() {
-                        map.insert("repo".to_string(), serde_json::Value::String(r.clone()));
-                    }
-                    branches_per_repo.push(obj);
-                }
-            }
-            let body = serde_json::json!({ "socket": socket, "repos": repos_list, "branches": branches_per_repo });
-            let url = format!("{}/api/peers/upsert", tracker.trim_end_matches('/'));
-            match client.post(&url).json(&body).send().await {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        info!(%socket, tracker = %tracker, "registered with tracker");
-                    } else {
-                        let code = resp.status();
-                        let text = resp.text().await.unwrap_or_default();
-                        error!(%socket, %code, %text, "tracker registration failed");
-                    }
-                }
-                Err(e) => {
-                    error!(error = %e, "tracker registration request error");
-                }
-            }
-            // Sleep 5 minutes
-            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-        }
-    });
-}
-
-// Serve the bundled OpenAPI YAML specification
+// Serve a minimal OpenAPI YAML specification (placeholder)
 async fn get_openapi_yaml() -> impl IntoResponse {
+    let yaml = r#"openapi: 3.0.0
+info:
+  title: Relay API
+  version: 0.0.0
+paths: {}
+"#;
     (
         StatusCode::OK,
         [("Content-Type", "application/yaml")],
-        relay_lib::assets::OPENAPI_YAML,
+        yaml,
     )
 }
 

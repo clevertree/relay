@@ -14,3 +14,6 @@
 
 # If you don't want to read from ../../rackspace_token, set token here
 # rackspace_spot_token = "REPLACE_WITH_YOUR_TOKEN"
+
+# Vercel API token for managing DNS (used by Docker entrypoint on the VM)
+# vercel_api_token = "REPLACE_WITH_YOUR_VERCEL_API_TOKEN"

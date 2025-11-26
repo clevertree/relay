@@ -1,4 +1,3 @@
-
 #!/bin/sh
 # Minimal entrypoint for Relay all-in-one image.
 # Starts IPFS, Deluge, ensures a bare repo exists, runs git-daemon, then execs relay-server.
@@ -82,8 +81,7 @@ PY
   /usr/local/bin/relay-server &
   RELAY_PID=$!
 
-  # Determine socket URL to advertise to tracker for peer upsert. Prefer RELAY_SOCKET_URL env if set,
-  # otherwise construct from detected host/name and allocated port.
+  # Determine socket URL (was previously advertised to tracker; tracker removed)
   if [ -n "${RELAY_SOCKET_URL:-}" ]; then
     SOCKET_URL=${RELAY_SOCKET_URL}
   else
@@ -103,39 +101,107 @@ PY
 
   echo "Advertising socket URL: ${RELAY_SOCKET_URL}"
 
-  # Peer upsert: call tracker API to register this node's socket and repos
-  if [ -n "${TRACKER_DNS_URL:-}" ] || [ -n "${RELAY_TRACKER_URL:-}" ]; then
-    # Prefer explicit TRACKER_DNS_URL for peer upsert endpoint; fallback to RELAY_TRACKER_URL + /api/peers/upsert
-    if [ -n "${RELAY_TRACKER_URL:-}" ]; then
-      PEERS_URL="${RELAY_TRACKER_URL%/}/api/peers/upsert"
+  # Tracker removed; skipping peer upsert
+
+  # --- Vercel DNS registration (requires VERCEL_API_TOKEN) ---
+  VERCEL_API_TOKEN_ENV=${VERCEL_API_TOKEN:-}
+  VERCEL_DOMAIN=${RELAY_DNS_DOMAIN:-relaynet.online}
+  VERCEL_SUBDOMAIN=${RELAY_DNS_SUBDOMAIN:-node1}
+  FQDN="${VERCEL_SUBDOMAIN}.${VERCEL_DOMAIN}"
+
+  get_public_ip() {
+    # Try multiple services to determine public IPv4
+    for url in \
+      "https://api.ipify.org" \
+      "https://ipv4.icanhazip.com" \
+      "https://ifconfig.me/ip"; do
+      ip=$(curl -fsS "$url" | tr -d '\r' | tr -d '\n' || true)
+      if echo "$ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        echo "$ip"
+        return 0
+      fi
+    done
+    return 1
+  }
+
+  vercel_dns_upsert() {
+    domain="$1"; name="$2"; value="$3"; type="${4:-A}"; ttl="${5:-60}"
+    auth_header="Authorization: Bearer ${VERCEL_API_TOKEN_ENV}"
+    base="https://api.vercel.com";
+    # List existing records matching name+type
+    list_url="${base}/v5/domains/${domain}/records?name=${name}&type=${type}"
+    list_res=$(curl -fsS -H "$auth_header" "$list_url" || true)
+    rec_id=$(echo "$list_res" | jq -r '.records[0].id // .records[0].uid // empty')
+    if [ -n "$rec_id" ]; then
+      # Update existing
+      patch_url="${base}/v5/domains/${domain}/records/${rec_id}"
+      body=$(jq -n --arg v "$value" --argjson t $ttl '{ value: $v, ttl: $t }')
+      curl -fsS -X PATCH -H "$auth_header" -H 'Content-Type: application/json' -d "$body" "$patch_url" >/dev/null
     else
-      PEERS_URL="${TRACKER_DNS_URL%/}/peers/upsert"
+      # Create new
+      create_url="${base}/v5/domains/${domain}/records"
+      body=$(jq -n --arg n "$name" --arg v "$value" --arg t "$type" --argjson ttl $ttl '{ name: $n, value: $v, type: $t, ttl: $ttl }')
+      curl -fsS -X POST -H "$auth_header" -H 'Content-Type: application/json' -d "$body" "$create_url" >/dev/null
     fi
-    # Build payload: socket and optionally domain or ipv4/ipv6
-    # Prefer domain when RELAY_DNS_SUBDOMAIN is set
-    PAYLOAD_PEER=$(jq -n \
-      --arg socket "${RELAY_SOCKET_URL}" \
-      --arg domain "${RELAY_DNS_SUBDOMAIN:-}" \
-      --arg dns_domain "${RELAY_DNS_DOMAIN:-}" \
-      --arg ipv4 "${RELAY_PUBLIC_IPV4:-}" \
-      --arg ipv6 "${RELAY_PUBLIC_IPV6:-}" \
-      --argjson repos '[]' \
-      '($domain // "") as $d | ($dns_domain // "") as $dd | \n+       ($d | length) as $hasDomain | \n+       if $hasDomain > 0 then {socket: $socket, domain: ($d + (if $dd|length>0 then ("." + $dd) else "" end)), repos: $repos} \n+       else {socket: $socket, ipv4: ($ipv4 // null), ipv6: ($ipv6 // null), repos: $repos} end')
-    echo "Posting peer upsert to ${PEERS_URL} with payload: ${PAYLOAD_PEER}"
-    if [ -n "${TRACKER_ADMIN_TOKEN:-}" ]; then
-      RES_PEER=$(curl -s -o /tmp/peer_res -w "%{http_code}" -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${TRACKER_ADMIN_TOKEN}" -d "${PAYLOAD_PEER}" "${PEERS_URL}")
-    else
-      RES_PEER=$(curl -s -o /tmp/peer_res -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "${PAYLOAD_PEER}" "${PEERS_URL}")
-    fi
-    if [ -z "${RES_PEER:-}" ] || [ "$RES_PEER" -lt 200 ] || [ "$RES_PEER" -ge 300 ]; then
-      echo "Peer upsert failed (status=$RES_PEER), response:" && cat /tmp/peer_res || true
-      echo "Killing relay-server (pid=${RELAY_PID}) and exiting"
+  }
+
+  if [ -n "$VERCEL_API_TOKEN_ENV" ]; then
+    echo "Attempting Vercel DNS upsert for ${FQDN}"
+    # Determine public IP
+    PUB_IP=""
+    for i in 1 2 3 4 5; do
+      PUB_IP=$(get_public_ip || true)
+      if [ -n "$PUB_IP" ]; then break; fi
+      echo "Failed to determine public IP (attempt $i); retrying..."
+      sleep 3
+    done
+    if [ -z "$PUB_IP" ]; then
+      echo "Could not determine public IP; stopping relay-server and exiting"
       kill ${RELAY_PID} || true
       exit 1
     fi
-    echo "Peer upsert succeeded: " && cat /tmp/peer_res
+
+    # Upsert A record with retries
+    DNS_OK="no"
+    for i in 1 2 3 4 5; do
+      if vercel_dns_upsert "$VERCEL_DOMAIN" "$VERCEL_SUBDOMAIN" "$PUB_IP" "A" 60; then
+        echo "DNS upsert succeeded (attempt $i) for ${FQDN} -> ${PUB_IP}"
+        DNS_OK="yes"; break
+      else
+        echo "DNS upsert failed (attempt $i); retrying..."
+        sleep 5
+      fi
+    done
+    if [ "$DNS_OK" != "yes" ]; then
+      echo "DNS upsert failed after retries; stopping relay-server and exiting"
+      kill ${RELAY_PID} || true
+      exit 1
+    fi
   else
-    echo "No tracker URL configured; skipping peer upsert"
+    echo "VERCEL_API_TOKEN not set; skipping DNS upsert"
+  fi
+
+  # --- SSL certificate via certbot (nginx) ---
+  if [ -n "${RELAY_CERTBOT_EMAIL:-}" ]; then
+    echo "Requesting SSL certificate for ${FQDN} via certbot"
+    CERT_OK="no"
+    for i in 1 2 3; do
+      if certbot --nginx -d "$FQDN" -m "$RELAY_CERTBOT_EMAIL" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
+        CERT_OK="yes"; break
+      else
+        echo "Certbot failed (attempt $i); retrying..."
+        sleep 10
+      fi
+    done
+    if [ "$CERT_OK" != "yes" ]; then
+      echo "Certbot failed after retries; stopping relay-server and exiting"
+      kill ${RELAY_PID} || true
+      exit 1
+    fi
+    # Reload nginx to pick up new certs
+    nginx -s reload || true
+  else
+    echo "RELAY_CERTBOT_EMAIL not set; skipping SSL certificate provisioning"
   fi
 
   # Wait for relay-server to exit (foreground)

@@ -34,10 +34,22 @@ variable "ghcr_pat" {
 
 variable "relay_dns_subdomain" {
   type    = string
-  default = ""
+  default = "node1"
 }
 
 variable "certbot_email" {
   type    = string
   default = ""
+}
+
+variable "relay_dns_domain" {
+  description = "Base DNS domain managed in Vercel (e.g., relaynet.online)"
+  type        = string
+  default     = "relaynet.online"
+}
+
+variable "vercel_api_token" {
+  description = "Vercel API token for DNS management"
+  type        = string
+  sensitive   = true
 }

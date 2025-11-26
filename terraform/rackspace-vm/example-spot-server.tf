@@ -20,6 +20,8 @@ resource "spot_server" "relay_vm" {
     GHCR_USERNAME       = var.ghcr_username
     GHCR_PAT            = var.ghcr_pat
     RELAY_DNS_SUBDOMAIN = var.relay_dns_subdomain
-    CERTBOT_EMAIL       = var.certbot_email
+    RELAY_DNS_DOMAIN    = var.relay_dns_domain
+    RELAY_CERTBOT_EMAIL = var.certbot_email
+    VERCEL_API_TOKEN    = var.vercel_api_token
   })
 }
