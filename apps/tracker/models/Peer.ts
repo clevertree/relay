@@ -12,6 +12,15 @@ export class Peer extends Model {
     @Column({type: DataType.STRING, allowNull: false})
     socket!: string;
 
+    @Column({type: DataType.STRING, allowNull: true})
+    domain?: string;
+
+    @Column({type: DataType.STRING, allowNull: true})
+    ipv4?: string;
+
+    @Column({type: DataType.STRING, allowNull: true})
+    ipv6?: string;
+
     // @CreatedAt
     // @Column(DataType.DATE)
     // createdAt!: Date;

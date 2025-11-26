@@ -154,7 +154,6 @@ async fn start_tracker_registration() {
 /// - RELAY_DNS_SUBDOMAIN: subdomain label to upsert (e.g., "node1"). If empty, feature is disabled.
 /// - RELAY_DNS_DOMAIN: optional, defaults to relaynet.online when omitted.
 /// - TRACKER_DNS_URL: optional, defaults to https://relaynet.online/api/dns/upsert
-/// - TRACKER_ADMIN_TOKEN: optional bearer token to authorize the tracker DNS endpoint when present
 /// - RELAY_PUBLIC_IPV4 / RELAY_PUBLIC_IPV6: optional explicit addresses; otherwise resolved from RELAY_SOCKET_URL host
 /// - RELAY_DNS_REFRESH_SECS: optional u64; if set (>0) will refresh periodically
 /// - VERCEL_TEAM_ID / VERCEL_TEAM_SLUG: optional team scoping for DNS API
@@ -166,10 +165,6 @@ async fn start_dns_upsert() {
             return;
         }
     };
-    // Do not require TRACKER_ADMIN_TOKEN in the server binary; the token is only
-    // used by the Next.js tracker service. If unset, proceed without adding an
-    // Authorization header when calling the tracker DNS endpoint.
-    let admin_token = std::env::var("TRACKER_ADMIN_TOKEN").ok().filter(|t| !t.trim().is_empty());
     let dns_url = std::env::var("TRACKER_DNS_URL").unwrap_or_else(|_| "https://relaynet.online/api/dns/upsert".to_string());
     let domain = std::env::var("RELAY_DNS_DOMAIN").ok();
     let team_id = std::env::var("VERCEL_TEAM_ID").ok();
@@ -208,15 +203,14 @@ async fn start_dns_upsert() {
             if let Some(slug) = &team_slug { body["slug"] = serde_json::Value::String(slug.clone()); }
 
             info!(subdomain = %sub, ipv4 = ?ipv4, ipv6 = ?ipv6, "Upserting DNS A/AAAA via tracker");
-            // Only include Authorization header when token is present. The
-            // server itself should not require the token to be configured.
-            let mut req = client.post(&dns_url)
+            // The relay server will call the tracker's DNS upsert endpoint without any
+            // authorization header. The tracker service (Next.js app) is responsible
+            // for authenticating requests to Vercel when necessary.
+            let res = client.post(&dns_url)
                 .header("Content-Type", "application/json")
-                .json(&body);
-            if let Some(ref token) = admin_token {
-                req = req.header("Authorization", format!("Bearer {}", token));
-            }
-            let res = req.send().await;
+                .json(&body)
+                .send()
+                .await;
             match res {
                 Ok(r) => {
                     let code = r.status();

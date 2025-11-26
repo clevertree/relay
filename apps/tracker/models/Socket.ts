@@ -9,6 +9,15 @@ export class Socket extends Model {
   @Column({ type: DataType.STRING, allowNull: false })
   declare socket: string;
 
+  @Column({ type: DataType.STRING, allowNull: true })
+  declare domain?: string;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  declare ipv4?: string;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  declare ipv6?: string;
+
   // associations are registered explicitly in ensureDb() to avoid circular import issues
   declare repos?: Array<Repo & { SocketRepo: SocketRepo }>;
 }

@@ -15,6 +15,9 @@ export async function POST(req: Request) {
         const { SocketRepoBranch } = await import('@/models/SocketRepoBranch');
     const body = await req.json().catch(() => ({}));
     const socket = (body?.socket ?? '').toString().trim();
+    const domainIn = (body?.domain ?? '').toString().trim();
+    const ipv4In = (body?.ipv4 ?? '').toString().trim();
+    const ipv6In = (body?.ipv6 ?? '').toString().trim();
     const reposIn: unknown = body?.repos;
     const branchesIn: unknown = body?.branches;
         if (!socket) {
@@ -30,8 +33,12 @@ export async function POST(req: Request) {
               ))
             : [];
 
-        // Upsert Socket by unique socket
-        const [sock] = await Socket.upsert({ socket });
+    // Upsert Socket by unique socket and optional domain/ips
+    const upsertData: any = { socket };
+    if (domainIn) upsertData.domain = domainIn;
+    if (ipv4In) upsertData.ipv4 = ipv4In;
+    if (ipv6In) upsertData.ipv6 = ipv6In;
+    const [sock] = await Socket.upsert(upsertData as any);
 
     // Attach repos: upsert each Repo by name then set associations (replace existing)
     const repoInstances: any[] = [];
@@ -66,6 +73,9 @@ export async function POST(req: Request) {
         return NextResponse.json({
             id: withRepos?.id ?? sock.id,
             socket: withRepos?.socket ?? socket,
+            domain: (withRepos?.domain ?? domainIn) || null,
+            ipv4: (withRepos?.ipv4 ?? ipv4In) || null,
+            ipv6: (withRepos?.ipv6 ?? ipv6In) || null,
             repos: Array.isArray(withRepos?.repos) ? (withRepos!.repos as any[]).map(r => r.name) : [],
             branches: (branchRows as any[]).map((r) => ({ repo: repoIdToName.get(r.repoId) || String(r.repoId), branch: r.branch, commit: r.commit })),
             updatedAt: withRepos?.updatedAt ?? sock.updatedAt,
