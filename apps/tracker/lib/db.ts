@@ -20,6 +20,12 @@ export function getSequelize(): Sequelize {
                 dialect: 'postgres',
                 dialectModule: pg,
                 logging: console.log,
+                  pool: {
+                        max: 5, // Maximum number of connections in the pool
+                        min: 0, // Minimum number of connections in the pool
+                        acquire: 30000, // Time in milliseconds to wait for a connection to be acquired
+                        idle: 10000, // Time in milliseconds a connection can be idle before being released
+                    },
                 define: {
                     timestamps: true,
                     underscored: false,
