@@ -21,9 +21,10 @@ const DEFAULTS = {
   preferences: { openAfterDownload: true },
 };
 
-// In-memory per-tab page info (branch detection, origin)
-const pageInfo = new Map(); // tabId -> { origin, branch }
+// In-memory per-tab page info (branch/repo detection, origin)
+const pageInfo = new Map(); // tabId -> { origin, branch, repo }
 const branchRules = new Map(); // tabId -> { ruleId, origin, branch }
+const repoRules = new Map(); // tabId -> { ruleId, origin, repo }
 
 // Track tab removal to cleanup
 if (browser.tabs && browser.tabs.onRemoved) {
@@ -31,6 +32,7 @@ if (browser.tabs && browser.tabs.onRemoved) {
     pageInfo.delete(tabId);
     // Cleanup any header injection rules/listeners tied to this tab
     try { removeBranchHeaderRule(tabId); } catch (_) {}
+    try { removeRepoHeaderRule(tabId); } catch (_) {}
   });
 }
 
@@ -182,6 +184,71 @@ function removeBranchHeaderRule(tabId) {
     try { browser.webRequest.onBeforeSendHeaders.removeListener(rec.listener); } catch {}
   }
   branchRules.delete(tabId);
+}
+
+async function addRepoHeaderRule(tabId, origin, repo) {
+  if (!origin || !repo) return;
+  // Store in-memory
+  const existing = pageInfo.get(tabId) || { origin };
+  pageInfo.set(tabId, { ...existing, origin: origin, repo: repo, branch: existing.branch });
+  const isChr = isChromium();
+  if (isChr && chrome.declarativeNetRequest) {
+    const ruleId = 200000 + Number(tabId);
+    const url = new URL(origin);
+    const scheme = url.protocol; // e.g., 'http:'
+    const host = url.host; // includes port if any
+    const regex = `^${escapeRegex(scheme)}//${escapeRegex(host)}/.*`;
+    const rule = {
+      id: ruleId,
+      priority: 1,
+      action: {
+        type: 'modifyHeaders',
+        requestHeaders: [{ header: 'X-Relay-Repo', operation: 'set', value: String(repo) }],
+      },
+      condition: {
+        tabIds: [tabId],
+        regexFilter: regex,
+        resourceTypes: [
+          'main_frame','sub_frame','xmlhttprequest','script','stylesheet','image','font','media','ping','other'
+        ],
+      },
+    };
+    try {
+      await new Promise((resolve) => chrome.declarativeNetRequest.updateSessionRules({
+        removeRuleIds: [ruleId], addRules: [rule],
+      }, resolve));
+      repoRules.set(tabId, { ruleId, origin, repo });
+    } catch (e) {
+      console.warn('addRepoHeaderRule failed (Chromium)', e);
+    }
+  } else if (browser.webRequest && browser.webRequest.onBeforeSendHeaders) {
+    const filter = { urls: [origin.replace(/\/$/, '') + '/*'], tabId };
+    const listener = (details) => {
+      const hdrs = details.requestHeaders || [];
+      const name = 'X-Relay-Repo';
+      const found = hdrs.find((h) => h.name.toLowerCase() === name.toLowerCase());
+      if (found) found.value = String(repo); else hdrs.push({ name, value: String(repo) });
+      return { requestHeaders: hdrs };
+    };
+    try {
+      browser.webRequest.onBeforeSendHeaders.addListener(listener, filter, ['blocking', 'requestHeaders']);
+      repoRules.set(tabId, { listener, origin, repo });
+    } catch (e) {
+      console.warn('addRepoHeaderRule failed (FF)', e);
+    }
+  }
+}
+
+function removeRepoHeaderRule(tabId) {
+  const rec = repoRules.get(tabId);
+  if (!rec) return;
+  if (rec.ruleId && isChromium() && chrome.declarativeNetRequest) {
+    try { chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [rec.ruleId], addRules: [] }, () => {}); } catch {}
+  }
+  if (rec.listener && browser.webRequest && browser.webRequest.onBeforeSendHeaders) {
+    try { browser.webRequest.onBeforeSendHeaders.removeListener(rec.listener); } catch {}
+  }
+  repoRules.delete(tabId);
 }
 
 // Downloads
@@ -392,7 +459,10 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           try { json = await res.json(); } catch (_) { json = {}; }
           const branches = Array.isArray(json?.branches) ? json.branches : [];
           const capabilities = Array.isArray(json?.capabilities) ? json.capabilities : [];
-          sendResponse({ ok: true, branches, capabilities });
+          const repos = Array.isArray(json?.repos) ? json.repos : [];
+          const currentBranch = typeof json?.currentBranch === 'string' ? json.currentBranch : null;
+          const currentRepo = typeof json?.currentRepo === 'string' ? json.currentRepo : null;
+          sendResponse({ ok: true, branches, repos, capabilities, currentBranch, currentRepo });
         } catch (e) {
           sendResponse({ ok: false, error: String(e) });
         }
@@ -401,7 +471,7 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'pageBranch': {
         const tabId = sender?.tab?.id;
         if (tabId != null) {
-          const info = { origin: msg.origin || (sender?.origin || null), branch: msg.branch || null };
+          const info = { origin: msg.origin || (sender?.origin || null), branch: msg.branch || null, repo: msg.repo || null };
           pageInfo.set(tabId, info);
         }
         sendResponse({ ok: true });
@@ -434,10 +504,35 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             } catch (e) { reject(e); }
           });
           // Remember in-memory until the content script reports the new page
-          pageInfo.set(tab.id, { origin, branch });
+          const prev = pageInfo.get(tab.id) || { origin };
+          pageInfo.set(tab.id, { origin, branch, repo: prev.repo || null });
           // Install request header injection for this tab
           try { await addBranchHeaderRule(tab.id, origin, branch); } catch {}
           // Reload the tab to apply immediately
+          await new Promise((resolve) => browser.tabs.reload(tab.id, {}, resolve));
+          sendResponse({ ok: true });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e) });
+        }
+        break;
+      }
+      case 'setActiveTabRepo': {
+        const repo = (msg && msg.repo) || '';
+        const [tab] = await new Promise((resolve) => browser.tabs.query({ active: true, currentWindow: true }, resolve));
+        if (!tab || !tab.url) { sendResponse({ ok: false, error: 'no active tab' }); break; }
+        try {
+          const origin = new URL(tab.url).origin;
+          try { await requestHostPermission(origin + '/*'); } catch {}
+          await new Promise((resolve, reject) => {
+            try {
+              browser.cookies.set({ url: tab.url, name: 'relay-repo', value: repo, path: '/', sameSite: 'lax' }, (c) => {
+                if (browser.runtime.lastError) reject(browser.runtime.lastError); else resolve(c);
+              });
+            } catch (e) { reject(e); }
+          });
+          const prev = pageInfo.get(tab.id) || { origin };
+          pageInfo.set(tab.id, { origin, branch: prev.branch || null, repo });
+          try { await addRepoHeaderRule(tab.id, origin, repo); } catch {}
           await new Promise((resolve) => browser.tabs.reload(tab.id, {}, resolve));
           sendResponse({ ok: true });
         } catch (e) {
@@ -536,10 +631,16 @@ try {
     const listener = (details) => {
       if (details.type !== 'main_frame') return;
       const hdrs = details.responseHeaders || [];
-      const h = hdrs.find((x) => x.name && x.name.toLowerCase() === 'x-relay-branch');
-      if (h && details.tabId != null) {
+      const hb = hdrs.find((x) => x.name && x.name.toLowerCase() === 'x-relay-branch');
+      const hr = hdrs.find((x) => x.name && x.name.toLowerCase() === 'x-relay-repo');
+      if ((hb || hr) && details.tabId != null) {
         const url = new URL(details.url);
-        pageInfo.set(details.tabId, { origin: url.origin, branch: h.value || h.binaryValue || null });
+        const prev = pageInfo.get(details.tabId) || { origin: url.origin };
+        pageInfo.set(details.tabId, {
+          origin: url.origin,
+          branch: hb ? (hb.value || hb.binaryValue || null) : prev.branch || null,
+          repo: hr ? (hr.value || hr.binaryValue || null) : prev.repo || null,
+        });
       }
     };
     browser.webRequest.onHeadersReceived.addListener(listener, { urls: ['<all_urls>'] }, ['responseHeaders']);

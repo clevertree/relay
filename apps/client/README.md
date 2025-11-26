@@ -24,8 +24,10 @@ Planned next (follow-up)
 - OS file associations installer to make Relay Client the default media player.
 
 Tracker API reference (from apps/tracker)
-- GET /api/peers → returns latest peers: `[ { id, socket, updatedAt } ]`
-- POST /api/peers/upsert with JSON body `{ socket }` → upserts by unique socket and returns `{ id, socket, updatedAt }`
+- GET /api/peers → returns latest peers with repositories and branch heads:
+  `[{ id, socket, repos: string[], branches: [{ repo, branch, commit }], updatedAt }]`
+- POST /api/peers/upsert with JSON body `{ socket, repos?: string[], branches?: [{ repo, branch, commit }] }`
+  → upserts by unique socket, associates repos and branch heads, and returns the peer
 
 Configuration
 - Environment variable `RELAY_TRACKER_URL` sets the default tracker, defaults to `https://relaynet.online`.

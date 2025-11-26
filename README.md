@@ -5,20 +5,20 @@ Overview
 This monorepo hosts the Relay Network reference implementation:
 - apps/server — Rust Relay Server that serves and commits files directly from a Git repository via a simple HTTP API.
 - apps/client — Tauri (Rust) + React + TypeScript + Tailwind desktop client.
-- apps/tracker — Next.js tracker that lists recent master peer sockets (already provided/deployed).
+- apps/tracker — Next.js tracker that stores peer sockets and the repositories/branches they serve (with branch HEAD commits).
 - crates/relay-lib — Shared Rust library with HTTP client helpers and bundled assets (OpenAPI, rules schema, default HTML template, 404 page).
 - crates/hooks — Rust crate used by Git hooks to validate repository rules and enforce insert constraints.
 
 What is the Relay API?
 
-The Relay API describes CRUD operations on any repository path while selecting a Git branch via header. It also includes POST /status for server metadata and capabilities. Certain file types (html, js) are blocked for security.
+The Relay API describes CRUD operations on any repository path while selecting a Git branch and repository subpath via headers/cookies/query. Discovery and capabilities are provided via the HTTP OPTIONS method (no `/status`). Certain file types (html, js) are blocked for writes.
 
 Repository rules (relay.yaml)
 
 - Each repository may contain a `relay.yaml` at its root describing what files are allowed to be inserted, the JSON Schema for `meta.json`, and a declarative database policy.
 - These rules are enforced only for new commits (existing files are not retroactively validated).
 - The JSON Schema for `relay.yaml` is bundled in `crates/relay-lib/assets/rules.schema.yaml` and exposed via the `relay_lib::assets` module for Rust.
-- The Relay server returns the parsed rules (as JSON) in `POST /status`, and honors the optional `indexFile` setting to suggest a default document.
+- The Relay server returns discovery data (capabilities, branches, repos, current selections) via `OPTIONS` and honors the optional `indexFile` setting when rendering index documents.
 - The commit hooks crate (`crates/hooks`) validates pushes using `relay.yaml` and rejects violations.
 - The rules `db` section enables fully declarative indexing and querying using SQLite. All SQL features are allowed. The system binds named params like `:branch`, `:path`, `:meta_dir`, `:meta_json`, and `:meta_<field>` for top-level meta fields.
 
@@ -46,7 +46,7 @@ Install workspace dependencies
    - Server: cargo build --manifest-path apps/server/Cargo.toml
    - Hooks:  cargo build --manifest-path crates/hooks/Cargo.toml
 
-Run the Tracker (already included, optional local run)
+Run the Tracker (optional local run)
 
 The tracker is already deployed to Vercel. To run locally:
 pnpm -C apps/tracker dev
@@ -91,14 +91,20 @@ Repository Layout
 - apps/client — Tauri + React + TS + Tailwind
 - crates/hooks — Git hooks runner crate (placeholder)
 
-API Summary
+API Summary (Server)
 
-- Header: X-Relay-Branch: <branch> (default: main)
-- GET /{path} — Return file bytes from repo at branch.
-- PUT /{path} — Upsert file content; commits to branch.
-- DELETE /{path} — Delete file; commits to branch.
-- QUERY /{path?} — Policy-driven query backed by the local SQLite index. Default pagination pageSize=25; `X-Relay-Branch` may be a branch or `all`.
-- POST /status — Returns server status, branches, sample paths (honors rules.indexFile), capabilities, and `rules` JSON if present.
+- Headers:
+  - `X-Relay-Branch: <branch>` (default: main)
+  - `X-Relay-Repo: <repo-subdir>` (defaults to env or first repo directory)
+- GET /{path} — Return file bytes scoped under the selected repo and branch.
+- PUT /{path} — Upsert file content (commit) scoped to repo/branch.
+- DELETE /{path} — Delete file (commit) scoped to repo/branch.
+- QUERY /{path?} — Policy-driven query backed by the local index. Default pagination pageSize=25; `X-Relay-Branch` may be a branch or `all`.
+- OPTIONS / and OPTIONS /* — Discovery payload: capabilities, branches, repos, currentBranch, currentRepo, branchHeads (branch → commit). If `X-Relay-Branch`/`X-Relay-Repo` are provided (or query `?branch=`/`?repo=`), the response is filtered accordingly.
+
+Tracker API Summary
+- GET /api/peers — `[{ id, socket, repos: string[], branches: [{ repo, branch, commit }], updatedAt }]`
+- POST /api/peers/upsert — `{ socket, repos?: string[], branches?: [{ repo, branch, commit }] }`
 
 Security
 
@@ -119,7 +125,7 @@ Bundled assets and templating
 
 Notes
 
-- The local index database (SQLite) is created/updated by Git hooks based on `rules.db` policies. Do not store this database inside the Git repo.
+- The local index database (SQLite/PoloDB) is created/updated by Git hooks based on `rules.db` policies. Do not store this database inside the Git repo.
 
 Licensing
 

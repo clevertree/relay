@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post, options},
+    routing::{get, options},
     Json, Router,
 };
 use tokio::net::TcpListener;
@@ -27,6 +27,7 @@ struct AppState {
 }
 
 const HEADER_BRANCH: &str = "X-Relay-Branch";
+const HEADER_REPO: &str = "X-Relay-Repo";
 const DEFAULT_BRANCH: &str = "main";
 // Disallowed extensions for general access; JavaScript is now allowed to be loaded (GET)
 // but remains blocked for writes via PUT/DELETE (enforced below and by hooks).
@@ -55,21 +56,17 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState { repo_path };
 
-    // Middleware to support custom QUERY method as an alias for POST /query/*
-    // If a request comes in with method "QUERY" to any path like "/foo/bar",
-    // we rewrite it to a POST request targeting "/query/foo/bar" (preserving the query string).
+    // Build router (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
     let app = Router::new()
-        .route("/status", post(post_status))
         .route("/openapi.yaml", get(get_openapi_yaml))
-        .route("/env", post(post_env))
-        // Accept any HTTP method for /query/*path; middleware will rewrite custom
-        // METHOD QUERY to POST /query/* and other clients may call POST directly.
-        .route("/query/*path", axum::routing::any(post_query))
+        .route("/env", axum::routing::post(post_env))
         .route("/", get(get_root).options(options_capabilities))
         .route("/*path", get(get_file).put(put_file).delete(delete_file).options(options_capabilities))
-        .layer(axum::middleware::from_fn(query_alias_middleware))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
+
+    // Start background tracker registration task if env is configured
+    start_tracker_registration().await;
 
     let bind = std::env::var("RELAY_BIND").unwrap_or_else(|_| "0.0.0.0:8088".into());
     let addr = SocketAddr::from_str(&bind)?;
@@ -77,6 +74,75 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     axum::serve(listener, app.into_make_service()).await?;
     Ok(())
+}
+
+/// Spawn a background task that periodically registers this server's socket and repos to the tracker.
+async fn start_tracker_registration() {
+    let tracker_url = std::env::var("RELAY_TRACKER_URL").ok();
+    let socket_url = std::env::var("RELAY_SOCKET_URL").ok();
+    if tracker_url.is_none() || socket_url.is_none() {
+        info!("tracker registration disabled (RELAY_TRACKER_URL or RELAY_SOCKET_URL not set)");
+        return;
+    }
+    let tracker = tracker_url.unwrap();
+    let socket = socket_url.unwrap();
+    let repo_path = std::env::var("RELAY_REPO_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("data/repo.git"));
+    let branch_env = std::env::var("RELAY_REGISTER_BRANCH").unwrap_or_else(|_| DEFAULT_BRANCH.to_string());
+    // Allow static repo list override via env (comma-separated)
+    let repos_env = std::env::var("RELAY_REPOS").ok();
+
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        loop {
+            let repos_list: Vec<String> = if let Some(env_list) = &repos_env {
+                env_list
+                    .split(',')
+                    .map(|s| s.trim().trim_matches('/').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else {
+                // Discover by reading top-level directories on selected branch
+                match list_repos(&repo_path, &branch_env) {
+                    Ok(v) => v,
+                    Err(_) => Vec::new(),
+                }
+            };
+            // Build branches array with commit heads for each branch, optionally expand per repo
+            let heads = list_branch_heads(&repo_path)
+                .into_iter()
+                .map(|(branch, commit)| serde_json::json!({"branch": branch, "commit": commit}))
+                .collect::<Vec<_>>();
+            // Expand heads per repo to include repo name for tracker schema
+            let mut branches_per_repo: Vec<serde_json::Value> = Vec::new();
+            for r in &repos_list {
+                for h in &heads {
+                    let mut obj = h.clone();
+                    if let Some(map) = obj.as_object_mut() {
+                        map.insert("repo".to_string(), serde_json::Value::String(r.clone()));
+                    }
+                    branches_per_repo.push(obj);
+                }
+            }
+            let body = serde_json::json!({ "socket": socket, "repos": repos_list, "branches": branches_per_repo });
+            let url = format!("{}/api/peers/upsert", tracker.trim_end_matches('/'));
+            match client.post(&url).json(&body).send().await {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        info!(%socket, tracker = %tracker, "registered with tracker");
+                    } else {
+                        let code = resp.status();
+                        let text = resp.text().await.unwrap_or_default();
+                        error!(%socket, %code, %text, "tracker registration failed");
+                    }
+                }
+                Err(e) => {
+                    error!(error = %e, "tracker registration request error");
+                }
+            }
+            // Sleep 5 minutes
+            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        }
+    });
 }
 
 // Serve the bundled OpenAPI YAML specification
@@ -165,18 +231,7 @@ fn ensure_bare_repo(path: &PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Serialize)]
-struct StatusResponse {
-    ok: bool,
-    #[serde(rename = "repoInitialized")]
-    repo_initialized: bool,
-    branches: Vec<String>,
-    #[serde(rename = "samplePaths")]
-    sample_paths: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rules: Option<serde_json::Value>,
-    capabilities: Vec<&'static str>,
-}
+// Removed legacy /status response model — discovery moved under OPTIONS
 
 #[derive(Deserialize)]
 struct RulesDoc {
@@ -184,57 +239,85 @@ struct RulesDoc {
     index_file: Option<String>,
 }
 
-async fn post_status(State(state): State<AppState>) -> impl IntoResponse {
-    let repo = match Repository::open_bare(&state.repo_path) {
-        Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    };
-    let branches = list_branches(&repo);
-    // Try to read relay.yaml from default branch
-    let (rules_json, index_file) = match read_file_from_repo(&state.repo_path, DEFAULT_BRANCH, "relay.yaml") {
-        Ok(bytes) => {
-            let rules_yaml = String::from_utf8_lossy(&bytes);
-            match serde_yaml::from_str::<serde_json::Value>(&rules_yaml) {
-                Ok(json_val) => {
-                    // Attempt to parse indexFile for samplePaths
-                    let idx = serde_yaml::from_str::<RulesDoc>(&rules_yaml).ok().and_then(|d| d.index_file);
-                    (Some(json_val), idx.unwrap_or_else(|| "index.md".to_string()))
-                }
-                Err(_) => (None, "index.md".to_string()),
-            }
-        }
-        Err(_) => (None, "index.md".to_string()),
-    };
-    let body = StatusResponse {
-        ok: true,
-        repo_initialized: true,
-        branches,
-        sample_paths: serde_json::json!({"index": index_file}),
-        rules: rules_json,
-        capabilities: vec!["git", "torrent", "ipfs", "http"],
-    };
-    Json(body).into_response()
-}
+// Removed legacy /status endpoint handler
 
-/// OPTIONS handler — advertise server capabilities and available branches
-async fn options_capabilities(State(state): State<AppState>) -> impl IntoResponse {
-    // Open repo to list branches
-    let branches = match Repository::open_bare(&state.repo_path) {
-        Ok(repo) => list_branches(&repo),
-        Err(_) => Vec::new(),
+/// OPTIONS handler — discovery: capabilities, branches, repos, current selections
+async fn options_capabilities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: Option<Query<HashMap<String, String>>>,
+) -> impl IntoResponse {
+    // Branch and repo resolution from request context
+    let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
+    let repo_name = repo_from(&state.repo_path, &headers, &query.as_ref().map(|q| q.0.clone()), &branch);
+
+    // Enumerate branches and repos
+    let (mut branches, mut repos, mut branch_heads): (Vec<String>, Vec<String>, Vec<(String, String)>) = match Repository::open_bare(&state.repo_path) {
+        Ok(repo) => {
+            let branches = list_branches(&repo);
+            let repos = list_repos(&state.repo_path, &branch).unwrap_or_default();
+            let heads = list_branch_heads(&state.repo_path);
+            (branches, repos, heads)
+        }
+        Err(_) => (Vec::new(), Vec::new(), Vec::new()),
     };
-    // Keep capabilities aligned with /status
+
+    // Filter by requested branch (if explicitly set via header/query/cookie)
+    if let Some(req_branch) = query.as_ref().and_then(|q| q.0.get("branch").cloned()).or_else(|| headers.get(HEADER_BRANCH).and_then(|v| v.to_str().ok()).map(|s| s.to_string())) {
+        if !req_branch.is_empty() {
+            branches.retain(|b| b == &req_branch);
+            branch_heads.retain(|(b, _)| b == &req_branch);
+        }
+    }
+    // Filter repos list by requested repo (if present); also limit branch heads to those branches where the repo exists
+    if let Some(req_repo) = query.as_ref().and_then(|q| q.0.get("repo").cloned()).or_else(|| headers.get(HEADER_REPO).and_then(|v| v.to_str().ok()).map(|s| s.to_string())) {
+        if !req_repo.is_empty() {
+            repos.retain(|r| r == &req_repo);
+            // Keep only heads for branches where this repo exists
+            branch_heads.retain(|(b, _)| {
+                if let Ok(list) = list_repos(&state.repo_path, b) { list.iter().any(|r| r == &req_repo) } else { false }
+            });
+        }
+    }
     let capabilities = vec!["git", "torrent", "ipfs", "http"];
-    // Methods generally supported on file paths
-    let allow = "GET, PUT, DELETE, OPTIONS";
+    let allow = "GET, PUT, DELETE, OPTIONS, QUERY";
+    let body = serde_json::json!({
+        "ok": true,
+        "repoInitialized": true,
+        "capabilities": capabilities,
+        "branches": branches,
+        "repos": repos,
+        "currentBranch": branch,
+        "currentRepo": repo_name.clone().unwrap_or_default(),
+        "branchHeads": branch_heads.into_iter().map(|(b,c)| serde_json::json!({"branch": b, "commit": c})).collect::<Vec<_>>(),
+        "samplePaths": {"index": "index.md"},
+    });
     (
         StatusCode::OK,
-        [("Allow", allow.to_string())],
-        Json(serde_json::json!({
-            "capabilities": capabilities,
-            "branches": branches,
-        })),
+        [("Allow", allow.to_string()), (HEADER_BRANCH, branch), (HEADER_REPO, repo_name.clone().unwrap_or_default())],
+        Json(body),
     )
+}
+
+/// List all local branches with their HEAD commit ids
+fn list_branch_heads(repo_path: &PathBuf) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Ok(repo) = Repository::open_bare(repo_path) {
+        if let Ok(mut iter) = repo.branches(None) {
+            while let Some(Ok((b, _))) = iter.next() {
+                if let Ok(name_opt) = b.name() {
+                    if let Some(name) = name_opt {
+                        if let Ok(reference) = repo.find_reference(&format!("refs/heads/{}", name)) {
+                            if let Ok(commit) = reference.peel_to_commit() {
+                                out.push((name.to_string(), commit.id().to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 #[derive(Deserialize)]
@@ -399,7 +482,7 @@ mod tests {
         let tree = repo.find_tree(tree_oid).unwrap();
 
         let repo_path = dir.path().to_path_buf();
-        let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "", DEFAULT_BRANCH);
+        let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "", DEFAULT_BRANCH, "");
     assert!(ct.starts_with("text/html"), "ct was {}", ct);
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("<h1>Title</h1>") || s.contains("<a href=\"README.md\""));
@@ -419,7 +502,7 @@ mod tests {
         let tree = repo.find_tree(tree_oid).unwrap();
 
         let repo_path = dir.path().to_path_buf();
-        let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "text/markdown", DEFAULT_BRANCH);
+        let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "text/markdown", DEFAULT_BRANCH, "");
         assert_eq!(ct, "text/markdown");
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("# Title") || s.contains("README.md"));
@@ -461,6 +544,54 @@ fn branch_from(headers: &HeaderMap, query: &Option<HashMap<String, String>>) -> 
     DEFAULT_BRANCH.to_string()
 }
 
+fn sanitize_repo_name(name: &str) -> Option<String> {
+    let trimmed = name.trim().trim_matches('/');
+    if trimmed.is_empty() { return None; }
+    if trimmed.contains("..") { return None; }
+    Some(trimmed.to_string())
+}
+
+fn repo_from(repo_path: &PathBuf, headers: &HeaderMap, query: &Option<HashMap<String, String>>, branch: &str) -> Option<String> {
+    // Precedence: query ?repo= -> header X-Relay-Repo -> cookie relay-repo -> env RELAY_DEFAULT_REPO -> first in list_repos
+    if let Some(q) = query {
+        if let Some(r) = q.get("repo").and_then(|s| sanitize_repo_name(s)) { return Some(r); }
+    }
+    if let Some(h) = headers.get(HEADER_REPO).and_then(|v| v.to_str().ok()).and_then(|s| sanitize_repo_name(s)) {
+        return Some(h);
+    }
+    if let Some(cookie_hdr) = headers.get("cookie").and_then(|v| v.to_str().ok()) {
+        for part in cookie_hdr.split(';') {
+            let mut kv = part.trim().splitn(2, '=');
+            let k = kv.next().unwrap_or("").trim();
+            let v = kv.next().unwrap_or("");
+            if k == "relay-repo" {
+                if let Some(s) = sanitize_repo_name(v) { return Some(s); }
+            }
+        }
+    }
+    if let Ok(env_def) = std::env::var("RELAY_DEFAULT_REPO") {
+        if let Some(s) = sanitize_repo_name(&env_def) { return Some(s); }
+    }
+    if let Ok(list) = list_repos(repo_path, branch) { return list.into_iter().next(); }
+    None
+}
+
+fn list_repos(repo_path: &PathBuf, branch: &str) -> anyhow::Result<Vec<String>> {
+    let repo = Repository::open_bare(repo_path)?;
+    let refname = format!("refs/heads/{}", branch);
+    let reference = repo.find_reference(&refname)?;
+    let commit = reference.peel_to_commit()?;
+    let tree = commit.tree()?;
+    let mut out: Vec<String> = Vec::new();
+    for entry in tree.iter() {
+        if entry.kind() == Some(ObjectType::Tree) {
+            if let Some(name) = entry.name() { out.push(name.to_string()); }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
 async fn get_file(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -474,6 +605,16 @@ async fn get_file(
         return (StatusCode::FORBIDDEN, "Disallowed file type").into_response();
     }
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
+    let repo_name = match repo_from(&state.repo_path, &headers, &query.as_ref().map(|q| q.0.clone()), &branch) {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                [("Content-Type", "text/plain".to_string()), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, "".to_string())],
+                "Repository not found".to_string(),
+            ).into_response();
+        }
+    };
     info!(%branch, "resolved branch");
 
     // Open repo and branch
@@ -488,7 +629,7 @@ async fn get_file(
     let reference = match repo.find_reference(&refname) {
         Ok(r) => r,
         Err(_) => {
-            return render_404_markdown(&state.repo_path, &branch, &decoded);
+            return render_404_markdown(&state.repo_path, &branch, &repo_name, &decoded);
         }
     };
     let commit = match reference.peel_to_commit() {
@@ -506,17 +647,22 @@ async fn get_file(
         }
     };
 
-    // Empty path or root → directory listing of root
-    let rel = decoded.trim_matches('/');
+    // Scope under selected repo
+    let path_scoped = {
+        let p = decoded.trim_matches('/');
+        if p.is_empty() { repo_name.clone() } else { format!("{}/{}", repo_name, p) }
+    };
+    // Empty path for repo root?
+    let rel = path_scoped.trim_matches('/');
     if rel.is_empty() {
         let accept_hdr = headers
             .get("accept")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        let (ct, body) = directory_response(&state.repo_path, &tree, &tree, rel, accept_hdr, &branch);
+        let (ct, body) = directory_response(&state.repo_path, &tree, &tree, rel, accept_hdr, &branch, &repo_name);
         return (
             StatusCode::OK,
-            [("Content-Type", ct), (HEADER_BRANCH, branch.clone())],
+            [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())],
             body,
         )
             .into_response();
@@ -527,7 +673,7 @@ async fn get_file(
     let entry = match tree.get_path(path_obj) {
         Ok(e) => e,
         Err(_) => {
-            return render_404_markdown(&state.repo_path, &branch, rel);
+            return render_404_markdown(&state.repo_path, &branch, &repo_name, rel);
         }
     };
     match entry.kind() {
@@ -563,10 +709,10 @@ async fn get_file(
                         // let css = css_hrefs_for(&tree, &base_dir, &branch);
                         // let js = js_hrefs_for(&tree, &branch);
                         let title = std::path::Path::new(rel).file_name().and_then(|s| s.to_str()).unwrap_or("Document");
-                        let wrapped = wrap_html_with_assets(title, &html_frag, &branch, &state.repo_path, &base_dir);
+                        let wrapped = wrap_html_with_assets(title, &html_frag, &branch, &repo_name, &state.repo_path, &base_dir);
                         return (
                             StatusCode::OK,
-                            [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.clone())],
+                            [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())],
                             wrapped,
                         )
                             .into_response();
@@ -574,7 +720,7 @@ async fn get_file(
                     }
                     // Non-markdown: serve with detected mime
                     let ct = mime_guess::from_path(rel).first_or_octet_stream().essence_str().to_string();
-                    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone())], blob.content().to_vec()).into_response()
+                    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())], blob.content().to_vec()).into_response()
                 }
                 Err(e) => {
                     error!(?e, "blob read error");
@@ -595,10 +741,10 @@ async fn get_file(
                 .get("accept")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-                let (ct, body) = directory_response(&state.repo_path, &tree, &sub_tree, rel, accept_hdr, &branch);
-                (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone())], body).into_response()
+                let (ct, body) = directory_response(&state.repo_path, &tree, &sub_tree, rel, accept_hdr, &branch, &repo_name);
+                (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())], body).into_response()
         }
-        _ => render_404_markdown(&state.repo_path, &branch, rel),
+        _ => render_404_markdown(&state.repo_path, &branch, &repo_name, rel),
     }
 }
 
@@ -609,6 +755,16 @@ async fn get_root(
 ) -> impl IntoResponse {
     // Explicitly implement root directory listing to avoid extractor mismatch
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
+    let repo_name = match repo_from(&state.repo_path, &headers, &query.as_ref().map(|q| q.0.clone()), &branch) {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                [("Content-Type", "text/plain".to_string()), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, "".to_string())],
+                "Repository not found".to_string(),
+            ).into_response();
+        }
+    };
     info!(%branch, "get_root resolved branch");
     let repo = match Repository::open_bare(&state.repo_path) {
         Ok(r) => r,
@@ -621,7 +777,7 @@ async fn get_root(
     let reference = match repo.find_reference(&refname) {
         Ok(r) => r,
         Err(_) => {
-            return render_404_markdown(&state.repo_path, &branch, "");
+            return render_404_markdown(&state.repo_path, &branch, &repo_name, "");
         }
     };
     let commit = match reference.peel_to_commit() {
@@ -642,8 +798,8 @@ async fn get_root(
         .get("accept")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let (ct, body) = directory_response(&state.repo_path, &tree, &tree, "", accept_hdr, &branch);
-    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone())], body).into_response()
+    let (ct, body) = directory_response(&state.repo_path, &tree, &tree, &repo_name, accept_hdr, &branch, &repo_name);
+    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())], body).into_response()
 }
 
 async fn put_file(
@@ -659,7 +815,23 @@ async fn put_file(
     }
     // Allow branch from query string too
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
-    match write_file_to_repo(&state.repo_path, &branch, &decoded, &body) {
+    let repo_name = match repo_from(&state.repo_path, &headers, &query.as_ref().map(|q| q.0.clone()), &branch) {
+        Some(r) => r,
+        None => {
+            // Optionally allow creating a new repo directory on PUT
+            if std::env::var("RELAY_ALLOW_CREATE_REPO").ok().map(|v| v == "true" || v == "1").unwrap_or(true) {
+                // proceed with scoped path even if repo dir doesn't yet exist (tree builder will create)
+                String::from("new")
+            } else {
+                return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Repository not found"}))).into_response();
+            }
+        }
+    };
+    let scoped_path = {
+        let p = decoded.trim_matches('/');
+        if p.is_empty() { repo_name.clone() } else { format!("{}/{}", repo_name, p) }
+    };
+    match write_file_to_repo(&state.repo_path, &branch, &scoped_path, &body) {
         Ok((commit, branch)) => Json(serde_json::json!({"commit": commit, "branch": branch, "path": decoded})).into_response(),
         Err(e) => {
             error!(?e, "write error");
@@ -784,7 +956,7 @@ fn md_to_html_bytes(bytes: &[u8]) -> Vec<u8> {
 // 2) Walk parent directories up to repo root looking for the filename
 // 3) Fallback to bundled relay-lib/assets/template.html
 // Variables replaced by name: {title}, {head}, {body}
-fn wrap_html_with_assets(title: &str, body: &str, branch: &str, repo_path: &PathBuf, base_dir: &str) -> Vec<u8> {
+fn wrap_html_with_assets(title: &str, body: &str, branch: &str, repo: &str, repo_path: &PathBuf, base_dir: &str) -> Vec<u8> {
     fn join_rel(base: &str, name: &str) -> String {
         if base.is_empty() { name.to_string() } else { format!("{}/{}", base.trim_matches('/'), name) }
     }
@@ -820,6 +992,7 @@ fn wrap_html_with_assets(title: &str, body: &str, branch: &str, repo_path: &Path
     let mut head = String::new();
     head.push_str("<meta charset=\"utf-8\">\n");
     head.push_str(&format!("<meta name=\"relay-branch\" content=\"{}\">\n", branch));
+    head.push_str(&format!("<meta name=\"relay-repo\" content=\"{}\">\n", repo));
     // Do named replacement
     let html = template_html
         .replace("{title}", title)
@@ -830,17 +1003,17 @@ fn wrap_html_with_assets(title: &str, body: &str, branch: &str, repo_path: &Path
 
 // Helper to return directory listing as HTML or markdown depending on Accept header
 // root_tree is the tree at repo root (for CSS presence checks), listing_tree is the directory to list
-fn directory_response(repo_path: &PathBuf, _root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str) -> (String, Vec<u8>) {
+fn directory_response(repo_path: &PathBuf, _root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str, repo: &str) -> (String, Vec<u8>) {
     let md = render_directory_markdown(listing_tree, base_path);
     if accept_hdr.contains("text/markdown") {
         ("text/markdown".to_string(), md)
     } else {
         let body = String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
-        ("text/html; charset=utf-8".to_string(), wrap_html_with_assets("Directory", &body, branch, repo_path, base_path))
+        ("text/html; charset=utf-8".to_string(), wrap_html_with_assets("Directory", &body, branch, repo, repo_path, base_path))
     }
 }
 
-fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) -> Response {
+fn render_404_markdown(repo_path: &PathBuf, branch: &str, repo: &str, missing_path: &str) -> Response {
     // Determine parent directory of the missing path for theme.css lookup
     let parent_dir = {
         let trimmed = missing_path.trim_matches('/');
@@ -884,10 +1057,10 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, missing_path: &str) ->
         }
     }
 
-    let wrapped = wrap_html_with_assets("Not Found", &body_html, branch, repo_path, &parent_dir);
+    let wrapped = wrap_html_with_assets("Not Found", &body_html, branch, repo, repo_path, &parent_dir);
     (
         StatusCode::NOT_FOUND,
-        [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.to_string())],
+        [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo.to_string())],
         wrapped,
     )
     .into_response()

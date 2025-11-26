@@ -6,28 +6,29 @@ Repository policy
 - Never import or reference files directly from `apps/` other than code in this crate; prefer shared assets and data in shared crates.
 
 Endpoints
-- POST /status — returns status, branches, sample paths, capabilities
-  - Includes `rules` if the repository contains a `relay.yaml` at root (returned as JSON)
-  - Honors `rules.indexFile` to set the suggested default index document in response.samplePaths.index
-- GET /{path} — read file at branch (branch via header X-Relay-Branch or query `?branch=...`, default `main`)
+- OPTIONS / and OPTIONS /* — discovery endpoint returning capabilities, branches, repos, current selections, and branch HEAD commits (branchHeads). If `X-Relay-Branch` or `X-Relay-Repo` headers (or `?branch=`/`?repo=` query) are sent, the response is filtered accordingly.
+- GET /{path} — read file at branch/repo (branch via header X-Relay-Branch or query `?branch=...`, repo via header X-Relay-Repo or query `?repo=...`).
   - If the path resolves to a directory, returns a markdown listing with breadcrumbs and links.
   - If the file/dir is missing, returns 404 with `text/html` body. If `/site/404.md` exists on that branch, it is rendered; otherwise a default page plus a parent directory listing is returned. Global and per-directory CSS are auto-linked when present.
-- PUT /{path} — write file and commit to branch (branch via header or query `?branch=...`).
+- PUT /{path} — write file and commit to selected branch/repo (branch via header or query `?branch=...`; repo via header or query `?repo=...`).
   - Commits are validated by the hooks runner (`relay-hooks`) via a pre-receive check. Rejected commits return 400/500 with error text.
-- DELETE /{path} — delete file and commit to branch (branch via header or query `?branch=...`).
-- POST /query/{path?} — Generic YAML-driven query using the local PoloDB index built by hooks
+- DELETE /{path} — delete file and commit to selected branch/repo (branch via header or query `?branch=...`).
+- QUERY * — Custom method for YAML-driven query using the local PoloDB index built by hooks (no POST alias).
   - Pagination defaults: pageSize=25, page=0; can override via request body
   - Header X-Relay-Branch may be a branch name or `all` to query across branches
   - Request body (generic): `{ filter?: object, page?: number, pageSize?: number, sort?: [{ field, dir }] }`
   - Response: `{ total, page, pageSize, items }`
-- QUERY * — Method alias for `POST /query/*`
-  - Any `QUERY /foo/bar?x=y` is rewritten by the server to `POST /query/foo/bar?x=y`
 
 Env
 - RELAY_REPO_PATH: path to a bare repo (default ./data/repo.git)
 - RELAY_BIND: address (default 0.0.0.0:8088)
 - RELAY_HOOKS_BIN: optional path to the hooks runner binary (default `relay-hooks` on PATH)
 - RELAY_DB_PATH: optional path to the local PoloDB file (default `<gitdir>/relay_index.polodb`)
+// Tracker self-registration (optional)
+- RELAY_TRACKER_URL: tracker base URL (e.g., https://relaynet.online)
+- RELAY_SOCKET_URL: the public socket URL of this server (e.g., http://localhost:8088)
+- RELAY_REPOS: optional comma-separated list of repo subdirectories to report (if omitted, discovered from the current branch)
+- RELAY_REGISTER_BRANCH: which branch to scan for repo discovery (default: main)
 
 Rules
 - The server will read `relay.yaml` from the default branch (main) when serving `/status` and return it as JSON.

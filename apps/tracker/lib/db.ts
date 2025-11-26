@@ -1,6 +1,9 @@
 import 'reflect-metadata';
 import {Sequelize} from 'sequelize-typescript';
-import {Peer} from '@/models/Peer';
+import {Socket} from '@/models/Socket';
+import {Repo} from '@/models/Repo';
+import {SocketRepo} from '@/models/SocketRepo';
+import {SocketRepoBranch} from '@/models/SocketRepoBranch';
 import pg from 'pg';
 
 let sequelize: Sequelize | null = null;
@@ -14,7 +17,7 @@ export function getSequelize(): Sequelize {
     sequelize = new Sequelize(databaseUrl, {
         dialect: 'postgres',
         dialectModule: pg,
-        models: [Peer],
+        models: [Socket, Repo, SocketRepo, SocketRepoBranch],
         logging: false,
         define: {
             timestamps: true,
@@ -34,8 +37,8 @@ let synced = false;
 export async function ensureDb(): Promise<Sequelize> {
     const s = getSequelize();
     if (!synced) {
-        // Do not force drop; make non-destructive changes when possible
-        await s.sync();
+        // Apply schema changes; we intentionally break old schema and let Sequelize alter tables
+        await s.sync({ alter: true });
         synced = true;
     }
     return s;

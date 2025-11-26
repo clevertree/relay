@@ -20,24 +20,38 @@ async function refreshState() {
     const info = await bg({ type: 'getActivePageInfo' });
     const elStatus = qs('relayStatus');
     const wrap = qs('branchWrap');
+    const repoWrap = qs('repoWrap');
     const sel = qs('branch');
+    const selRepo = qs('repo');
     const defaults = ['main','dev','staging'];
     if (info?.ok && info.info && (info.info.branch || (info.tab && info.tab.url))) {
       const b = info.info.branch || '';
-      elStatus.textContent = b ? `Relay-ready • branch: ${b}` : 'Relay-ready • branch not specified';
+      const r = info.info.repo || '';
+      elStatus.textContent = `Relay-ready${b ? ` • branch: ${b}` : ''}${r ? ` • repo: ${r}` : ''}`;
       elStatus.style.color = '#0a0';
       wrap.style.display = 'block';
-      // populate dropdown via live OPTIONS request (no caching)
+      // populate dropdowns via live OPTIONS request (no caching)
       sel.innerHTML = '';
       const loading = document.createElement('option');
       loading.value = '';
       loading.textContent = 'Loading branches…';
       sel.appendChild(loading);
+      selRepo.innerHTML = '';
+      const loadingRepo = document.createElement('option');
+      loadingRepo.value = '';
+      loadingRepo.textContent = 'Loading repositories…';
+      selRepo.appendChild(loadingRepo);
       let choices = [];
+      let repos = [];
       try {
         const opt = await bg({ type: 'fetchBranchesForActiveTab' });
-        if (opt?.ok && Array.isArray(opt.branches) && opt.branches.length) {
-          choices = opt.branches;
+        if (opt?.ok) {
+          if (Array.isArray(opt.branches) && opt.branches.length) {
+            choices = opt.branches;
+          }
+          if (Array.isArray(opt.repos)) {
+            repos = opt.repos;
+          }
         }
       } catch {}
       if (!choices.length) choices = defaults.slice();
@@ -50,10 +64,24 @@ async function refreshState() {
         if (name === b) optEl.selected = true;
         sel.appendChild(optEl);
       }
+      // repos dropdown
+      repoWrap.style.display = repos && repos.length ? 'block' : 'none';
+      if (repos && repos.length) {
+        selRepo.innerHTML = '';
+        // ensure current repo is first/included
+        if (r && !repos.includes(r)) repos = [r, ...repos];
+        for (const name of repos) {
+          const o = document.createElement('option');
+          o.value = name; o.textContent = name;
+          if (name === r) o.selected = true;
+          selRepo.appendChild(o);
+        }
+      }
     } else {
       elStatus.textContent = 'This page is not part of the relay network';
       elStatus.style.color = '#888';
       wrap.style.display = 'none';
+      if (repoWrap) repoWrap.style.display = 'none';
     }
   } catch {}
   const recent = qs('recent');
@@ -145,6 +173,14 @@ async function main() {
     if (!branch) return;
     await bg({ type: 'setActiveTabBranch', branch });
     // Popup can close; the tab will reload
+    window.close();
+  });
+
+  qs('applyRepo').addEventListener('click', async () => {
+    const sel = qs('repo');
+    const repo = sel.value;
+    if (!repo) return;
+    await bg({ type: 'setActiveTabRepo', repo });
     window.close();
   });
 }

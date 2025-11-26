@@ -1,0 +1,97 @@
+openapi: 3.0.3
+info:
+  title: Relay Tracker API
+  version: 0.2.0
+  description: |
+    The Relay Tracker stores active peer sockets and the Git repositories (by subpath) they serve.
+servers:
+  - url: https://relaynet.online
+    description: Production
+  - url: http://localhost:3000
+    description: Local dev (Next.js)
+paths:
+  /api/peers:
+    get:
+      summary: List known peers with their repositories
+      operationId: listPeers
+      tags: [peers]
+      responses:
+        '200':
+          description: Peers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Peer'
+  /api/peers/upsert:
+    post:
+      summary: Upsert a peer socket and associate repositories
+      operationId: upsertPeer
+      tags: [peers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertPeerRequest'
+      responses:
+        '200':
+          description: Upserted peer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '400':
+          description: Invalid input
+components:
+  schemas:
+    Peer:
+      type: object
+      properties:
+        id:
+          type: integer
+        socket:
+          type: string
+          example: http://localhost:8088
+        repos:
+          type: array
+          items:
+            type: string
+          example: ["site", "movies", "docs"]
+        branches:
+          type: array
+          description: Branch heads known for this socket per repo
+          items:
+            $ref: '#/components/schemas/PeerBranch'
+        updatedAt:
+          type: string
+          format: date-time
+    PeerBranch:
+      type: object
+      properties:
+        repo:
+          type: string
+          example: site
+        branch:
+          type: string
+          example: main
+        commit:
+          type: string
+          description: 40-hex Git commit id for the branch HEAD
+          example: 9fceb02c3a9c...
+    UpsertPeerRequest:
+      type: object
+      required: [socket]
+      properties:
+        socket:
+          type: string
+        repos:
+          type: array
+          items:
+            type: string
+        branches:
+          type: array
+          description: Optional detailed branch heads per repo
+          items:
+            $ref: '#/components/schemas/PeerBranch'

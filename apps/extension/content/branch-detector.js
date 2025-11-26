@@ -6,8 +6,10 @@
     try {
       const meta = document.querySelector('meta[name="relay-branch"]');
       const branch = meta ? meta.getAttribute('content') : null;
+      const metaRepo = document.querySelector('meta[name="relay-repo"]');
+      const repo = metaRepo ? metaRepo.getAttribute('content') : null;
       const origin = location.origin;
-      const msg = { type: 'pageBranch', branch, origin };
+      const msg = { type: 'pageBranch', branch, repo, origin };
       if (typeof chrome !== 'undefined' && chrome.runtime) {
         chrome.runtime.sendMessage(msg, () => {});
       } else if (typeof browser !== 'undefined' && browser.runtime) {
