@@ -34,13 +34,26 @@ function isValidLabel(name: string): boolean {
 
 export async function POST(req: Request) {
   try {
-    // Require TRACKER_ADMIN_TOKEN bearer token for authorization
-    const auth = (req.headers.get('authorization') || '').trim();
-    const expected = process.env.TRACKER_ADMIN_TOKEN || '';
-    if (!auth || !auth.toLowerCase().startsWith('bearer ') || auth.slice(7) !== expected) {
-      return bad('unauthorized', 401);
+    // This endpoint is intentionally public — do not require a bearer token here.
+    // Try to parse JSON body; if that fails (or returns empty) fall back to
+    // reading raw text and JSON.parse to support clients that send raw bodies
+    // as text (the UI's "Send raw" uses that pattern).
+  let body = (await req.json().catch(() => ({}))) as Partial<Body> | undefined;
+    if (!body || (Object.keys(body).length === 0)) {
+      const txt = await req.text().catch(() => '');
+      if (txt && txt.trim()) {
+        try {
+          body = JSON.parse(txt) as Partial<Body>;
+        } catch (_e) {
+          // leave body as empty object if parse fails
+          body = {} as Partial<Body>;
+        }
+      } else {
+        body = {} as Partial<Body>;
+      }
     }
-    const body = (await req.json().catch(() => ({}))) as Partial<Body>;
+  // ensure body is defined for the remainder of the function
+  body = body || ({} as Partial<Body>);
     const domain = (body.domain || process.env.VERCEL_DNS_DOMAIN || 'relaynet.online').toString().trim();
     const nameRaw = (body.name || '').toString().trim();
     const ipCompat = (body.ip || '').toString().trim();
@@ -51,14 +64,13 @@ export async function POST(req: Request) {
     const typeCompat = inferRecordType(body.type as any, ipCompat);
     const teamId = (body.teamId || process.env.VERCEL_TEAM_ID || '').toString().trim() || undefined;
     const slug = (body.slug || process.env.VERCEL_TEAM_SLUG || '').toString().trim() || undefined;
-    // Require a single admin token (TRACKER_ADMIN_TOKEN) to be present; we do not
-    // support falling back to multiple tokens. The admin token is used for both
-    // authenticating requests and calling the Vercel API.
-    if (!process.env.TRACKER_ADMIN_TOKEN) {
-      return bad('TRACKER_ADMIN_TOKEN not configured on server', 500);
-    }
+    // NOTE: We do not require TRACKER_ADMIN_TOKEN to be present at the request
+    // layer. Vercel API calls (performed by helper functions) will use
+    // TRACKER_ADMIN_TOKEN if configured on the server; if it's missing, those
+    // helper calls may fail. Removing the authorization check here makes the
+    // endpoint publicly callable.
     if (!domain) return bad('domain is required (env VERCEL_DNS_DOMAIN default used when omitted)');
-    if (!nameRaw) return bad('name is required');
+  if (!nameRaw) return bad('name is required');
     // Validate that at least one of ip/ipv4/ipv6 is provided
     const hasAnyIp = !!(ipCompat || ipv4 || ipv6);
     if (!hasAnyIp) return bad('ip, ipv4 or ipv6 is required');
@@ -94,10 +106,10 @@ export async function POST(req: Request) {
           // eslint-disable-next-line no-console
           console.warn('delete fallback failed', delErr);
         }
-        const createdAfter = await createRecord(domain, { name, value, type: ty, ttl, comment: body.comment }, ctx);
+    const createdAfter = await createRecord(domain, { name, value, type: ty, ttl, comment: body?.comment }, ctx);
         return { action: 'updated' as const, type: ty, value, ttl, record: createdAfter };
       }
-      const created = await createRecord(domain, { name, value, type: ty, ttl, comment: body.comment }, ctx);
+  const created = await createRecord(domain, { name, value, type: ty, ttl, comment: body?.comment }, ctx);
       return { action: 'created' as const, type: ty, value, ttl, record: created };
     }
 
