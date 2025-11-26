@@ -19,7 +19,7 @@ export function getSequelize(): Sequelize {
             sequelize = new Sequelize(databaseUrl, {
                 dialect: 'postgres',
                 dialectModule: pg,
-                logging: true,
+                logging: console.log,
                 define: {
                     timestamps: true,
                     underscored: false,
