@@ -68,10 +68,14 @@ export async function ensureDb(): Promise<Sequelize> {
                     const R: any = Repo;
                     const SR: any = SocketRepo;
                     if (S && R && SR && typeof S.belongsToMany === 'function') {
-                        S.belongsToMany(R, { through: SR });
+                        // Explicitly specify the join keys to match the socket_repo table
+                        // columns (socketId, repoId). Without these Sequelize can generate
+                        // alias-derived column names (e.g. fId) which won't match the
+                        // existing schema and lead to "column does not exist" errors.
+                        S.belongsToMany(R, { through: SR, foreignKey: 'socketId', otherKey: 'repoId' });
                     }
                     if (R && S && SR && typeof R.belongsToMany === 'function') {
-                        R.belongsToMany(S, { through: SR });
+                        R.belongsToMany(S, { through: SR, foreignKey: 'repoId', otherKey: 'socketId' });
                     }
                 } catch (e) {
                     // If explicit association registration fails, rethrow to surface during render/build.
