@@ -25,7 +25,7 @@ COPY target/release/relay-server /usr/local/bin/relay-server
 
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh && ls -la /entrypoint.sh
 
 RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay
 
