@@ -3,58 +3,358 @@ info:
   title: Relay API
   version: 0.1.0
   description: |
-    The Relay API exposes CRUD operations on a Git repository with branch and repository selection via headers or cookies.
-    Disallowed file types for writes: .html, .htm, .js
+    The Relay system provides decentralized content hosting and peer-to-peer networking.
+
+    ## Components
+
+    ### Tracker API
+    The tracker maintains a registry of relay peers and their capabilities.
+
+    ### Relay Server API
+    Individual relay servers provide Git-based content hosting with HTTP access.
+
 servers:
-  - url: http://localhost:8088
-    description: Local Relay server
-tags:
-  - name: files
-    description: File CRUD and query
-  - name: system
-    description: Server status and capabilities
+  - url: https://www.relaynet.online/
+    description: Online Relay Tracker
+  - url: https://relay.example.com/
+    description: Example Relay Server (replace with actual relay URLs)
+
 paths:
-  /{path}:
-    parameters:
-      - in: header
-        name: X-Relay-Branch
-        schema:
-          type: string
-          default: main
-        required: false
-        description: Git branch to use
-      - in: header
-        name: X-Relay-Repo
-        schema:
-          type: string
-        required: false
-        description: Repository subdirectory to use (top-level folder name)
-      - in: path
-        name: path
-        required: true
-        schema:
-          type: string
-        description: Repository-relative path (URL-encoded)
+  # Tracker API endpoints
+  /api/peers:
     get:
-      tags: [files]
-      summary: Read file contents from a branch
-      operationId: getFile
+      summary: List registered peers
+      description: Returns a list of all registered relay peers with their socket URLs, repositories, and branch information.
+      operationId: listPeers
       responses:
         '200':
-          description: Raw file bytes
+          description: Successful response
           content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      description: Database ID of the peer
+                    socket:
+                      type: string
+                      description: WebSocket or HTTP URL of the peer
+                      example: "ws://relay.example.com:8088"
+                    repos:
+                      type: array
+                      items:
+                        type: string
+                      description: List of repository names hosted by this peer
+                    branches:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          repo:
+                            type: string
+                            description: Repository name
+                          branch:
+                            type: string
+                            description: Branch name
+                          commit:
+                            type: string
+                            description: Commit hash
+                    updatedAt:
+                      type: string
+                      format: date-time
+                      description: Last update timestamp
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+    post:
+      summary: Register or update a peer
+      description: Register a new peer or update an existing peer's information including socket URL, repositories, and branch heads.
+      operationId: upsertPeer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - socket
+              properties:
+                socket:
+                  type: string
+                  description: WebSocket or HTTP URL of the peer
+                  example: "ws://relay.example.com:8088"
+                domain:
+                  type: string
+                  description: Domain name for the peer (optional)
+                ipv4:
+                  type: string
+                  description: IPv4 address (optional)
+                ipv6:
+                  type: string
+                  description: IPv6 address (optional)
+                repos:
+                  type: array
+                  items:
+                    type: string
+                  description: List of repository names
+                branches:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - repo
+                      - branch
+                      - commit
+                    properties:
+                      repo:
+                        type: string
+                      branch:
+                        type: string
+                      commit:
+                        type: string
+      responses:
+        '200':
+          description: Peer registered/updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  socket:
+                    type: string
+                  domain:
+                    type: string
+                    nullable: true
+                  ipv4:
+                    type: string
+                    nullable: true
+                  ipv6:
+                    type: string
+                    nullable: true
+                  repos:
+                    type: array
+                    items:
+                      type: string
+                  branches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        repo:
+                          type: string
+                        branch:
+                          type: string
+                        commit:
+                          type: string
+                  updatedAt:
+                    type: string
+                    format: date-time
+        '400':
+          description: Invalid request
+        '500':
+          description: Server error
+
+  /api/peers/probe:
+    post:
+      summary: Test peer connectivity
+      description: Test whether a peer socket URL is reachable by attempting a TCP connection.
+      operationId: probePeer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - socket
+              properties:
+                socket:
+                  type: string
+                  description: Socket URL to test
+                  example: "ws://relay.example.com:8088"
+      responses:
+        '200':
+          description: Connectivity test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    description: Whether the connection was successful
+                  info:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum: [connected]
+                      error:
+                        type: string
+        '400':
+          description: Invalid socket URL
+        '503':
+          description: Connection failed
+        '500':
+          description: Server error
+
+  # Relay Server API endpoints
+  /openapi.yaml:
+    get:
+      summary: Get OpenAPI specification
+      description: Returns the OpenAPI specification for this relay server.
+      operationId: getOpenAPISpec
+      responses:
+        '200':
+          description: OpenAPI YAML specification
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /swagger-ui:
+    get:
+      summary: Swagger UI
+      description: Interactive API documentation interface.
+      operationId: getSwaggerUI
+      responses:
+        '200':
+          description: HTML page with Swagger UI
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /env:
+    post:
+      summary: Get environment variables
+      description: Returns whitelisted environment variables from the relay server (only RELAY_PUBLIC_* variables).
+      operationId: getEnvironment
+      responses:
+        '200':
+          description: Environment variables
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+
+  /{path}:
+    get:
+      summary: Get file or directory
+      description: |
+        Retrieve a file or directory listing from the Git repository.
+
+        **Branch Selection:**
+        - Query parameter: `?branch=name`
+        - Header: `X-Relay-Branch`
+        - Cookie: `relay-branch`
+
+        **Repository Selection:**
+        - Query parameter: `?repo=name`
+        - Header: `X-Relay-Repo`
+        - Cookie: `relay-repo`
+
+        **Content Negotiation:**
+        - Accept: `text/markdown` returns raw markdown
+        - Accept: `text/html` returns rendered HTML (default)
+      operationId: getFile
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          description: File or directory path
+        - name: branch
+          in: query
+          schema:
+            type: string
+          description: Git branch name
+        - name: repo
+          in: query
+          schema:
+            type: string
+          description: Repository name
+        - name: Accept
+          in: header
+          schema:
+            type: string
+            enum: [text/html, text/markdown]
+          description: Content type preference
+        - name: X-Relay-Branch
+          in: header
+          schema:
+            type: string
+          description: Git branch (header)
+        - name: X-Relay-Repo
+          in: header
+          schema:
+            type: string
+          description: Repository name (header)
+      responses:
+        '200':
+          description: File or directory content
+          content:
+            text/html:
+              schema:
+                type: string
+            text/markdown:
+              schema:
+                type: string
             application/octet-stream:
               schema:
                 type: string
                 format: binary
-        '403':
-          description: Disallowed file type
         '404':
-          description: File not found
+          description: File or directory not found
+
     put:
-      tags: [files]
-      summary: Create or update a file on a branch, committing the change
+      summary: Upload file
+      description: |
+        Upload or update a file in the Git repository.
+
+        **Branch Selection:** Same as GET endpoint
+        **Repository Selection:** Same as GET endpoint
+
+        **Restrictions:** .js, .html, .htm files are blocked for security.
       operationId: putFile
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          description: File path to create/update
+        - name: branch
+          in: query
+          schema:
+            type: string
+        - name: repo
+          in: query
+          schema:
+            type: string
+        - name: X-Relay-Branch
+          in: header
+          schema:
+            type: string
+        - name: X-Relay-Repo
+          in: header
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -64,115 +364,162 @@ paths:
               format: binary
       responses:
         '200':
-          description: File written and committed
+          description: File uploaded successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WriteResponse'
+                type: object
+                properties:
+                  commit:
+                    type: string
+                    description: Commit hash
+                  branch:
+                    type: string
+                  path:
+                    type: string
+        '400':
+          description: Invalid request or file type blocked
         '403':
-          description: Disallowed file type
+          description: File type not allowed
+        '500':
+          description: Server error
+
     delete:
-      tags: [files]
-      summary: Delete a file from a branch, committing the change
+      summary: Delete file
+      description: Delete a file from the Git repository.
       operationId: deleteFile
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          description: File path to delete
+        - name: branch
+          in: query
+          schema:
+            type: string
+        - name: repo
+          in: query
+          schema:
+            type: string
+        - name: X-Relay-Branch
+          in: header
+          schema:
+            type: string
+        - name: X-Relay-Repo
+          in: header
+          schema:
+            type: string
       responses:
         '200':
-          description: File deleted and committed
+          description: File deleted successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WriteResponse'
+                type: object
+                properties:
+                  commit:
+                    type: string
+                  branch:
+                    type: string
+                  path:
+                    type: string
         '404':
           description: File not found
         '403':
-          description: Disallowed file type
-  /:
+          description: File type not allowed
+        '500':
+          description: Server error
+
     options:
-      tags: [system]
-      summary: "Discovery: capabilities, branches, repos, and current selections"
-      operationId: optionsRoot
+      summary: Discover capabilities
+      description: |
+        Returns server capabilities, available branches, repositories, and current selections.
+
+        Supports the same branch/repo selection parameters as GET.
+      operationId: getCapabilities
+      parameters:
+        - name: branch
+          in: query
+          schema:
+            type: string
+        - name: repo
+          in: query
+          schema:
+            type: string
+        - name: X-Relay-Branch
+          in: header
+          schema:
+            type: string
+        - name: X-Relay-Repo
+          in: header
+          schema:
+            type: string
       responses:
         '200':
-          description: Discovery payload
+          description: Server capabilities and repository information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  repoInitialized:
+                    type: boolean
+                    example: true
+                  capabilities:
+                    type: array
+                    items:
+                      type: string
+                      enum: [git, torrent, ipfs, http]
+                  branches:
+                    type: array
+                    items:
+                      type: string
+                  repos:
+                    type: array
+                    items:
+                      type: string
+                  currentBranch:
+                    type: string
+                  currentRepo:
+                    type: string
+                  branchHeads:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        branch:
+                          type: string
+                        commit:
+                          type: string
+                  samplePaths:
+                    type: object
+                    properties:
+                      index:
+                        type: string
+                        example: "index.md"
           headers:
             Allow:
               schema:
                 type: string
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptionsResponse'
-  '/{any*}':
-    options:
-      tags: [system]
-      summary: Discovery for a specific path
-      operationId: optionsAny
-      responses:
-        '200':
-          description: Discovery payload
-          headers:
-            Allow:
+                example: "GET, PUT, DELETE, OPTIONS, QUERY"
+            X-Relay-Branch:
               schema:
                 type: string
-          content:
-            application/json:
+            X-Relay-Repo:
               schema:
-                $ref: '#/components/schemas/OptionsResponse'
+                type: string
+
 components:
-  schemas:
-    OptionsResponse:
-      type: object
-      properties:
-        ok:
-          type: boolean
-          example: true
-        repoInitialized:
-          type: boolean
-        capabilities:
-          type: array
-          items:
-            type: string
-          example: [git, torrent, ipfs, http]
-        branches:
-          type: array
-          items:
-            type: string
-        repos:
-          type: array
-          items:
-            type: string
-          description: Top-level directories considered repositories
-        currentBranch:
-          type: string
-        currentRepo:
-          type: string
-        branchHeads:
-          type: array
-          description: Current HEAD commit per branch; filtered by request headers/query when provided
-          items:
-            type: object
-            properties:
-              branch:
-                type: string
-              commit:
-                type: string
-        samplePaths:
-          type: object
-          additionalProperties:
-            type: string
-          example:
-            index: index.md
-    WriteResponse:
-      type: object
-      properties:
-        branch:
-          type: string
-        path:
-          type: string
-        commit:
-          type: string
-  x-relay:
-    methods:
-      QUERY:
-        summary: Custom method for server-side queries against the repository according to policy
-        notes: "This non-standard method may be blocked by some proxies. Clients should send directly to the server."
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token for admin operations (optional for most endpoints)
+
+security:
+  - bearerAuth: []
