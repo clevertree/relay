@@ -68,6 +68,9 @@ async fn main() -> anyhow::Result<()> {
     // Start background tracker registration task if env is configured
     start_tracker_registration().await;
 
+    // Start DNS upsert (Vercel) if configured via envs
+    start_dns_upsert().await;
+
     let bind = std::env::var("RELAY_BIND").unwrap_or_else(|_| "0.0.0.0:8088".into());
     let addr = SocketAddr::from_str(&bind)?;
     info!(%addr, "Relay server listening");
@@ -143,6 +146,127 @@ async fn start_tracker_registration() {
             tokio::time::sleep(std::time::Duration::from_secs(300)).await;
         }
     });
+}
+
+/// Spawn a one-shot (and optional periodic) task that upserts DNS A/AAAA records for the desired subdomain
+/// against the tracker DNS API (Vercel). Controlled by envs:
+/// - RELAY_DNS_SUBDOMAIN: subdomain label to upsert (e.g., "node1"). If empty, feature is disabled.
+/// - RELAY_DNS_DOMAIN: optional, defaults to relaynet.online when omitted.
+/// - TRACKER_DNS_URL: optional, defaults to https://relaynet.online/api/dns/upsert
+/// - TRACKER_ADMIN_TOKEN: required bearer token to authorize the tracker DNS endpoint
+/// - RELAY_PUBLIC_IPV4 / RELAY_PUBLIC_IPV6: optional explicit addresses; otherwise resolved from RELAY_SOCKET_URL host
+/// - RELAY_DNS_REFRESH_SECS: optional u64; if set (>0) will refresh periodically
+/// - VERCEL_TEAM_ID / VERCEL_TEAM_SLUG: optional team scoping for DNS API
+async fn start_dns_upsert() {
+    let sub = match std::env::var("RELAY_DNS_SUBDOMAIN") {
+        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
+        _ => {
+            info!("DNS upsert disabled (RELAY_DNS_SUBDOMAIN not set)");
+            return;
+        }
+    };
+    let admin_token = match std::env::var("TRACKER_ADMIN_TOKEN") {
+        Ok(t) if !t.trim().is_empty() => t,
+        _ => {
+            info!("DNS upsert disabled (TRACKER_ADMIN_TOKEN not set)");
+            return;
+        }
+    };
+    let dns_url = std::env::var("TRACKER_DNS_URL").unwrap_or_else(|_| "https://relaynet.online/api/dns/upsert".to_string());
+    let domain = std::env::var("RELAY_DNS_DOMAIN").ok();
+    let team_id = std::env::var("VERCEL_TEAM_ID").ok();
+    let team_slug = std::env::var("VERCEL_TEAM_SLUG").ok();
+    let refresh = std::env::var("RELAY_DNS_REFRESH_SECS").ok().and_then(|s| s.parse::<u64>().ok()).filter(|v| *v > 0);
+
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        loop {
+            // Determine IPv4 / IPv6
+            let mut ipv4 = std::env::var("RELAY_PUBLIC_IPV4").ok().filter(|s| !s.trim().is_empty());
+            let mut ipv6 = std::env::var("RELAY_PUBLIC_IPV6").ok().filter(|s| !s.trim().is_empty());
+            if ipv4.is_none() || ipv6.is_none() {
+                if let Some(sock) = std::env::var("RELAY_SOCKET_URL").ok() {
+                    let host = extract_host(&sock);
+                    if let Some(h) = host {
+                        match resolve_host_ips(&h).await {
+                            Ok((v4, v6)) => {
+                                if ipv4.is_none() { ipv4 = v4; }
+                                if ipv6.is_none() { ipv6 = v6; }
+                            }
+                            Err(e) => {
+                                error!(host = %h, error = %e, "DNS resolve failed for socket host");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Build request body
+            let mut body = serde_json::json!({ "name": sub, "ttl": 60 });
+            if let Some(dom) = &domain { body["domain"] = serde_json::Value::String(dom.clone()); }
+            if let Some(v4) = &ipv4 { body["ipv4"] = serde_json::Value::String(v4.clone()); }
+            if let Some(v6) = &ipv6 { body["ipv6"] = serde_json::Value::String(v6.clone()); }
+            if let Some(tid) = &team_id { body["teamId"] = serde_json::Value::String(tid.clone()); }
+            if let Some(slug) = &team_slug { body["slug"] = serde_json::Value::String(slug.clone()); }
+
+            info!(subdomain = %sub, ipv4 = ?ipv4, ipv6 = ?ipv6, "Upserting DNS A/AAAA via tracker");
+            let res = client.post(&dns_url)
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await;
+            match res {
+                Ok(r) => {
+                    let code = r.status();
+                    let txt = r.text().await.unwrap_or_default();
+                    if code.is_success() {
+                        info!(status = %code, response = %txt, "DNS upsert ok");
+                    } else {
+                        error!(status = %code, response = %txt, "DNS upsert failed");
+                    }
+                }
+                Err(e) => error!(error = %e, "DNS upsert request error"),
+            }
+
+            if let Some(sec) = refresh {
+                tokio::time::sleep(std::time::Duration::from_secs(sec)).await;
+            } else {
+                break;
+            }
+        }
+    });
+}
+
+/// Extract host part from a URL string like http://host:port/path or [v6]:port
+fn extract_host(url: &str) -> Option<String> {
+    // strip scheme
+    let after_scheme = match url.split_once("://") { Some((_, rest)) => rest, None => url };
+    // strip path
+    let host_port = after_scheme.split('/').next().unwrap_or(after_scheme);
+    // handle userinfo@
+    let host_port = host_port.rsplit('@').next().unwrap_or(host_port);
+    if host_port.starts_with('[') {
+        // IPv6 literal [addr]:port
+        if let Some(end) = host_port.find(']') { return Some(host_port[1..end].to_string()); }
+    }
+    // Otherwise split :port if present
+    let host = host_port.split(':').next().unwrap_or(host_port);
+    Some(host.to_string())
+}
+
+/// Resolve host to IPv4/IPv6 strings (best-effort)
+async fn resolve_host_ips(host: &str) -> anyhow::Result<(Option<String>, Option<String>)> {
+    let target = format!("{}:0", host);
+    let mut v4: Option<String> = None;
+    let mut v6: Option<String> = None;
+    let mut addrs = tokio::net::lookup_host(target).await?;
+    while let Some(addr) = addrs.next() {
+        if addr.is_ipv4() && v4.is_none() { v4 = Some(addr.ip().to_string()); }
+        if addr.is_ipv6() && v6.is_none() { v6 = Some(addr.ip().to_string()); }
+        if v4.is_some() && v6.is_some() { break; }
+    }
+    Ok((v4, v6))
 }
 
 // Serve the bundled OpenAPI YAML specification
