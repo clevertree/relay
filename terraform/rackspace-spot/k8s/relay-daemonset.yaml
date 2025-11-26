@@ -19,13 +19,13 @@ spec:
         - operator: "Exists"
       containers:
         - name: relay
-          image: ghcr.io/clevertree/relay:sha-cbed5cb
+          image: ghcr.io/clevertree/relay:sha-199c379
           imagePullPolicy: IfNotPresent
           env:
             - name: RELAY_DNS_SUBDOMAIN
-              value: ""
+              value: "node1"
             - name: RELAY_CERTBOT_EMAIL
-              value: ""
+              value: "ari@clevertree.com"
             - name: VERCEL_API_TOKEN
               valueFrom:
                 secretKeyRef:
