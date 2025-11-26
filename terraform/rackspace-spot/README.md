@@ -16,3 +16,15 @@ Usage
 Notes
 - This configuration creates a cloudspace and a spot nodepool (Kubernetes) by default. If you prefer a single VM instance with a systemd unit that pulls the GHCR image, I can add that as an alternate, simpler module.
 - The Terraform here uses the `rackerlabs/spot` provider. See `variables.tf` and `terraform.tfvars.example` for overridable defaults.
+
+Vercel DNS secrets
+------------------
+
+This module can now manage the Kubernetes secret `relay-credentials` which contains `VERCEL_API_TOKEN` and optional `VERCEL_TEAM_ID` used by the relay entrypoint to upsert DNS records.
+
+Provide values via `secrets.auto.tfvars` (recommended for local runs) in this folder or set them as Terraform variables from your CI:
+
+vercel_api_token = "<your-vercel-token>"
+vercel_team_id  = "team_bB1RJkslury9ynlawD5kmMdG"
+
+Run `terraform init` and `terraform apply` after adding these values.

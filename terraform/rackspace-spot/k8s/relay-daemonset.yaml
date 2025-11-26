@@ -19,13 +19,23 @@ spec:
         - operator: "Exists"
       containers:
         - name: relay
-          image: ghcr.io/clevertree/relay:sha-38edb74
+          image: ghcr.io/clevertree/relay:sha-cbed5cb
           imagePullPolicy: IfNotPresent
           env:
             - name: RELAY_DNS_SUBDOMAIN
               value: ""
-            - name: CERTBOT_EMAIL
+            - name: RELAY_CERTBOT_EMAIL
               value: ""
+            - name: VERCEL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: relay-credentials
+                  key: VERCEL_API_TOKEN
+            - name: VERCEL_TEAM_ID
+              valueFrom:
+                secretKeyRef:
+                  name: relay-credentials
+                  key: VERCEL_TEAM_ID
           ports:
             - containerPort: 80
             - containerPort: 443

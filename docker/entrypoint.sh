@@ -12,6 +12,18 @@ ensure_repo() {
     mkdir -p "$(dirname "$repo")"
     git clone --bare "$tmpl" "$repo"
   fi
+  # Ensure at least one repository exists by cloning template into a subdirectory if needed
+  template_repo_dir="$repo/relay-template"
+  if [ ! -d "$template_repo_dir" ]; then
+    tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
+    echo "Cloning template repo into subdirectory $template_repo_dir"
+    mkdir -p "$template_repo_dir"
+    git clone "$tmpl" "$template_repo_dir"
+    # Add and commit the subdirectory to the bare repo
+    cd "$repo"
+    git --git-dir="$repo" --work-tree="$template_repo_dir" add .
+    git --git-dir="$repo" --work-tree="$template_repo_dir" commit -m "Add relay-template repository"
+  fi
 }
 
 start_ipfs() {
@@ -127,22 +139,75 @@ PY
   vercel_dns_upsert() {
     domain="$1"; name="$2"; value="$3"; type="${4:-A}"; ttl="${5:-60}"
     auth_header="Authorization: Bearer ${VERCEL_API_TOKEN_ENV}"
-    base="https://api.vercel.com";
-    # List existing records matching name+type
-    list_url="${base}/v5/domains/${domain}/records?name=${name}&type=${type}"
-    list_res=$(curl -fsS -H "$auth_header" "$list_url" || true)
-    rec_id=$(echo "$list_res" | jq -r '.records[0].id // .records[0].uid // empty')
-    if [ -n "$rec_id" ]; then
-      # Update existing
-      patch_url="${base}/v5/domains/${domain}/records/${rec_id}"
-      body=$(jq -n --arg v "$value" --argjson t $ttl '{ value: $v, ttl: $t }')
-      curl -fsS -X PATCH -H "$auth_header" -H 'Content-Type: application/json' -d "$body" "$patch_url" >/dev/null
-    else
-      # Create new
-      create_url="${base}/v5/domains/${domain}/records"
-      body=$(jq -n --arg n "$name" --arg v "$value" --arg t "$type" --argjson ttl $ttl '{ name: $n, value: $v, type: $t, ttl: $ttl }')
-      curl -fsS -X POST -H "$auth_header" -H 'Content-Type: application/json' -d "$body" "$create_url" >/dev/null
+    base="https://api.vercel.com"
+    # prefer v4 endpoints and include teamId when present
+    team_q=""
+    if [ -n "${VERCEL_TEAM_ID:-}" ]; then
+      team_q="?teamId=${VERCEL_TEAM_ID}"
     fi
+
+    # Helper to exit on auth errors
+    handle_auth_err() {
+      status="$1"; body="$2"
+      if echo "$body" | grep -qi 'forbidden' || [ "$status" = "401" ] || [ "$status" = "403" ]; then
+        echo "Vercel auth error (status=$status): $body"
+        return 2
+      fi
+      return 0
+    }
+
+    # List existing records via v4
+    list_url="${base}/v4/domains/${domain}/records${team_q}&name=${name}&type=${type}"
+    list_raw=$(curl -sS -w "\n%{http_code}" -H "$auth_header" "$list_url" || true)
+    list_body=$(echo "$list_raw" | sed -n '1,$p' | sed '$d') || list_body=""
+    list_code=$(echo "$list_raw" | tail -n1 || echo "")
+    if [ -z "$list_code" ]; then list_code=0; fi
+    if [ "$list_code" = "200" ]; then
+      rec_id=$(echo "$list_body" | jq -r '.records[] | select(.name=="'"$name"'" and .type=="'"$type"'" ) | .id // .uid' | head -n1 || true)
+    else
+      handle_auth_err "$list_code" "$list_body" || return 2
+      rec_id=""
+    fi
+
+    # If record exists in v4, PATCH via v4
+    if [ -n "$rec_id" ]; then
+      patch_url="${base}/v4/domains/${domain}/records/${rec_id}${team_q}"
+      body=$(jq -n --arg v "$value" --argjson t $ttl '{ value: $v, ttl: $t }')
+      res=$(curl -sS -w "\n%{http_code}" -X PATCH -H "$auth_header" -H 'Content-Type: application/json' -d "$body" "$patch_url" || true)
+      res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
+      res_code=$(echo "$res" | tail -n1 || echo "")
+      if [ "$res_code" = "200" ] || [ "$res_code" = "204" ]; then
+        return 0
+      else
+        handle_auth_err "$res_code" "$res_body" || return 2
+        # if not auth error, treat as failure
+        return 1
+      fi
+    fi
+
+    # No existing record found; try to create via v4 (fallback to v2 if needed)
+    create_url_v4="${base}/v4/domains/${domain}/records${team_q}"
+    create_url_v2="${base}/v2/domains/${domain}/records${team_q}"
+    body_create=$(jq -n --arg n "$name" --arg v "$value" --arg t "$type" --argjson ttl $ttl '{ name: $n, value: $v, type: $t, ttl: $ttl }')
+
+    # try v4 create
+    res=$(curl -sS -w "\n%{http_code}" -X POST -H "$auth_header" -H 'Content-Type: application/json' -d "$body_create" "$create_url_v4" || true)
+    res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
+    res_code=$(echo "$res" | tail -n1 || echo "")
+    if [ "$res_code" = "200" ] || [ "$res_code" = "201" ]; then
+      return 0
+    fi
+    handle_auth_err "$res_code" "$res_body" || return 2
+
+    # try v2 create as fallback
+    res=$(curl -sS -w "\n%{http_code}" -X POST -H "$auth_header" -H 'Content-Type: application/json' -d "$body_create" "$create_url_v2" || true)
+    res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
+    res_code=$(echo "$res" | tail -n1 || echo "")
+    if [ "$res_code" = "200" ] || [ "$res_code" = "201" ]; then
+      return 0
+    fi
+    handle_auth_err "$res_code" "$res_body" || return 2
+    return 1
   }
 
   if [ -n "$VERCEL_API_TOKEN_ENV" ]; then

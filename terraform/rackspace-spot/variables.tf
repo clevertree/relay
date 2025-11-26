@@ -36,3 +36,10 @@ variable "vercel_api_token" {
   sensitive   = true
   default     = null
 }
+
+variable "vercel_team_id" {
+  description = "Vercel Team ID for team-scoped API calls (optional)"
+  type        = string
+  sensitive   = false
+  default     = null
+}

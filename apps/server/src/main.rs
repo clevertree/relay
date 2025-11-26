@@ -531,7 +531,7 @@ fn sanitize_repo_name(name: &str) -> Option<String> {
 }
 
 fn repo_from(repo_path: &PathBuf, headers: &HeaderMap, query: &Option<HashMap<String, String>>, branch: &str) -> Option<String> {
-    // Precedence: query ?repo= -> header X-Relay-Repo -> cookie relay-repo -> env RELAY_DEFAULT_REPO -> first in list_repos
+    // Precedence: query ?repo= -> header X-Relay-Repo -> cookie relay-repo -> env RELAY_DEFAULT_REPO -> first in list_repos -> default empty repo
     if let Some(q) = query {
         if let Some(r) = q.get("repo").and_then(|s| sanitize_repo_name(s)) { return Some(r); }
     }
@@ -552,7 +552,8 @@ fn repo_from(repo_path: &PathBuf, headers: &HeaderMap, query: &Option<HashMap<St
         if let Some(s) = sanitize_repo_name(&env_def) { return Some(s); }
     }
     if let Ok(list) = list_repos(repo_path, branch) { return list.into_iter().next(); }
-    None
+    // If no subdirectories found, serve the root as the default repository
+    Some("".to_string())
 }
 
 fn list_repos(repo_path: &PathBuf, branch: &str) -> anyhow::Result<Vec<String>> {
@@ -629,7 +630,13 @@ async fn get_file(
     // Scope under selected repo
     let path_scoped = {
         let p = decoded.trim_matches('/');
-        if p.is_empty() { repo_name.clone() } else { format!("{}/{}", repo_name, p) }
+        if repo_name.is_empty() {
+            p.to_string()
+        } else if p.is_empty() {
+            repo_name.clone()
+        } else {
+            format!("{}/{}", repo_name, p)
+        }
     };
     // Empty path for repo root?
     let rel = path_scoped.trim_matches('/');
@@ -777,7 +784,7 @@ async fn get_root(
         .get("accept")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let (ct, body) = directory_response(&state.repo_path, &tree, &tree, &repo_name, accept_hdr, &branch, &repo_name);
+    let (ct, body) = directory_response(&state.repo_path, &tree, &tree, if repo_name.is_empty() { "" } else { &repo_name }, accept_hdr, &branch, &repo_name);
     (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())], body).into_response()
 }
 
@@ -808,7 +815,13 @@ async fn put_file(
     };
     let scoped_path = {
         let p = decoded.trim_matches('/');
-        if p.is_empty() { repo_name.clone() } else { format!("{}/{}", repo_name, p) }
+        if repo_name.is_empty() {
+            p.to_string()
+        } else if p.is_empty() {
+            repo_name.clone()
+        } else {
+            format!("{}/{}", repo_name, p)
+        }
     };
     match write_file_to_repo(&state.repo_path, &branch, &scoped_path, &body) {
         Ok((commit, branch)) => Json(serde_json::json!({"commit": commit, "branch": branch, "path": decoded})).into_response(),
