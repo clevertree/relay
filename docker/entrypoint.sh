@@ -263,7 +263,35 @@ PY
       kill ${RELAY_PID} || true
       exit 1
     fi
-    # Reload nginx to pick up new certs
+    # Configure nginx to proxy to relay-server
+    echo "Configuring nginx to proxy to relay-server"
+    RELAY_PORT=$(echo "$RELAY_BIND" | awk -F: '{print $NF}')
+    cat > /etc/nginx/sites-enabled/default <<EOF
+server {
+    listen 80;
+    server_name ${FQDN};
+    return 301 https://\$server_name\$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name ${FQDN};
+
+    ssl_certificate /etc/letsencrypt/live/${FQDN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${FQDN}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:${RELAY_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    # Reload nginx to pick up new certs and configuration
     nginx -s reload || true
   else
     echo "RELAY_CERTBOT_EMAIL not set; skipping SSL certificate provisioning"
