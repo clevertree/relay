@@ -1,19 +1,28 @@
 import { NextResponse } from 'next/server';
 import { ensureDb } from '@/lib/db';
-import { Socket } from '@/models/Socket';
-import { Repo } from '@/models/Repo';
-import { SocketRepoBranch } from '@/models/SocketRepoBranch';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
+  // If no DATABASE_URL is configured, return an empty list so prerender
+  // and build steps don't attempt to load DB drivers.
+  if (!process.env.DATABASE_URL || process.env.SKIP_DB_DURING_PRERENDER === '1') {
+    return NextResponse.json([]);
+  }
   await ensureDb();
+  const { dbModelsReady } = await import('@/lib/db');
+  if (!dbModelsReady()) {
+    return NextResponse.json([]);
+  }
+  const { Socket } = await import('@/models/Socket');
+  const { Repo } = await import('@/models/Repo');
   const sockets = await Socket.findAll({
     include: [Repo],
     order: [['updatedAt', 'DESC']],
     limit: 200,
   });
   const ids = sockets.map((s) => s.id);
+  const { SocketRepoBranch } = await import('@/models/SocketRepoBranch');
   const branches = ids.length
     ? await SocketRepoBranch.findAll({ where: { socketId: ids } as any })
     : [];

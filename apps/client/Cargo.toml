@@ -38,7 +38,8 @@ widestring = "0.5"
 # Windows WebView2 will be pulled transitively by wry on Windows
 
 [features]
-# Enable the embedded webview on desktop by default (Windows implemented now)
-default = ["webview"]
+# Do not enable the embedded webview by default to avoid pulling
+# Windows-only dependencies on non-Windows platforms during workspace builds.
+default = ["internal_player"]
 internal_player = []
 webview = ["dep:wry", "dep:tao", "dep:webview2", "dep:winapi"]

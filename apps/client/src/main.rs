@@ -709,7 +709,7 @@ impl RelayClientApp {
         let Some(tab) = self.repo_tabs.get(i).cloned() else {
             return;
         };
-        // Allocate a persistent rectangle where the embedded webview should live
+    // Allocate a persistent rectangle where the embedded webview should live
         let desired = egui::vec2(ui.available_width(), ui.available_height());
         let mut rect = ui.available_rect_before_wrap();
         // Clamp rect to desired size
@@ -717,7 +717,10 @@ impl RelayClientApp {
         rect.max.y = rect.min.y + desired.y;
         let _resp = ui.allocate_rect(rect, egui::Sense::hover());
 
-        // Convert logical points (egui) to physical pixels for Win32 bounds
+    // Make a local copy of the URL for non-Windows code paths
+    let url = tab.url.clone();
+
+    // Convert logical points (egui) to physical pixels for Win32 bounds
         #[cfg(all(windows, feature = "webview"))]
         {
             let scale = ui.ctx().pixels_per_point();
@@ -744,7 +747,7 @@ impl RelayClientApp {
         #[cfg(not(all(windows, feature = "webview")))]
         {
             ui.label("Embedded WebView is only implemented on Windows in this build. Use the external browser link below.");
-            ui.hyperlink_to(&url_clone, &url_clone);
+            ui.hyperlink_to(&url, &url);
         }
     }
 

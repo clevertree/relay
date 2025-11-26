@@ -2,11 +2,23 @@
 import 'reflect-metadata';
 export const runtime = 'nodejs';
 import { ensureDb } from '@/lib/db';
-import { Peer } from '@/models/Peer';
 
 export default async function Page() {
-  await ensureDb();
-  const peers = await Peer.findAll({ order: [['updatedAt', 'DESC']], limit: 200 });
+  // During `next build` we may not have a DATABASE_URL configured.
+  // Avoid instantiating the DB in that case so prerendering doesn't
+  // require DB drivers. Show an empty list when no DB is configured.
+  let peers: any[] = [];
+  if (process.env.DATABASE_URL && process.env.SKIP_DB_DURING_PRERENDER !== '1') {
+    await ensureDb();
+    const { dbModelsReady } = await import('@/lib/db');
+    if (dbModelsReady()) {
+      const { Peer } = await import('@/models/Peer');
+      peers = await Peer.findAll({ order: [['updatedAt', 'DESC']], limit: 200 });
+    } else {
+      // Models weren't registered successfully; return empty list for build.
+      peers = [];
+    }
+  }
   return (
     <main>
       <h1>Relay Peer Server</h1>

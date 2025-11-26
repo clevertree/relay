@@ -1,18 +1,22 @@
 import {NextResponse} from 'next/server';
 import {ensureDb} from '@/lib/db';
-import {Socket} from '@/models/Socket';
-import {Repo} from '@/models/Repo';
-import {SocketRepoBranch} from '@/models/SocketRepoBranch';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
     try {
         await ensureDb();
-        const body = await req.json().catch(() => ({}));
-        const socket = (body?.socket ?? '').toString().trim();
-        const reposIn: unknown = body?.repos;
-        const branchesIn: unknown = body?.branches;
+        const { dbModelsReady } = await import('@/lib/db');
+        if (!dbModelsReady()) {
+            return NextResponse.json({ error: 'DB models not available' }, { status: 503 });
+        }
+        const { Socket } = await import('@/models/Socket');
+        const { Repo } = await import('@/models/Repo');
+        const { SocketRepoBranch } = await import('@/models/SocketRepoBranch');
+    const body = await req.json().catch(() => ({}));
+    const socket = (body?.socket ?? '').toString().trim();
+    const reposIn: unknown = body?.repos;
+    const branchesIn: unknown = body?.branches;
         if (!socket) {
             return NextResponse.json({error: 'socket is required'}, {status: 400});
         }
@@ -29,8 +33,8 @@ export async function POST(req: Request) {
         // Upsert Socket by unique socket
         const [sock] = await Socket.upsert({ socket });
 
-        // Attach repos: upsert each Repo by name then set associations (replace existing)
-        const repoInstances: Repo[] = [];
+    // Attach repos: upsert each Repo by name then set associations (replace existing)
+    const repoInstances: any[] = [];
         for (const name of repoNames) {
             const [repo] = await Repo.upsert({ name });
             repoInstances.push(repo);
