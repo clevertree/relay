@@ -81,7 +81,9 @@ PY
   if [ -n "${RELAY_DNS_SUBDOMAIN:-}" ]; then
     DNS_DOMAIN=${RELAY_DNS_DOMAIN:-relaynet.online}
     DNS_URL=${TRACKER_DNS_URL:-https://relaynet.online/api/dns/upsert}
-    PAYLOAD=$(jq -n --arg name "$RELAY_DNS_SUBDOMAIN" --arg domain "$DNS_DOMAIN" '{name: $name, domain: $domain}')
+    # Get external IPv4
+    EXTERNAL_IPV4=$(curl -s https://api.ipify.org?format=json | jq -r .ip 2>/dev/null || echo "")
+    PAYLOAD=$(jq -n --arg name "$RELAY_DNS_SUBDOMAIN" --arg domain "$DNS_DOMAIN" --arg ipv4 "$EXTERNAL_IPV4" '{name: $name, domain: $domain, ipv4: $ipv4}')
     echo "Requesting DNS upsert to $DNS_URL with payload: $PAYLOAD"
     # If TRACKER_ADMIN_TOKEN is set, include it
     if [ -n "${TRACKER_ADMIN_TOKEN:-}" ]; then
