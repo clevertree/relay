@@ -1,308 +1,163 @@
 openapi: 3.0.3
 info:
-  title: Relay API
-  version: 0.1.0
+  title: Relay Tracker API
+  version: 0.2.0
   description: |
-    The Relay system provides decentralized content hosting and peer-to-peer networking.
-
-    ## Components
-
-    ### Tracker API
-    The tracker maintains a registry of relay peers and their capabilities.
-
-    ### Relay Server API
-    Individual relay servers provide Git-based content hosting with HTTP access.
-
+    The Relay Tracker stores active peer sockets and the Git repositories (by subpath) they serve.
 servers:
-  - url: https://www.relaynet.online/
-    description: Online Relay Tracker
-  - url: https://relay.example.com/
-    description: Example Relay Server (replace with actual relay URLs)
-
+  - url: https://relaynet.online
+    description: Production
+  - url: http://localhost:3000
+    description: Local dev (Next.js)
 paths:
-  # Tracker API endpoints
   /api/peers:
     get:
-      summary: List registered peers
-      description: Returns a list of all registered relay peers with their socket URLs, repositories, and branch information.
+      summary: List known peers with their repositories
       operationId: listPeers
+      tags: [peers]
       responses:
         '200':
-          description: Successful response
+          description: Peers
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    id:
-                      type: integer
-                      description: Database ID of the peer
-                    socket:
-                      type: string
-                      description: WebSocket or HTTP URL of the peer
-                      example: "ws://relay.example.com:8088"
-                    repos:
-                      type: array
-                      items:
-                        type: string
-                      description: List of repository names hosted by this peer
-                    branches:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          repo:
-                            type: string
-                            description: Repository name
-                          branch:
-                            type: string
-                            description: Branch name
-                          commit:
-                            type: string
-                            description: Commit hash
-                    updatedAt:
-                      type: string
-                      format: date-time
-                      description: Last update timestamp
-        '503':
-          description: Database unavailable
+                  $ref: '#/components/schemas/Peer'
+  /api/peers/upsert:
+    post:
+      summary: Upsert a peer socket and associate repositories
+      operationId: upsertPeer
+      tags: [peers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertPeerRequest'
+      responses:
+        '200':
+          description: Upserted peer
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-
+                $ref: '#/components/schemas/Peer'
+        '400':
+          description: Invalid input
+  /api/dns/upsert:
     post:
-      summary: Register or update a peer
-      description: Register a new peer or update an existing peer's information including socket URL, repositories, and branch heads.
-      operationId: upsertPeer
+      summary: Upsert DNS records via Vercel
+      operationId: dnsUpsert
+      tags: [dns]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-                - socket
+              required: [name]
               properties:
-                socket:
-                  type: string
-                  description: WebSocket or HTTP URL of the peer
-                  example: "ws://relay.example.com:8088"
                 domain:
                   type: string
-                  description: Domain name for the peer (optional)
+                  description: Domain to update (defaults to env VERCEL_DNS_DOMAIN)
+                name:
+                  type: string
+                  description: Subdomain label or '@' for root
+                ip:
+                  type: string
+                  description: Single-value compatibility IP (ipv4 or ipv6)
                 ipv4:
                   type: string
-                  description: IPv4 address (optional)
                 ipv6:
                   type: string
-                  description: IPv6 address (optional)
-                repos:
-                  type: array
-                  items:
-                    type: string
-                  description: List of repository names
-                branches:
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - repo
-                      - branch
-                      - commit
-                    properties:
-                      repo:
-                        type: string
-                      branch:
-                        type: string
-                      commit:
-                        type: string
+                type:
+                  type: string
+                  enum: [A, AAAA, CNAME]
+                ttl:
+                  type: integer
+                teamId:
+                  type: string
+                slug:
+                  type: string
+            example:
+              domain: "relaynet.online"
+              name: "@"
+              ipv4: "203.0.113.10"
+              ipv6: ""
+              type: "A"
+              ttl: 60
+              teamId: ""
+              slug: ""
       responses:
         '200':
-          description: Peer registered/updated successfully
+          description: Records upserted
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id:
-                    type: integer
-                  socket:
-                    type: string
                   domain:
                     type: string
-                    nullable: true
-                  ipv4:
+                  fqdn:
                     type: string
-                    nullable: true
-                  ipv6:
-                    type: string
-                    nullable: true
-                  repos:
-                    type: array
-                    items:
-                      type: string
-                  branches:
+                  results:
                     type: array
                     items:
                       type: object
-                      properties:
-                        repo:
-                          type: string
-                        branch:
-                          type: string
-                        commit:
-                          type: string
-                  updatedAt:
-                    type: string
-                    format: date-time
         '400':
           description: Invalid request
+        '401':
+          description: Missing admin token (TRACKER_ADMIN_TOKEN)
         '500':
           description: Server error
-
-  /api/peers/probe:
-    post:
-      summary: Test peer connectivity
-      description: Test whether a peer socket URL is reachable by attempting a TCP connection.
-      operationId: probePeer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - socket
-              properties:
-                socket:
-                  type: string
-                  description: Socket URL to test
-                  example: "ws://relay.example.com:8088"
-      responses:
-        '200':
-          description: Connectivity test result
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  ok:
-                    type: boolean
-                    description: Whether the connection was successful
-                  info:
-                    type: object
-                    properties:
-                      status:
-                        type: string
-                        enum: [connected]
-                      error:
-                        type: string
-        '400':
-          description: Invalid socket URL
-        '503':
-          description: Connection failed
-        '500':
-          description: Server error
-
-  # Relay Server API endpoints
-  /openapi.yaml:
-    get:
-      summary: Get OpenAPI specification
-      description: Returns the OpenAPI specification for this relay server.
-      operationId: getOpenAPISpec
-      responses:
-        '200':
-          description: OpenAPI YAML specification
-          content:
-            application/yaml:
-              schema:
-                type: string
-
-  /swagger-ui:
-    get:
-      summary: Swagger UI
-      description: Interactive API documentation interface.
-      operationId: getSwaggerUI
-      responses:
-        '200':
-          description: HTML page with Swagger UI
-          content:
-            text/html:
-              schema:
-                type: string
-
-    /api/dns/upsert:
-      post:
-        summary: Upsert DNS records via Vercel
-        description: Create or update A/AAAA/CNAME records for a given domain. This endpoint wraps Vercel DNS APIs and is intended for administrative use.
-        operationId: dnsUpsert
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - name
-                  - ip
-                properties:
-                  domain:
-                    type: string
-                    description: Domain to update (defaults to env VERCEL_DNS_DOMAIN)
-                  name:
-                    type: string
-                    description: Subdomain label or '@' for root
-                  ip:
-                    type: string
-                    description: Single-value compatibility IP (ipv4 or ipv6)
-                  ipv4:
-                    type: string
-                  ipv6:
-                    type: string
-                  type:
-                    type: string
-                    enum: [A, AAAA, CNAME]
-                  ttl:
-                    type: integer
-                  teamId:
-                    type: string
-                  slug:
-                    type: string
-        responses:
-          '200':
-            description: Records upserted
-            content:
-              application/json:
-                schema:
-                  type: object
-                  properties:
-                    domain:
-                      type: string
-                    fqdn:
-                      type: string
-                    results:
-                      type: array
-                      items:
-                        type: object
-          '400':
-            description: Invalid request
-          '401':
-            description: Missing admin token (TRACKER_ADMIN_TOKEN)
-          '500':
-            description: Server error
-
 components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      description: Bearer token for admin operations (optional for most endpoints)
-
-security:
-  - bearerAuth: []
+  schemas:
+    Peer:
+      type: object
+      properties:
+        id:
+          type: integer
+        socket:
+          type: string
+          example: http://localhost:8088
+        repos:
+          type: array
+          items:
+            type: string
+          example: ["site", "movies", "docs"]
+        branches:
+          type: array
+          description: Branch heads known for this socket per repo
+          items:
+            $ref: '#/components/schemas/PeerBranch'
+        updatedAt:
+          type: string
+          format: date-time
+    PeerBranch:
+      type: object
+      properties:
+        repo:
+          type: string
+          example: site
+        branch:
+          type: string
+          example: main
+        commit:
+          type: string
+          description: 40-hex Git commit id for the branch HEAD
+          example: 9fceb02c3a9c...
+    UpsertPeerRequest:
+      type: object
+      required: [socket]
+      properties:
+        socket:
+          type: string
+        repos:
+          type: array
+          items:
+            type: string
+        branches:
+          type: array
+          description: Optional detailed branch heads per repo
+          items:
+            $ref: '#/components/schemas/PeerBranch'

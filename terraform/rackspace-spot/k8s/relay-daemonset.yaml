@@ -19,7 +19,7 @@ spec:
         - operator: "Exists"
       containers:
         - name: relay
-          image: ghcr.io/clevertree/relay:latest
+          image: ghcr.io/clevertree/relay:sha-38edb74
           imagePullPolicy: IfNotPresent
           env:
             - name: RELAY_DNS_SUBDOMAIN

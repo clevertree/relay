@@ -79,6 +79,15 @@ paths:
                   type: string
                 slug:
                   type: string
+            example:
+              domain: "relaynet.online"
+              name: "@"
+              ipv4: "203.0.113.10"
+              ipv6: ""
+              type: "A"
+              ttl: 60
+              teamId: ""
+              slug: ""
       responses:
         '200':
           description: Records upserted
