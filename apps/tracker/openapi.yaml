@@ -44,6 +44,63 @@ paths:
                 $ref: '#/components/schemas/Peer'
         '400':
           description: Invalid input
+  /api/dns/upsert:
+    post:
+      summary: Upsert DNS records via Vercel
+      operationId: dnsUpsert
+      tags: [dns]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                domain:
+                  type: string
+                  description: Domain to update (defaults to env VERCEL_DNS_DOMAIN)
+                name:
+                  type: string
+                  description: Subdomain label or '@' for root
+                ip:
+                  type: string
+                  description: Single-value compatibility IP (ipv4 or ipv6)
+                ipv4:
+                  type: string
+                ipv6:
+                  type: string
+                type:
+                  type: string
+                  enum: [A, AAAA, CNAME]
+                ttl:
+                  type: integer
+                teamId:
+                  type: string
+                slug:
+                  type: string
+      responses:
+        '200':
+          description: Records upserted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domain:
+                    type: string
+                  fqdn:
+                    type: string
+                  results:
+                    type: array
+                    items:
+                      type: object
+        '400':
+          description: Invalid request
+        '401':
+          description: Missing admin token (TRACKER_ADMIN_TOKEN)
+        '500':
+          description: Server error
 components:
   schemas:
     Peer:
