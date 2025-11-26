@@ -4,6 +4,7 @@ import net from "node:net";
 
 type DomainStatus = {
   domain: string;
+  resolvedIp?: string;
   https: { ok: boolean; ms?: number; error?: string };
   ports: Record<number, { ok: boolean; ms?: number; error?: string }>;
   lastChecked: string; // ISO timestamp
@@ -22,10 +23,10 @@ function getDomainsFromEnv(): string[] {
     .filter((s) => s.length > 0);
 }
 
-async function resolveHost(host: string): Promise<void> {
-  // Just ensure DNS resolves; will throw on failure
-  await new Promise<void>((resolve, reject) => {
-    dns.lookup(host, (err) => (err ? reject(err) : resolve()));
+async function resolveHost(host: string): Promise<string> {
+  // Resolve and return IP address; throws on failure
+  return await new Promise<string>((resolve, reject) => {
+    dns.lookup(host, (err, address) => (err ? reject(err) : resolve(address)));
   });
 }
 
@@ -66,11 +67,12 @@ async function checkHttpsHead(host: string): Promise<{ ok: boolean; ms?: number;
 
 async function checkDomain(domain: string): Promise<DomainStatus> {
   // Ensure hostname resolves first
-  try { await resolveHost(domain); } catch (e: any) {
+  let resolvedIp: string | undefined;
+  try { resolvedIp = await resolveHost(domain); } catch (e: any) {
     const now = new Date().toISOString();
     const portsObj: Record<number, { ok: boolean; ms?: number; error?: string }> = {};
     for (const p of PORTS_TO_CHECK) portsObj[p] = { ok: false, error: "dns_failed" };
-    return { domain, https: { ok: false, error: "dns_failed" }, ports: portsObj, lastChecked: now };
+    return { domain, resolvedIp, https: { ok: false, error: "dns_failed" }, ports: portsObj, lastChecked: now };
   }
 
   const [httpsRes, ...portsRes] = await Promise.all([
@@ -82,16 +84,37 @@ async function checkDomain(domain: string): Promise<DomainStatus> {
   for (let i = 0; i < PORTS_TO_CHECK.length; i++) {
     ports[PORTS_TO_CHECK[i]] = portsRes[i];
   }
-  return { domain, https: httpsRes, ports, lastChecked: now };
+  return { domain, resolvedIp, https: httpsRes, ports, lastChecked: now };
 }
 
 export async function POST(_req: NextRequest) {
+  // Optional body: { domain?: string }
+  let body: any = null;
+  try {
+    body = await _req.json();
+  } catch {
+    // ignore empty/invalid JSON
+  }
+
+  // Single-domain check
+  if (body && typeof body.domain === "string" && body.domain.trim().length > 0) {
+    const domain = body.domain.trim();
+    const result = await checkDomain(domain);
+    cache[domain] = result;
+    return new Response(JSON.stringify({ results: [result] }), { headers: { "content-type": "application/json" } });
+  }
+
+  // Check all domains sequentially (one by one)
   const domains = getDomainsFromEnv();
   if (domains.length === 0) {
     return new Response(JSON.stringify({ error: "RELAY_MASTER_PEER_LIST is empty" }), { status: 500 });
   }
-  const results = await Promise.all(domains.map((d) => checkDomain(d)));
-  for (const r of results) cache[r.domain] = r;
+  const results: DomainStatus[] = [];
+  for (const d of domains) {
+    const r = await checkDomain(d);
+    cache[r.domain] = r;
+    results.push(r);
+  }
   return new Response(JSON.stringify({ results }), { headers: { "content-type": "application/json" } });
 }
 
@@ -100,6 +123,7 @@ export async function GET() {
   const domains = getDomainsFromEnv();
   const results: DomainStatus[] = domains.map((d) => cache[d] || ({
     domain: d,
+    resolvedIp: undefined,
     https: { ok: false, error: "not_checked" },
     ports: Object.fromEntries(PORTS_TO_CHECK.map((p) => [p, { ok: false, error: "not_checked" }])) as Record<number, any>,
     lastChecked: "",

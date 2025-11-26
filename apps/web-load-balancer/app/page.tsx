@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type DomainStatus = {
   domain: string;
+  resolvedIp?: string;
   https: { ok: boolean; ms?: number; error?: string };
   ports: Record<number, { ok: boolean; ms?: number; error?: string }>;
   lastChecked: string;
@@ -18,6 +19,7 @@ export default function Home() {
   const [selected, setSelected] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({});
 
   const fetchCache = useCallback(async () => {
     const r = await fetch("/api/check", { cache: "no-store" });
@@ -33,6 +35,28 @@ export default function Home() {
       setResults(j.results);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const checkSingle = useCallback(async (domain: string) => {
+    setRowLoading((prev) => ({ ...prev, [domain]: true }));
+    try {
+      const r = await fetch("/api/check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain }),
+      });
+      const j = (await r.json()) as ApiResponse;
+      const updated = j.results[0];
+      setResults((prev) => {
+        const idx = prev.findIndex((x) => x.domain === updated.domain);
+        if (idx === -1) return prev;
+        const next = [...prev];
+        next[idx] = updated;
+        return next;
+      });
+    } finally {
+      setRowLoading((prev) => ({ ...prev, [domain]: false }));
     }
   }, []);
 
@@ -119,7 +143,7 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <button onClick={runServerChecks} disabled={loading}
                   className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50">
-            {loading ? "Checking..." : "Check Now"}
+            {loading ? "Checking..." : "Check All"}
           </button>
           <button onClick={beginRedirect} className="rounded bg-emerald-600 px-4 py-2 text-white">
             Choose & Redirect
@@ -132,6 +156,7 @@ export default function Home() {
           <thead className="bg-zinc-100 dark:bg-zinc-900">
             <tr>
               <th className="p-2 text-left">Domain</th>
+              <th className="p-2 text-left">Resolved IP</th>
               <th className="p-2 text-left">HTTPS</th>
               <th className="p-2 text-left">Git(9418)</th>
               <th className="p-2 text-left">SSH(22)</th>
@@ -146,6 +171,7 @@ export default function Home() {
               return (
                 <tr key={r.domain} className="border-t border-zinc-200 dark:border-zinc-800">
                   <td className="p-2 font-medium">{r.domain}</td>
+                  <td className="p-2 text-zinc-600">{r.resolvedIp ?? ""}</td>
                   <td className="p-2">
                     <span className={r.https.ok ? "text-emerald-600" : "text-rose-600"}>
                       {r.https.ok ? `ok${r.https.ms ? ` (${r.https.ms}ms)` : ""}` : (r.https.error || "fail")}
@@ -168,9 +194,18 @@ export default function Home() {
                     )}
                   </td>
                   <td className="p-2">
-                    <button className="rounded border px-2 py-1" onClick={() => setSelected(r.domain)}>
+                    <div className="flex items-center gap-2">
+                      <button className="rounded border px-2 py-1" onClick={() => setSelected(r.domain)}>
                       {selected === r.domain ? "Selected" : "Select"}
-                    </button>
+                      </button>
+                      <button
+                        className="rounded border px-2 py-1"
+                        onClick={() => checkSingle(r.domain)}
+                        disabled={!!rowLoading[r.domain]}
+                      >
+                        {rowLoading[r.domain] ? "Checking..." : "Check"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
