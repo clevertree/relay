@@ -11,6 +11,7 @@ data/
 logs/
 tests/
 pnpm-lock.yaml
+ipfs/
 
 # Storybook static output
 storybook-static/

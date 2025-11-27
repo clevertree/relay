@@ -7,14 +7,10 @@ set -e
 clone_default_repo() {
   repo=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
   if [ ! -d "$repo" ] || [ ! -d "$repo/objects" ]; then
-    tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
-    echo "Cloning bare repo from $tmpl to $repo (with 20s timeout; will fallback to git init --bare)"
+    tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay}
+    echo "Cloning bare repo from $tmpl to $repo"
     mkdir -p "$(dirname "$repo")"
-    if ! timeout 20s git clone --bare "$tmpl" "$repo"; then
-      echo "Template clone timed out or failed; creating empty bare repo at $repo"
-      rm -rf "$repo" || true
-      git init --bare "$repo" || echo "Failed to git init bare repo, continuing"
-    fi
+    git clone --bare "$tmpl" "$repo"
   fi
 }
 
@@ -124,7 +120,7 @@ PY
   FQDN="${VERCEL_SUBDOMAIN}.${VERCEL_DOMAIN}"
 
   # Configure git identity as requested to avoid commit prompts/errors
-  # email: admin@<fqdn> (e.g., admin@node-dfw1.relaynet.online), name: admin
+  # email: admin@<fqdn> (e.g., admin@node1.relaynet.online), name: admin
   git config --global user.email "admin@${FQDN}" || true
   git config --global user.name "admin" || true
 
@@ -147,10 +143,11 @@ PY
     domain="$1"; name="$2"; value="$3"; type="${4:-A}"; ttl="${5:-60}"
     auth_header="Authorization: Bearer ${VERCEL_API_TOKEN_ENV}"
     base="https://api.vercel.com"
-    # Creation policy: default to no-create unless explicitly allowed
-    ALLOW_CREATE="${RELAY_DNS_ALLOW_CREATE:-false}"
-    # Helper: case-insensitive boolean check
-    is_true() { case "${1:-}" in 1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]) return 0;; *) return 1;; esac; }
+    # prefer v4 endpoints and include teamId when present
+    team_q=""
+    if [ -n "${VERCEL_TEAM_ID:-}" ]; then
+      team_q="?teamId=${VERCEL_TEAM_ID}"
+    fi
 
     # Helper to exit on auth errors
     handle_auth_err() {
@@ -162,12 +159,8 @@ PY
       return 0
     }
 
-    # Build list URL with proper query separators and exact filters
-    if [ -n "${VERCEL_TEAM_ID:-}" ]; then
-      list_url="${base}/v4/domains/${domain}/records?teamId=${VERCEL_TEAM_ID}&name=${name}&type=${type}"
-    else
-      list_url="${base}/v4/domains/${domain}/records?name=${name}&type=${type}"
-    fi
+    # List existing records via v4
+    list_url="${base}/v4/domains/${domain}/records${team_q}&name=${name}&type=${type}"
     list_raw=$(curl -sS -w "\n%{http_code}" -H "$auth_header" "$list_url" || true)
     list_body=$(echo "$list_raw" | sed -n '1,$p' | sed '$d') || list_body=""
     list_code=$(echo "$list_raw" | tail -n1 || echo "")
@@ -179,19 +172,14 @@ PY
       rec_id=""
     fi
 
-    # If record exists in v4, PATCH via v4 (exact match only)
+    # If record exists in v4, PATCH via v4
     if [ -n "$rec_id" ]; then
-      if [ -n "${VERCEL_TEAM_ID:-}" ]; then
-        patch_url="${base}/v4/domains/${domain}/records/${rec_id}?teamId=${VERCEL_TEAM_ID}"
-      else
-        patch_url="${base}/v4/domains/${domain}/records/${rec_id}"
-      fi
+      patch_url="${base}/v4/domains/${domain}/records/${rec_id}${team_q}"
       body=$(jq -n --arg v "$value" --argjson t $ttl '{ value: $v, ttl: $t }')
       res=$(curl -sS -w "\n%{http_code}" -X PATCH -H "$auth_header" -H 'Content-Type: application/json' -d "$body" "$patch_url" || true)
       res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
       res_code=$(echo "$res" | tail -n1 || echo "")
       if [ "$res_code" = "200" ] || [ "$res_code" = "204" ]; then
-        echo "DNS_UPSERT_UPDATED name=${name}.${domain} value=${value}"
         return 0
       else
         handle_auth_err "$res_code" "$res_body" || return 2
@@ -200,20 +188,9 @@ PY
       fi
     fi
 
-    # No existing record found; consider creation policy first
-    if ! is_true "$ALLOW_CREATE"; then
-      echo "DNS_UPSERT_SKIPPED_CREATE name=${name}.${domain} reason=missing_record allow_create=false"
-      return 0
-    fi
-
-    # Try to create via v4 (fallback to v2 if needed)
-    if [ -n "${VERCEL_TEAM_ID:-}" ]; then
-      create_url_v4="${base}/v4/domains/${domain}/records?teamId=${VERCEL_TEAM_ID}"
-      create_url_v2="${base}/v2/domains/${domain}/records?teamId=${VERCEL_TEAM_ID}"
-    else
-      create_url_v4="${base}/v4/domains/${domain}/records"
-      create_url_v2="${base}/v2/domains/${domain}/records"
-    fi
+    # No existing record found; try to create via v4 (fallback to v2 if needed)
+    create_url_v4="${base}/v4/domains/${domain}/records${team_q}"
+    create_url_v2="${base}/v2/domains/${domain}/records${team_q}"
     body_create=$(jq -n --arg n "$name" --arg v "$value" --arg t "$type" --argjson ttl $ttl '{ name: $n, value: $v, type: $t, ttl: $ttl }')
 
     # try v4 create
@@ -221,7 +198,6 @@ PY
     res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
     res_code=$(echo "$res" | tail -n1 || echo "")
     if [ "$res_code" = "200" ] || [ "$res_code" = "201" ]; then
-      echo "DNS_UPSERT_CREATED name=${name}.${domain} value=${value}"
       return 0
     fi
     handle_auth_err "$res_code" "$res_body" || return 2
@@ -231,7 +207,6 @@ PY
     res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
     res_code=$(echo "$res" | tail -n1 || echo "")
     if [ "$res_code" = "200" ] || [ "$res_code" = "201" ]; then
-      echo "DNS_UPSERT_CREATED name=${name}.${domain} value=${value}"
       return 0
     fi
     handle_auth_err "$res_code" "$res_body" || return 2
@@ -341,14 +316,30 @@ EOF
 
     # ensure certbot directories are present (persisted via hostPath)
     mkdir -p /etc/letsencrypt /var/lib/letsencrypt
-    # State files for retry/backoff management
-    RELAY_CERT_STATE_DIR=/var/lib/letsencrypt
-    LAST_ATTEMPT_FILE="$RELAY_CERT_STATE_DIR/.relay-certbot-last-attempt"
-    LAST_SUCCESS_FILE="$RELAY_CERT_STATE_DIR/.relay-certbot-last-success"
-    BACKOFF_INDEX_FILE="$RELAY_CERT_STATE_DIR/.relay-certbot-backoff-index"
+    CERT_PRESENT=0
+    if [ -d "/etc/letsencrypt/live/${FQDN}" ]; then
+      if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
+        CERT_PRESENT=1
+      fi
+    fi
 
-    # Helper: write nginx SSL server block and reload
-    write_ssl_nginx_and_reload() {
+    if [ $CERT_PRESENT -eq 0 ]; then
+      echo "No existing certs for ${FQDN}; attempting certbot (will retry up to 3 times)"
+      for i in 1 2 3; do
+        if certbot --nginx -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
+          echo "Certbot succeeded on attempt $i"
+          CERT_PRESENT=1
+          break
+        else
+          echo "Certbot attempt $i failed; will retry after backoff"
+          sleep $((10 * i))
+        fi
+      done
+    else
+      echo "Found existing certs for ${FQDN}; skipping initial certbot run"
+    fi
+
+    if [ $CERT_PRESENT -eq 1 ]; then
       echo "Configuring nginx to proxy to relay-server with SSL for ${FQDN}"
       cat > /etc/nginx/sites-enabled/default <<EOF
 server {
@@ -376,113 +367,14 @@ server {
 }
 EOF
       nginx -s reload || true
-    }
-
-    # Helper: single certbot attempt; returns 0 on success
-    certbot_single_attempt() {
-      echo "CERTBOT_ATTEMPT domain=${FQDN} mode=${SSL_MODE} staging=${RELAY_CERTBOT_STAGING:-false} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      date -u +%s > "$LAST_ATTEMPT_FILE" || true
-      if certbot --nginx -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
-        echo "CERTBOT_SUCCESS domain=${FQDN} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        date -u +%s > "$LAST_SUCCESS_FILE" || true
-        echo 0 > "$BACKOFF_INDEX_FILE" || true
-        return 0
-      else
-        echo "CERTBOT_FAIL domain=${FQDN} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        return 1
-      fi
-    }
-
-    # Helper: compute backoff by index (POSIX sh compatible)
-    get_backoff_delay() {
-      bi="$1"
-      case "$bi" in
-        0) echo 1800 ;;
-        1) echo 3600 ;;
-        2) echo 7200 ;;
-        3) echo 14400 ;;
-        4) echo 28800 ;;
-        5) echo 43200 ;;
-        *) echo 86400 ;;
-      esac
-    }
-
-    # Helper: background retry manager with exponential backoff + jitter (POSIX sh)
-    certbot_retry_manager() {
-      while true; do
-        # If cert exists and is valid, sleep a while before checking again
-        if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
-          if EXP=$(openssl x509 -in "/etc/letsencrypt/live/${FQDN}/fullchain.pem" -noout -enddate 2>/dev/null | cut -d= -f2); then
-            EXP_EPOCH=$(date -u -d "$EXP" +%s 2>/dev/null || true)
-            NOW_EPOCH=$(date -u +%s)
-            SECS_LEFT=$((EXP_EPOCH - NOW_EPOCH))
-            if [ -n "$EXP_EPOCH" ] && [ $SECS_LEFT -gt $((20*24*3600)) ]; then
-              sleep 21600 & wait $! 2>/dev/null || true # sleep 6h
-              continue
-            fi
-          fi
-        fi
-
-        # Compute backoff index
-        idx=0
-        if [ -f "$BACKOFF_INDEX_FILE" ]; then
-          idx=$(cat "$BACKOFF_INDEX_FILE" 2>/dev/null || echo 0)
-        fi
-        if [ -z "$idx" ]; then idx=0; fi
-        delay=$(get_backoff_delay "$idx")
-        # Jitter up to 20% if /dev/urandom is available
-        jitter=0
-        if [ -r /dev/urandom ]; then
-          # read a 16-bit unsigned int and mod it
-          ur=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ')
-          if [ -n "$ur" ]; then
-            # ensure divisor >=1
-            div=$(( (delay / 5) + 1 ))
-            jitter=$(( ur % div ))
-          fi
-        fi
-        sleep_for=$((delay + jitter))
-
-        echo "CERTBOT_NEXT_RETRY_IN seconds=${sleep_for} backoff_index=${idx} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        sleep $sleep_for & wait $! 2>/dev/null || true
-
-        if certbot_single_attempt; then
-          write_ssl_nginx_and_reload
-          printf %s 0 > "$BACKOFF_INDEX_FILE" || true
-          sleep 21600 & wait $! 2>/dev/null || true # 6h
-        else
-          next=$((idx + 1))
-          # cap at max index (>=6)
-          if [ "$next" -gt 6 ]; then next=6; fi
-          printf %s "$next" > "$BACKOFF_INDEX_FILE" || true
-        fi
-      done
-    }
-    CERT_PRESENT=0
-    if [ -d "/etc/letsencrypt/live/${FQDN}" ]; then
-      if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
-        CERT_PRESENT=1
-      fi
-    fi
-
-    if [ $CERT_PRESENT -eq 0 ]; then
-      echo "No existing certs for ${FQDN}; attempting immediate certbot run and enabling background retries"
-      if certbot_single_attempt; then
-        CERT_PRESENT=1
-      else
-        CERT_PRESENT=0
-      fi
-      certbot_retry_manager &
     else
-      echo "Found existing certs for ${FQDN}; will still start background renewal manager"
-      certbot_retry_manager &
-    fi
-
-    if [ $CERT_PRESENT -eq 1 ]; then
-      write_ssl_nginx_and_reload
-    else
-      # Continue serving HTTP and let retry manager obtain cert later
-      echo "No certs obtained for ${FQDN} yet; continuing with HTTP only and retrying in background."
+      if [ "$SSL_MODE" = "certbot-required" ]; then
+        echo "Certbot required but no certs obtained for ${FQDN}; stopping relay-server and exiting"
+        kill ${RELAY_PID} || true
+        exit 1
+      else
+        echo "No certs obtained for ${FQDN}; continuing with HTTP only (non-fatal)."
+      fi
     fi
   else
     if [ "$SSL_MODE" = "certbot-required" ]; then

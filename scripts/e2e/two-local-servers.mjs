@@ -67,6 +67,8 @@ async function main() {
             ].join('\n');
             fs.writeFileSync(destRules, minimal);
         }
+        spawnSync('git', ['config', 'user.name', 'Test User'], {cwd: tmp, stdio: 'inherit'});
+        spawnSync('git', ['config', 'user.email', 'test@example.com'], {cwd: tmp, stdio: 'inherit'});
         spawnSync('git', ['add', '.'], {cwd: tmp, stdio: 'inherit'});
         // Commit may fail if nothing changed; ignore non-zero
         spawnSync('git', ['commit', '-m', 'seed rules'], {cwd: tmp, stdio: 'inherit'});
