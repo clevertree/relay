@@ -22,13 +22,15 @@ spec:
       containers:
         - name: relay
           # Image published by CI: use the latest sha-tagged image pushed to GHCR
-          image: ghcr.io/clevertree/relay:sha-c0597dc
+          image: ghcr.io/clevertree/relay:sha-d92e7a1
           imagePullPolicy: IfNotPresent
           env:
             - name: RELAY_SSL_MODE
               value: "certbot-required"
             - name: RELAY_DNS_SUBDOMAIN
-              value: "node1"
+              value: "node-dfw1"
+            - name: RELAY_DNS_DOMAIN
+              value: "relaynet.online"
             - name: RELAY_CERTBOT_EMAIL
               value: "ari@clevertree.com"
             - name: VERCEL_API_TOKEN
@@ -80,3 +82,4 @@ spec:
           hostPath:
             path: /opt/relay/letsencrypt-var
             type: DirectoryOrCreate
+
