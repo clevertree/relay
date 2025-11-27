@@ -372,10 +372,22 @@ EOF
       fi
     }
 
-    # Helper: background retry manager with exponential backoff + jitter
+    # Helper: compute backoff by index (POSIX sh compatible)
+    get_backoff_delay() {
+      bi="$1"
+      case "$bi" in
+        0) echo 1800 ;;
+        1) echo 3600 ;;
+        2) echo 7200 ;;
+        3) echo 14400 ;;
+        4) echo 28800 ;;
+        5) echo 43200 ;;
+        *) echo 86400 ;;
+      esac
+    }
+
+    # Helper: background retry manager with exponential backoff + jitter (POSIX sh)
     certbot_retry_manager() {
-      # Backoff schedule in seconds: 30m, 1h, 2h, 4h, 8h, 12h, 24h (cap)
-      local schedule=(1800 3600 7200 14400 28800 43200 86400)
       while true; do
         # If cert exists and is valid, sleep a while before checking again
         if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
@@ -396,13 +408,18 @@ EOF
           idx=$(cat "$BACKOFF_INDEX_FILE" 2>/dev/null || echo 0)
         fi
         if [ -z "$idx" ]; then idx=0; fi
-        # shellcheck disable=SC2128
-        count=${#schedule[@]}
-        if [ -z "$count" ]; then count=7; fi
-        if [ "$idx" -ge "$count" ]; then idx=$((count - 1)); fi
-        delay=${schedule[$idx]}
-        # Jitter up to 20%
-        jitter=$((RANDOM % ( (delay / 5) + 1 )))
+        delay=$(get_backoff_delay "$idx")
+        # Jitter up to 20% if /dev/urandom is available
+        jitter=0
+        if [ -r /dev/urandom ]; then
+          # read a 16-bit unsigned int and mod it
+          ur=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ')
+          if [ -n "$ur" ]; then
+            # ensure divisor >=1
+            div=$(( (delay / 5) + 1 ))
+            jitter=$(( ur % div ))
+          fi
+        fi
         sleep_for=$((delay + jitter))
 
         echo "CERTBOT_NEXT_RETRY_IN seconds=${sleep_for} backoff_index=${idx} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -410,12 +427,13 @@ EOF
 
         if certbot_single_attempt; then
           write_ssl_nginx_and_reload
-          echo 0 > "$BACKOFF_INDEX_FILE" || true
+          printf %s 0 > "$BACKOFF_INDEX_FILE" || true
           sleep 21600 & wait $! 2>/dev/null || true # 6h
         else
           next=$((idx + 1))
-          if [ "$next" -ge "$count" ]; then next=$((count - 1)); fi
-          echo $next > "$BACKOFF_INDEX_FILE" || true
+          # cap at max index (>=6)
+          if [ "$next" -gt 6 ]; then next=6; fi
+          printf %s "$next" > "$BACKOFF_INDEX_FILE" || true
         fi
       done
     }
