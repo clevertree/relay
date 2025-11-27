@@ -29,7 +29,7 @@ resource "spot_spotnodepool" "pool" {
   cloudspace_name      = spot_cloudspace.cs.cloudspace_name
   server_class         = var.server_class
   bid_price            = var.bid_price
-  desired_server_count = 1
+  desired_server_count = 2
 
   labels = {
     "managed-by" = "terraform"

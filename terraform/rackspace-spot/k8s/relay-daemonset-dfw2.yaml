@@ -1,17 +1,17 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: relay-daemon
+  name: relay-daemon-dfw2
   labels:
-    app: relay
+    app: relay-dfw2
 spec:
   selector:
     matchLabels:
-      app: relay
+      app: relay-dfw2
   template:
     metadata:
       labels:
-        app: relay
+        app: relay-dfw2
     spec:
       hostNetwork: true
       hostPID: false
@@ -24,14 +24,11 @@ spec:
           # Image published by CI: use the latest sha-tagged image pushed to GHCR
           image: ghcr.io/clevertree/relay:sha-d92e7a1
           imagePullPolicy: IfNotPresent
-          # Pin this DaemonSet to the dfw1-designated node
-          # We will label the node: relay-node=dfw1
-          # A separate DaemonSet will target relay-node=dfw2
           env:
             - name: RELAY_SSL_MODE
               value: "certbot-required"
             - name: RELAY_DNS_SUBDOMAIN
-              value: "node-dfw1"
+              value: "node-dfw2"
             - name: RELAY_DNS_DOMAIN
               value: "relaynet.online"
             - name: RELAY_CERTBOT_EMAIL
@@ -58,9 +55,9 @@ spec:
               mountPath: /etc/letsencrypt
             - name: letsencrypt-var
               mountPath: /var/lib/letsencrypt
-      # Ensure this DaemonSet only runs on the dfw1 node
+      # Ensure this DaemonSet only runs on the dfw2 node
       nodeSelector:
-        relay-node: dfw1
+        relay-node: dfw2
 
       initContainers:
         - name: fix-letsencrypt-perms
@@ -88,4 +85,3 @@ spec:
           hostPath:
             path: /opt/relay/letsencrypt-var
             type: DirectoryOrCreate
-

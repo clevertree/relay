@@ -147,11 +147,10 @@ PY
     domain="$1"; name="$2"; value="$3"; type="${4:-A}"; ttl="${5:-60}"
     auth_header="Authorization: Bearer ${VERCEL_API_TOKEN_ENV}"
     base="https://api.vercel.com"
-    # prefer v4 endpoints and include teamId when present
-    team_q=""
-    if [ -n "${VERCEL_TEAM_ID:-}" ]; then
-      team_q="?teamId=${VERCEL_TEAM_ID}"
-    fi
+    # Creation policy: default to no-create unless explicitly allowed
+    ALLOW_CREATE="${RELAY_DNS_ALLOW_CREATE:-false}"
+    # Helper: case-insensitive boolean check
+    is_true() { case "${1:-}" in 1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]) return 0;; *) return 1;; esac; }
 
     # Helper to exit on auth errors
     handle_auth_err() {
@@ -163,8 +162,12 @@ PY
       return 0
     }
 
-    # List existing records via v4
-    list_url="${base}/v4/domains/${domain}/records${team_q}&name=${name}&type=${type}"
+    # Build list URL with proper query separators and exact filters
+    if [ -n "${VERCEL_TEAM_ID:-}" ]; then
+      list_url="${base}/v4/domains/${domain}/records?teamId=${VERCEL_TEAM_ID}&name=${name}&type=${type}"
+    else
+      list_url="${base}/v4/domains/${domain}/records?name=${name}&type=${type}"
+    fi
     list_raw=$(curl -sS -w "\n%{http_code}" -H "$auth_header" "$list_url" || true)
     list_body=$(echo "$list_raw" | sed -n '1,$p' | sed '$d') || list_body=""
     list_code=$(echo "$list_raw" | tail -n1 || echo "")
@@ -176,14 +179,19 @@ PY
       rec_id=""
     fi
 
-    # If record exists in v4, PATCH via v4
+    # If record exists in v4, PATCH via v4 (exact match only)
     if [ -n "$rec_id" ]; then
-      patch_url="${base}/v4/domains/${domain}/records/${rec_id}${team_q}"
+      if [ -n "${VERCEL_TEAM_ID:-}" ]; then
+        patch_url="${base}/v4/domains/${domain}/records/${rec_id}?teamId=${VERCEL_TEAM_ID}"
+      else
+        patch_url="${base}/v4/domains/${domain}/records/${rec_id}"
+      fi
       body=$(jq -n --arg v "$value" --argjson t $ttl '{ value: $v, ttl: $t }')
       res=$(curl -sS -w "\n%{http_code}" -X PATCH -H "$auth_header" -H 'Content-Type: application/json' -d "$body" "$patch_url" || true)
       res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
       res_code=$(echo "$res" | tail -n1 || echo "")
       if [ "$res_code" = "200" ] || [ "$res_code" = "204" ]; then
+        echo "DNS_UPSERT_UPDATED name=${name}.${domain} value=${value}"
         return 0
       else
         handle_auth_err "$res_code" "$res_body" || return 2
@@ -192,9 +200,20 @@ PY
       fi
     fi
 
-    # No existing record found; try to create via v4 (fallback to v2 if needed)
-    create_url_v4="${base}/v4/domains/${domain}/records${team_q}"
-    create_url_v2="${base}/v2/domains/${domain}/records${team_q}"
+    # No existing record found; consider creation policy first
+    if ! is_true "$ALLOW_CREATE"; then
+      echo "DNS_UPSERT_SKIPPED_CREATE name=${name}.${domain} reason=missing_record allow_create=false"
+      return 0
+    fi
+
+    # Try to create via v4 (fallback to v2 if needed)
+    if [ -n "${VERCEL_TEAM_ID:-}" ]; then
+      create_url_v4="${base}/v4/domains/${domain}/records?teamId=${VERCEL_TEAM_ID}"
+      create_url_v2="${base}/v2/domains/${domain}/records?teamId=${VERCEL_TEAM_ID}"
+    else
+      create_url_v4="${base}/v4/domains/${domain}/records"
+      create_url_v2="${base}/v2/domains/${domain}/records"
+    fi
     body_create=$(jq -n --arg n "$name" --arg v "$value" --arg t "$type" --argjson ttl $ttl '{ name: $n, value: $v, type: $t, ttl: $ttl }')
 
     # try v4 create
@@ -202,6 +221,7 @@ PY
     res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
     res_code=$(echo "$res" | tail -n1 || echo "")
     if [ "$res_code" = "200" ] || [ "$res_code" = "201" ]; then
+      echo "DNS_UPSERT_CREATED name=${name}.${domain} value=${value}"
       return 0
     fi
     handle_auth_err "$res_code" "$res_body" || return 2
@@ -211,6 +231,7 @@ PY
     res_body=$(echo "$res" | sed -n '1,$p' | sed '$d' || true)
     res_code=$(echo "$res" | tail -n1 || echo "")
     if [ "$res_code" = "200" ] || [ "$res_code" = "201" ]; then
+      echo "DNS_UPSERT_CREATED name=${name}.${domain} value=${value}"
       return 0
     fi
     handle_auth_err "$res_code" "$res_body" || return 2
