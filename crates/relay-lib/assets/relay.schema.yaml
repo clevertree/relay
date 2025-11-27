@@ -125,5 +125,115 @@ properties:
         additionalProperties: false
     required: [engine, collection]
     additionalProperties: false
+  git:
+    type: object
+    description: >-
+      Git governance for branching/merging/commit validation and hook-driven actions.
+      This section is optional. If present, relay-hooks and servers SHOULD enforce
+      these rules on new commits/merges and perform the configured actions.
+    properties:
+      allowedOrigins:
+        type: array
+        description: Repository-wide list of acceptable remote URLs for inbound histories (merge/pull validation).
+        items: { type: string }
+      allowPullFrom:
+        type: array
+        description: Repository-wide list of remote URLs that the relay is allowed to pull from (applies to all branches unless overridden).
+        items: { type: string }
+      sources:
+        type: array
+        description: Named upstream sources (origins) this repository may pull from.
+        items:
+          type: object
+          properties:
+            name: { type: string }
+            url: { type: string }
+          required: [name, url]
+          additionalProperties: false
+      branchRules:
+        type: object
+        description: Default and per-branch rules for commit acceptance and pulls.
+        properties:
+          default:
+            type: object
+            properties:
+              requireSigned: { type: boolean }
+              allowUnsigned: { type: boolean }
+              allowedKeys:
+                type: array
+                items: { type: string }
+              allowedOrigins:
+                type: array
+                items: { type: string }
+              allowPullFrom:
+                type: array
+                items: { type: string }
+            additionalProperties: false
+          branches:
+            type: array
+            description: Per-branch rule overrides.
+            items:
+              type: object
+              properties:
+                name: { type: string }
+                rule:
+                  type: object
+                  properties:
+                    requireSigned: { type: boolean }
+                    allowUnsigned: { type: boolean }
+                    allowedKeys:
+                      type: array
+                      items: { type: string }
+                    allowedOrigins:
+                      type: array
+                      items: { type: string }
+                    allowPullFrom:
+                      type: array
+                      items: { type: string }
+                  additionalProperties: false
+              required: [name, rule]
+              additionalProperties: false
+        additionalProperties: false
+      autoPush:
+        type: object
+        description: Auto-push behavior to peers after commits/merges.
+        properties:
+          branches:
+            type: array
+            items: { type: string }
+          peersEnv: { type: string }
+          async:
+            type: boolean
+            description: If true, pushing occurs asynchronously and must not block commit.
+          debounceSeconds:
+            type: integer
+            minimum: 0
+        additionalProperties: false
+      hooks:
+        type: object
+        properties:
+          github:
+            type: object
+            description: GitHub webhook integration used to trigger pulls.
+            properties:
+              enabled: { type: boolean }
+              path: { type: string }
+              secretEnv: { type: string }
+              events:
+                type: array
+                items: { type: string }
+              pullOn:
+                type: object
+                properties:
+                  origins:
+                    type: array
+                    items: { type: string }
+                  branches:
+                    type: array
+                    items: { type: string }
+                additionalProperties: false
+            additionalProperties: false
+        additionalProperties: false
+    additionalProperties: false
 required: [allowedPaths, insertTemplate, metaSchema, db]
 additionalProperties: false

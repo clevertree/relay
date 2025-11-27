@@ -13,7 +13,10 @@ use tracing::{error, info, warn, Level};
 
 /// Relay Git hooks runner
 #[derive(Parser, Debug)]
-#[command(version, about = "Relay Git hooks runner: validates relay.yaml and enforces whitelist/meta for new commits")]
+#[command(
+    version,
+    about = "Relay Git hooks runner: validates relay.yaml and enforces whitelist/meta for new commits"
+)]
 struct Args {
     /// Hook name (e.g., pre-receive, update)
     #[arg(long)]
@@ -55,7 +58,9 @@ struct InsertPolicy {
     statements: Vec<String>,
 }
 
-fn default_policy_branch() -> String { "*".to_string() }
+fn default_policy_branch() -> String {
+    "*".to_string()
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -93,7 +98,7 @@ fn open_repo_from_env() -> Result<Repository> {
 }
 
 fn handle_update() -> Result<()> {
-    // update hook args: <refname> <old> <new> are argv after program normally; 
+    // update hook args: <refname> <old> <new> are argv after program normally;
     // but we use pre-receive primarily. Do nothing.
     Ok(())
 }
@@ -102,16 +107,22 @@ fn handle_pre_receive() -> Result<()> {
     // Read lines: <old> <new> <ref>
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
-    if input.trim().is_empty() { return Ok(()); }
+    if input.trim().is_empty() {
+        return Ok(());
+    }
     let repo = open_repo_from_env()?;
 
     for line in input.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() != 3 { continue; }
+        if parts.len() != 3 {
+            continue;
+        }
         let old = Oid::from_str(parts[0]).unwrap_or_else(|_| Oid::zero());
         let new = Oid::from_str(parts[1]).unwrap_or_else(|_| Oid::zero());
         let r#ref = parts[2];
-        if new.is_zero() { continue; } // deletion
+        if new.is_zero() {
+            continue;
+        } // deletion
 
         validate_push(&repo, old, new, r#ref)?;
     }
@@ -131,7 +142,11 @@ fn validate_push(repo: &Repository, old: Oid, new: Oid, refname: &str) -> Result
 
     // Gather file additions/updates from old..new
     let mut diffopts = DiffOptions::new();
-    let old_tree = if old.is_zero() { None } else { Some(repo.find_commit(old)?.tree()?) };
+    let old_tree = if old.is_zero() {
+        None
+    } else {
+        Some(repo.find_commit(old)?.tree()?)
+    };
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut diffopts))?;
 
     // Build glob allowlist
@@ -142,12 +157,18 @@ fn validate_push(repo: &Repository, old: Oid, new: Oid, refname: &str) -> Result
 
     for delta in diff.deltas() {
         let status = delta.status();
-        if !matches!(status, git2::Delta::Added | git2::Delta::Modified | git2::Delta::Copied | git2::Delta::Renamed) {
+        if !matches!(
+            status,
+            git2::Delta::Added | git2::Delta::Modified | git2::Delta::Copied | git2::Delta::Renamed
+        ) {
             continue;
         }
         if let Some(path) = delta.new_file().path() {
             if !path_allowed(path, &globset) {
-                violations.push(format!("{}: path not permitted by allowed_paths", path.display()));
+                violations.push(format!(
+                    "{}: path not permitted by allowed_paths",
+                    path.display()
+                ));
             } else if path.ends_with("meta.json") {
                 if let Err(e) = validate_meta_json(repo, &new_tree, path, &parsed) {
                     violations.push(format!("{}: {}", path.display(), e));
@@ -189,14 +210,20 @@ fn load_rules(repo: &Repository, tree: &git2::Tree) -> Result<JsonValue> {
 fn validate_rules_schema(rules: &JsonValue) -> Result<()> {
     // Use bundled schema from relay-lib so the crate is self-contained
     let schema_yaml = relay_lib::assets::RULES_SCHEMA_YAML;
-    let schema_json: JsonValue = serde_yaml::from_str(schema_yaml).context("parse rules.schema.yaml")?;
+    let schema_json: JsonValue =
+        serde_yaml::from_str(schema_yaml).context("parse relay.schema.yaml")?;
     // Leak to satisfy 'static lifetime required by validator internals in jsonschema 0.17
     let leaked_schema: &'static JsonValue = Box::leak(Box::new(schema_json));
     let compiled = JSONSchema::compile(leaked_schema).context("compile rules schema")?;
     let result = compiled.validate(rules);
     if let Err(errors) = result {
-        let msgs: Vec<String> = errors.map(|e| format!("{} at {}", e, e.instance_path)).collect();
-        return Err(anyhow!("relay.yaml failed schema validation:\n{}", msgs.join("\n")));
+        let msgs: Vec<String> = errors
+            .map(|e| format!("{} at {}", e, e.instance_path))
+            .collect();
+        return Err(anyhow!(
+            "relay.yaml failed schema validation:\n{}",
+            msgs.join("\n")
+        ));
     }
     Ok(())
 }
@@ -215,7 +242,12 @@ fn path_allowed(path: &Path, gs: &GlobSet) -> bool {
     gs.is_match(s)
 }
 
-fn validate_meta_json(repo: &Repository, tree: &git2::Tree, path: &Path, rules: &RulesDoc) -> Result<()> {
+fn validate_meta_json(
+    repo: &Repository,
+    tree: &git2::Tree,
+    path: &Path,
+    rules: &RulesDoc,
+) -> Result<()> {
     let entry = tree.get_path(path)?;
     let blob = repo.find_blob(entry.id())?;
     let txt = std::str::from_utf8(blob.content())?;
@@ -225,8 +257,13 @@ fn validate_meta_json(repo: &Repository, tree: &git2::Tree, path: &Path, rules: 
     let leaked_meta: &'static JsonValue = Box::leak(Box::new(rules.meta_schema.clone()));
     let compiled = JSONSchema::compile(leaked_meta)?;
     if let Err(errors) = compiled.validate(&meta_json) {
-        let msgs: Vec<String> = errors.map(|e| format!("{} at {}", e, e.instance_path)).collect();
-        return Err(anyhow!("meta.json failed schema validation:\n{}", msgs.join("\n")));
+        let msgs: Vec<String> = errors
+            .map(|e| format!("{} at {}", e, e.instance_path))
+            .collect();
+        return Err(anyhow!(
+            "meta.json failed schema validation:\n{}",
+            msgs.join("\n")
+        ));
     }
     Ok(())
 }
@@ -241,11 +278,21 @@ fn maintain_local_index_polodb(
 ) -> Result<()> {
     use relay_lib::db::{Db, DbSpec};
     // Parse db spec
-    let db_spec_val = rules_val.get("db").cloned().ok_or_else(|| anyhow!("rules.db missing"))?;
+    let db_spec_val = rules_val
+        .get("db")
+        .cloned()
+        .ok_or_else(|| anyhow!("rules.db missing"))?;
     let spec: DbSpec = serde_json::from_value(db_spec_val).context("parse rules.db spec")?;
-    if spec.engine.to_lowercase() != "polodb" { return Ok(()); }
+    if spec.engine.to_lowercase() != "polodb" {
+        return Ok(());
+    }
     // Open PoloDB at <gitdir>/relay_index.polodb (or env override)
-    let db_path = std::env::var("RELAY_DB_PATH").unwrap_or_else(|_| repo.path().join("relay_index.polodb").to_string_lossy().to_string());
+    let db_path = std::env::var("RELAY_DB_PATH").unwrap_or_else(|_| {
+        repo.path()
+            .join("relay_index.polodb")
+            .to_string_lossy()
+            .to_string()
+    });
     let db = Db::open(&db_path).context("open polodb")?;
     db.ensure_indexes(&spec).context("ensure indexes")?;
     // Upsert for each changed meta.json
@@ -254,7 +301,10 @@ fn maintain_local_index_polodb(
         let blob = repo.find_blob(entry.id())?;
         let txt = std::str::from_utf8(blob.content())?;
         let meta: JsonValue = serde_json::from_str(txt).context("meta.json must be JSON")?;
-        let meta_dir = p.parent().map(|pp| pp.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+        let meta_dir = p
+            .parent()
+            .map(|pp| pp.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
         db.upsert_from_meta(&spec, branch, &meta, &meta_dir)
             .with_context(|| format!("upsert failed for {}", p.display()))?;
     }
@@ -265,9 +315,9 @@ fn maintain_local_index_polodb(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-    use std::path::Path;
     use git2::Repository as Git2Repo;
+    use std::path::Path;
+    use tempfile::tempdir;
 
     // URL of the canonical template used for tests (guaranteed to include relay.yaml)
     const TEMPLATE_REPO: &str = "https://github.com/clevertree/relay-template.git";
@@ -306,12 +356,19 @@ mod tests {
         let obj = repo.revparse_single("HEAD^{tree}")?;
         let tree = obj.peel_to_tree()?;
         let res = load_rules(&repo, &tree);
-        assert!(res.is_err(), "expected load_rules to error when relay.yaml missing");
+        assert!(
+            res.is_err(),
+            "expected load_rules to error when relay.yaml missing"
+        );
         Ok(())
     }
     #[test]
     fn test_build_globset_and_match() {
-        let gs = build_globset(&vec!["data/**/meta.json".into(), "data/**/assets/**".into()]).unwrap();
+        let gs = build_globset(&vec![
+            "data/**/meta.json".into(),
+            "data/**/assets/**".into(),
+        ])
+        .unwrap();
         assert!(path_allowed(Path::new("data/2024/foo/meta.json"), &gs));
         assert!(path_allowed(Path::new("data/2024/foo/assets/img.png"), &gs));
         assert!(!path_allowed(Path::new("docs/readme.md"), &gs));
@@ -319,5 +376,77 @@ mod tests {
     #[test]
     fn test_placeholder_no_sqlite_left() {
         assert!(true);
+    }
+
+    #[test]
+    fn test_schema_accepts_repo_wide_git_allowed_fields() -> Result<()> {
+        // Minimal valid rules with repo-wide git.allowedOrigins and git.allowPullFrom
+        let yaml = r#"
+allowedPaths: ["data/**"]
+insertTemplate: "/data/${title}/"
+metaSchema: {}
+db:
+  engine: polodb
+  collection: movies
+git:
+  allowedOrigins: ["https://github.com/clevertree/relay-template/"]
+  allowPullFrom: ["https://github.com/clevertree/relay-template/"]
+  branchRules:
+    default:
+      requireSigned: true
+      allowedKeys: [".ssh/*"]
+"#;
+        let val: JsonValue = serde_yaml::from_str(yaml)?;
+        // Should validate against bundled schema
+        validate_rules_schema(&val)
+    }
+
+    #[test]
+    fn test_schema_accepts_branch_overrides_for_allowed_fields() -> Result<()> {
+        // Same as above, but add per-branch overrides for allowedOrigins/allowPullFrom
+        let yaml = r#"
+allowedPaths: ["data/**"]
+insertTemplate: "/data/${title}/"
+metaSchema: {}
+db:
+  engine: polodb
+  collection: movies
+git:
+  allowedOrigins: ["https://example.com/upstream/"]
+  allowPullFrom: ["https://example.com/upstream/"]
+  branchRules:
+    default:
+      requireSigned: true
+      allowedKeys: [".ssh/*"]
+    branches:
+      - name: main
+        rule:
+          requireSigned: true
+          allowedKeys: [".ssh/id_rsa.pub"]
+          allowedOrigins: ["https://github.com/clevertree/relay-template/"]
+          allowPullFrom: ["https://github.com/clevertree/relay-template/"]
+"#;
+        let val: JsonValue = serde_yaml::from_str(yaml)?;
+        validate_rules_schema(&val)
+    }
+
+    #[test]
+    fn test_schema_rejects_unknown_git_property() {
+        // Introduce an unknown property under git to ensure additionalProperties: false is enforced
+        let yaml = r#"
+allowedPaths: ["data/**"]
+insertTemplate: "/data/${title}/"
+metaSchema: {}
+db:
+  engine: polodb
+  collection: movies
+git:
+  allowedOrigins: ["https://example.com/upstream/"]
+  allowPullFrom: ["https://example.com/upstream/"]
+  foo: 123
+"#;
+        let val: JsonValue = serde_yaml::from_str(yaml).unwrap();
+        let res = validate_rules_schema(&val);
+        assert!(res.is_err(), "schema should reject unknown git.foo");
     }
 }

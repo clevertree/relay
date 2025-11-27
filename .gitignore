@@ -50,4 +50,4 @@ terraform/**/terraform.tfvars
 terraform/**/secrets.auto.tfvars
 terraform/**/*.secrets.tfvars
 
-relay-test-kubeconfig.yaml
+*kubeconfig.yaml

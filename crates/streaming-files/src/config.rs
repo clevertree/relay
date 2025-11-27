@@ -236,4 +236,4 @@ fn default_play_min_total_percent() -> u32 { 1 }
 fn default_resume_poll_interval_sec() -> u32 { 5 }
 fn default_resume_timeout_min() -> u32 { 30 }
 fn default_preferred_backend() -> String { "auto".to_string() }
-fn default_playback_target() -> String { "system".to_string() }
+fn default_playback_target() -> String { "auto".to_string() }

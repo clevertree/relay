@@ -2,6 +2,10 @@
 # Requires the Kubernetes provider to be configured (kubeconfig from outputs)
 
 resource "kubernetes_secret" "relay_credentials" {
+  depends_on = [
+    spot_cloudspace.cs,
+    local_file.kubeconfig
+  ]
   metadata {
     name      = "relay-credentials"
     namespace = "default"

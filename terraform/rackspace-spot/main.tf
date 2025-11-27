@@ -9,7 +9,8 @@ provider "spot" {
 }
 
 provider "kubernetes" {
-  config_path = "/tmp/kubeconfig"
+  # Use a module-local kubeconfig path for cross-platform compatibility
+  config_path = abspath("${path.module}/kubeconfig")
 }
 
 // Data source to list available server classes and their metadata (used for debugging)
@@ -42,5 +43,5 @@ data "spot_kubeconfig" "this" {
 
 resource "local_file" "kubeconfig" {
   content  = data.spot_kubeconfig.this.raw
-  filename = "/tmp/kubeconfig"
+  filename = abspath("${path.module}/kubeconfig")
 }
