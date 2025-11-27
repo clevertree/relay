@@ -1,10 +1,6 @@
 # Create Kubernetes secret `relay-credentials` containing Vercel token/team id
 # Requires the Kubernetes provider to be configured (kubeconfig from outputs)
 
-provider "kubernetes" {
-  # Assumes provider is configured via environment or elsewhere in this module
-}
-
 resource "kubernetes_secret" "relay_credentials" {
   metadata {
     name      = "relay-credentials"

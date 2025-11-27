@@ -246,27 +246,79 @@ PY
     echo "VERCEL_API_TOKEN not set; skipping DNS upsert"
   fi
 
+  # --- Configure nginx to proxy to relay-server (always, even without SSL) ---
+  echo "Configuring nginx to proxy to relay-server"
+  RELAY_PORT=$(echo "$RELAY_BIND" | awk -F: '{print $NF}')
+  cat > /etc/nginx/sites-enabled/default <<EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+  # also ensure the common conf.d location is overridden so the default nginx welcome page cannot win
+  cat > /etc/nginx/conf.d/default.conf <<EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+  # Start nginx
+  nginx
+
   # --- SSL certificate via certbot (nginx) ---
+  # We attempt to provision certs if RELAY_CERTBOT_EMAIL is set. Failures are non-fatal:
+  # the container will continue to run HTTP only and will switch to HTTPS once certs exist.
   if [ -n "${RELAY_CERTBOT_EMAIL:-}" ]; then
-    echo "Requesting SSL certificate for ${FQDN} via certbot"
-    CERT_OK="no"
-    for i in 1 2 3; do
-      if certbot --nginx -d "$FQDN" -m "$RELAY_CERTBOT_EMAIL" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
-        CERT_OK="yes"; break
-      else
-        echo "Certbot failed (attempt $i); retrying..."
-        sleep 10
+    echo "Attempting SSL certificate provisioning for ${FQDN} (non-fatal)"
+
+    # ensure certbot directories are present (persisted via hostPath)
+    mkdir -p /etc/letsencrypt /var/lib/letsencrypt
+    CERT_PRESENT=0
+    if [ -d "/etc/letsencrypt/live/${FQDN}" ]; then
+      if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
+        CERT_PRESENT=1
       fi
-    done
-    if [ "$CERT_OK" != "yes" ]; then
-      echo "Certbot failed after retries; stopping relay-server and exiting"
-      kill ${RELAY_PID} || true
-      exit 1
     fi
-    # Configure nginx to proxy to relay-server
-    echo "Configuring nginx to proxy to relay-server"
-    RELAY_PORT=$(echo "$RELAY_BIND" | awk -F: '{print $NF}')
-    cat > /etc/nginx/sites-enabled/default <<EOF
+
+    if [ $CERT_PRESENT -eq 0 ]; then
+      echo "No existing certs for ${FQDN}; attempting certbot (will retry up to 3 times)"
+      for i in 1 2 3; do
+        if certbot --nginx -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
+          echo "Certbot succeeded on attempt $i"
+          CERT_PRESENT=1
+          break
+        else
+          echo "Certbot attempt $i failed; will retry after backoff"
+          sleep $((10 * i))
+        fi
+      done
+    else
+      echo "Found existing certs for ${FQDN}; skipping initial certbot run"
+    fi
+
+    if [ $CERT_PRESENT -eq 1 ]; then
+      echo "Configuring nginx to proxy to relay-server with SSL for ${FQDN}"
+      cat > /etc/nginx/sites-enabled/default <<EOF
 server {
     listen 80;
     server_name ${FQDN};
@@ -291,8 +343,10 @@ server {
     }
 }
 EOF
-    # Reload nginx to pick up new certs and configuration
-    nginx -s reload || true
+      nginx -s reload || true
+    else
+      echo "No certs obtained for ${FQDN}; continuing with HTTP only. You can inspect logs for certbot failures."
+    fi
   else
     echo "RELAY_CERTBOT_EMAIL not set; skipping SSL certificate provisioning"
   fi

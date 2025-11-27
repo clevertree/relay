@@ -8,6 +8,10 @@ provider "spot" {
   token = local.spot_token
 }
 
+provider "kubernetes" {
+  config_path = "/tmp/kubeconfig"
+}
+
 // Data source to list available server classes and their metadata (used for debugging)
 data "spot_serverclasses" "all" {}
 
@@ -34,4 +38,9 @@ resource "spot_spotnodepool" "pool" {
 
 data "spot_kubeconfig" "this" {
   cloudspace_name = spot_cloudspace.cs.cloudspace_name
+}
+
+resource "local_file" "kubeconfig" {
+  content  = data.spot_kubeconfig.this.raw
+  filename = "/tmp/kubeconfig"
 }

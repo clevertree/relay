@@ -15,11 +15,14 @@ spec:
     spec:
       hostNetwork: true
       hostPID: false
+      securityContext:
+        fsGroup: 1000
       tolerations:
         - operator: "Exists"
       containers:
         - name: relay
-          image: ghcr.io/clevertree/relay:main
+          # Replace this with your registry path, e.g. ghcr.io/clevertree/relay:latest or docker.io/youruser/relay:latest
+          image: REPLACE_WITH_REGISTRY/relay:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: RELAY_DNS_SUBDOMAIN
@@ -43,3 +46,35 @@ spec:
           securityContext:
             runAsUser: 0
             privileged: false
+          volumeMounts:
+            - name: letsencrypt
+              mountPath: /etc/letsencrypt
+            - name: letsencrypt-var
+              mountPath: /var/lib/letsencrypt
+
+      initContainers:
+        - name: fix-letsencrypt-perms
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /opt/relay/letsencrypt /opt/relay/letsencrypt-var || true
+              chown -R 1000:1000 /opt/relay/letsencrypt /opt/relay/letsencrypt-var || true
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: letsencrypt
+              mountPath: /opt/relay/letsencrypt
+            - name: letsencrypt-var
+              mountPath: /opt/relay/letsencrypt-var
+
+      volumes:
+        - name: letsencrypt
+          hostPath:
+            path: /opt/relay/letsencrypt
+            type: DirectoryOrCreate
+        - name: letsencrypt-var
+          hostPath:
+            path: /opt/relay/letsencrypt-var
+            type: DirectoryOrCreate
