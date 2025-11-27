@@ -124,7 +124,7 @@ PY
   FQDN="${VERCEL_SUBDOMAIN}.${VERCEL_DOMAIN}"
 
   # Configure git identity as requested to avoid commit prompts/errors
-  # email: admin@<fqdn> (e.g., admin@node1.relaynet.online), name: admin
+  # email: admin@<fqdn> (e.g., admin@node-dfw1.relaynet.online.online), name: admin
   git config --global user.email "admin@${FQDN}" || true
   git config --global user.name "admin" || true
 
@@ -320,30 +320,14 @@ EOF
 
     # ensure certbot directories are present (persisted via hostPath)
     mkdir -p /etc/letsencrypt /var/lib/letsencrypt
-    CERT_PRESENT=0
-    if [ -d "/etc/letsencrypt/live/${FQDN}" ]; then
-      if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
-        CERT_PRESENT=1
-      fi
-    fi
+    # State files for retry/backoff management
+    RELAY_CERT_STATE_DIR=/var/lib/letsencrypt
+    LAST_ATTEMPT_FILE="$RELAY_CERT_STATE_DIR/.relay-certbot-last-attempt"
+    LAST_SUCCESS_FILE="$RELAY_CERT_STATE_DIR/.relay-certbot-last-success"
+    BACKOFF_INDEX_FILE="$RELAY_CERT_STATE_DIR/.relay-certbot-backoff-index"
 
-    if [ $CERT_PRESENT -eq 0 ]; then
-      echo "No existing certs for ${FQDN}; attempting certbot (will retry up to 3 times)"
-      for i in 1 2 3; do
-        if certbot --nginx -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
-          echo "Certbot succeeded on attempt $i"
-          CERT_PRESENT=1
-          break
-        else
-          echo "Certbot attempt $i failed; will retry after backoff"
-          sleep $((10 * i))
-        fi
-      done
-    else
-      echo "Found existing certs for ${FQDN}; skipping initial certbot run"
-    fi
-
-    if [ $CERT_PRESENT -eq 1 ]; then
+    # Helper: write nginx SSL server block and reload
+    write_ssl_nginx_and_reload() {
       echo "Configuring nginx to proxy to relay-server with SSL for ${FQDN}"
       cat > /etc/nginx/sites-enabled/default <<EOF
 server {
@@ -371,14 +355,95 @@ server {
 }
 EOF
       nginx -s reload || true
-    else
-      if [ "$SSL_MODE" = "certbot-required" ]; then
-        echo "Certbot required but no certs obtained for ${FQDN}; stopping relay-server and exiting"
-        kill ${RELAY_PID} || true
-        exit 1
+    }
+
+    # Helper: single certbot attempt; returns 0 on success
+    certbot_single_attempt() {
+      echo "CERTBOT_ATTEMPT domain=${FQDN} mode=${SSL_MODE} staging=${RELAY_CERTBOT_STAGING:-false} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      date -u +%s > "$LAST_ATTEMPT_FILE" || true
+      if certbot --nginx -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
+        echo "CERTBOT_SUCCESS domain=${FQDN} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        date -u +%s > "$LAST_SUCCESS_FILE" || true
+        echo 0 > "$BACKOFF_INDEX_FILE" || true
+        return 0
       else
-        echo "No certs obtained for ${FQDN}; continuing with HTTP only (non-fatal)."
+        echo "CERTBOT_FAIL domain=${FQDN} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        return 1
       fi
+    }
+
+    # Helper: background retry manager with exponential backoff + jitter
+    certbot_retry_manager() {
+      # Backoff schedule in seconds: 30m, 1h, 2h, 4h, 8h, 12h, 24h (cap)
+      local schedule=(1800 3600 7200 14400 28800 43200 86400)
+      while true; do
+        # If cert exists and is valid, sleep a while before checking again
+        if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
+          if EXP=$(openssl x509 -in "/etc/letsencrypt/live/${FQDN}/fullchain.pem" -noout -enddate 2>/dev/null | cut -d= -f2); then
+            EXP_EPOCH=$(date -u -d "$EXP" +%s 2>/dev/null || true)
+            NOW_EPOCH=$(date -u +%s)
+            SECS_LEFT=$((EXP_EPOCH - NOW_EPOCH))
+            if [ -n "$EXP_EPOCH" ] && [ $SECS_LEFT -gt $((20*24*3600)) ]; then
+              sleep 21600 & wait $! 2>/dev/null || true # sleep 6h
+              continue
+            fi
+          fi
+        fi
+
+        # Compute backoff index
+        idx=0
+        if [ -f "$BACKOFF_INDEX_FILE" ]; then
+          idx=$(cat "$BACKOFF_INDEX_FILE" 2>/dev/null || echo 0)
+        fi
+        if [ -z "$idx" ]; then idx=0; fi
+        # shellcheck disable=SC2128
+        count=${#schedule[@]}
+        if [ -z "$count" ]; then count=7; fi
+        if [ "$idx" -ge "$count" ]; then idx=$((count - 1)); fi
+        delay=${schedule[$idx]}
+        # Jitter up to 20%
+        jitter=$((RANDOM % ( (delay / 5) + 1 )))
+        sleep_for=$((delay + jitter))
+
+        echo "CERTBOT_NEXT_RETRY_IN seconds=${sleep_for} backoff_index=${idx} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        sleep $sleep_for & wait $! 2>/dev/null || true
+
+        if certbot_single_attempt; then
+          write_ssl_nginx_and_reload
+          echo 0 > "$BACKOFF_INDEX_FILE" || true
+          sleep 21600 & wait $! 2>/dev/null || true # 6h
+        else
+          next=$((idx + 1))
+          if [ "$next" -ge "$count" ]; then next=$((count - 1)); fi
+          echo $next > "$BACKOFF_INDEX_FILE" || true
+        fi
+      done
+    }
+    CERT_PRESENT=0
+    if [ -d "/etc/letsencrypt/live/${FQDN}" ]; then
+      if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
+        CERT_PRESENT=1
+      fi
+    fi
+
+    if [ $CERT_PRESENT -eq 0 ]; then
+      echo "No existing certs for ${FQDN}; attempting immediate certbot run and enabling background retries"
+      if certbot_single_attempt; then
+        CERT_PRESENT=1
+      else
+        CERT_PRESENT=0
+      fi
+      certbot_retry_manager &
+    else
+      echo "Found existing certs for ${FQDN}; will still start background renewal manager"
+      certbot_retry_manager &
+    fi
+
+    if [ $CERT_PRESENT -eq 1 ]; then
+      write_ssl_nginx_and_reload
+    else
+      # Continue serving HTTP and let retry manager obtain cert later
+      echo "No certs obtained for ${FQDN} yet; continuing with HTTP only and retrying in background."
     fi
   else
     if [ "$SSL_MODE" = "certbot-required" ]; then
