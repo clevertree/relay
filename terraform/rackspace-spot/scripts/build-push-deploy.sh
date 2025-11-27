@@ -11,7 +11,8 @@ fi
 IMAGE="$REGISTRY/relay:$TAG"
 
 echo "Building image $IMAGE"
-docker build -t $IMAGE ..
+cd ../..
+docker build -t $IMAGE .
 
 echo "Pushing image $IMAGE"
 docker push $IMAGE

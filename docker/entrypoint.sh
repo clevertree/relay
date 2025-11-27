@@ -8,21 +8,28 @@ ensure_repo() {
   repo=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
   if [ ! -d "$repo" ] || [ ! -d "$repo/objects" ]; then
     tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
-    echo "Cloning bare repo from $tmpl to $repo"
+    echo "Cloning bare repo from $tmpl to $repo (with 20s timeout; will fallback to git init --bare)"
     mkdir -p "$(dirname "$repo")"
-    git clone --bare "$tmpl" "$repo"
+    if ! timeout 20s git clone --bare "$tmpl" "$repo"; then
+      echo "Template clone timed out or failed; creating empty bare repo at $repo"
+      rm -rf "$repo" || true
+      git init --bare "$repo" || echo "Failed to git init bare repo, continuing"
+    fi
   fi
   # Ensure at least one repository exists by cloning template into a subdirectory if needed
   template_repo_dir="$repo/relay-template"
   if [ ! -d "$template_repo_dir" ]; then
     tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
-    echo "Cloning template repo into subdirectory $template_repo_dir"
+    echo "Ensuring default content exists; attempting to import template into subdirectory (10s timeout)"
     mkdir -p "$template_repo_dir"
-    git clone "$tmpl" "$template_repo_dir"
-    # Add and commit the subdirectory to the bare repo
-    cd "$repo"
-    git --git-dir="$repo" --work-tree="$template_repo_dir" add .
-    git --git-dir="$repo" --work-tree="$template_repo_dir" commit -m "Add relay-template repository"
+    if timeout 10s git clone "$tmpl" "$template_repo_dir"; then
+      # Add and commit the subdirectory to the bare repo
+      cd "$repo" || return
+      git --git-dir="$repo" --work-tree="$template_repo_dir" add . || echo "Failed to add to git, continuing"
+      git --git-dir="$repo" --work-tree="$template_repo_dir" commit -m "Add relay-template repository" || echo "Failed to commit, continuing"
+    else
+      echo "Template subdirectory clone failed or timed out; leaving empty repo (server will still serve)"
+    fi
   fi
 }
 
@@ -31,11 +38,21 @@ start_ipfs() {
   if ! ipfs --repo "$IPFS_PATH" repo stat >/dev/null 2>&1; then
     IPFS_PATH="$IPFS_PATH" ipfs init
   fi
+  # Ensure API and Gateway listen on all interfaces for local testing
+  IPFS_PATH="$IPFS_PATH" ipfs config Addresses.API "/ip4/0.0.0.0/tcp/5001" >/dev/null 2>&1 || true
+  IPFS_PATH="$IPFS_PATH" ipfs config Addresses.Gateway "/ip4/0.0.0.0/tcp/8080" >/dev/null 2>&1 || true
   IPFS_PATH="$IPFS_PATH" ipfs daemon &
 }
 
 start_deluged() {
-  deluged -d -c /var/lib/deluge || true
+  # Run Deluge in background so entrypoint can continue
+  # Use daemonized mode (no -d) or background the foreground mode
+  deluged -c /var/lib/deluge >/var/log/relay/deluged.log 2>&1 &
+  # Fallback: if daemonization fails, try foreground mode in background
+  sleep 1
+  if ! pgrep -x deluged >/dev/null 2>&1; then
+    deluged -d -c /var/lib/deluge >/var/log/relay/deluged.log 2>&1 &
+  fi
 }
 
 start_git_daemon() {
@@ -257,7 +274,7 @@ server {
     server_name _;
 
     location / {
-        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_pass http://127.0.0.1:${RELAY_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -265,31 +282,55 @@ server {
     }
 }
 EOF
-  # also ensure the common conf.d location is overridden so the default nginx welcome page cannot win
-  cat > /etc/nginx/conf.d/default.conf <<EOF
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-
-    server_name _;
-
-    location / {
-        proxy_pass http://127.0.0.1:\${RELAY_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
+  # Remove any default nginx conf.d snippets to avoid duplicate default_server
+  rm -f /etc/nginx/conf.d/* 2>/dev/null || true
   # Start nginx
   nginx
 
   # --- SSL certificate via certbot (nginx) ---
-  # We attempt to provision certs if RELAY_CERTBOT_EMAIL is set. Failures are non-fatal:
-  # the container will continue to run HTTP only and will switch to HTTPS once certs exist.
-  if [ -n "${RELAY_CERTBOT_EMAIL:-}" ]; then
-    echo "Attempting SSL certificate provisioning for ${FQDN} (non-fatal)"
+  # SSL strategy
+  # Modes:
+  #   RELAY_SSL_MODE=certbot-required -> obtain certs via certbot and FAIL if unavailable
+  #   RELAY_SSL_MODE=selfsigned       -> generate a self-signed cert and enable HTTPS
+  #   RELAY_SSL_MODE=auto (default)   -> if RELAY_CERTBOT_EMAIL set, try certbot (non-fatal), else HTTP only
+  SSL_MODE=${RELAY_SSL_MODE:-auto}
+
+  if [ "$SSL_MODE" = "selfsigned" ]; then
+    echo "RELAY_SSL_MODE=selfsigned: generating self-signed cert and enabling HTTPS"
+    mkdir -p /etc/ssl/certs /etc/ssl/private
+    if [ ! -f /etc/ssl/private/relay-selfsigned.key ] || [ ! -f /etc/ssl/certs/relay-selfsigned.crt ]; then
+      openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+        -subj "/CN=${FQDN}" \
+        -keyout /etc/ssl/private/relay-selfsigned.key \
+        -out /etc/ssl/certs/relay-selfsigned.crt
+    fi
+    cat > /etc/nginx/sites-enabled/default <<EOF
+server {
+    listen 80;
+    server_name ${FQDN} _;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name ${FQDN} _;
+
+    ssl_certificate /etc/ssl/certs/relay-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/private/relay-selfsigned.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:${RELAY_PORT};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+    nginx -s reload || true
+
+  elif [ -n "${RELAY_CERTBOT_EMAIL:-}" ]; then
+    echo "Attempting SSL certificate provisioning for ${FQDN} ($SSL_MODE)"
 
     # ensure certbot directories are present (persisted via hostPath)
     mkdir -p /etc/letsencrypt /var/lib/letsencrypt
@@ -345,10 +386,22 @@ server {
 EOF
       nginx -s reload || true
     else
-      echo "No certs obtained for ${FQDN}; continuing with HTTP only. You can inspect logs for certbot failures."
+      if [ "$SSL_MODE" = "certbot-required" ]; then
+        echo "Certbot required but no certs obtained for ${FQDN}; stopping relay-server and exiting"
+        kill ${RELAY_PID} || true
+        exit 1
+      else
+        echo "No certs obtained for ${FQDN}; continuing with HTTP only (non-fatal)."
+      fi
     fi
   else
-    echo "RELAY_CERTBOT_EMAIL not set; skipping SSL certificate provisioning"
+    if [ "$SSL_MODE" = "certbot-required" ]; then
+      echo "RELAY_SSL_MODE=certbot-required but RELAY_CERTBOT_EMAIL not set; exiting"
+      kill ${RELAY_PID} || true
+      exit 1
+    else
+      echo "RELAY_CERTBOT_EMAIL not set; skipping SSL certificate provisioning"
+    fi
   fi
 
   # Wait for relay-server to exit (foreground)
