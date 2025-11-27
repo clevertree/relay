@@ -24,7 +24,7 @@ metadata:
     cert-manager.io/cluster-issuer: "letsencrypt-staging"
 spec:
   rules:
-    - host: node-dfw1.relaynet.online.online
+    - host: node-dfw1.relaynet.online
       http:
         paths:
           - path: /
@@ -36,5 +36,5 @@ spec:
                   number: 80
   tls:
     - hosts:
-        - node-dfw1.relaynet.online.online
+        - node-dfw1.relaynet.online
       secretName: node1-relaynet-tls

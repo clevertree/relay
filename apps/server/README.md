@@ -115,4 +115,4 @@ docker run -p 80:80 -p 443:443 \
   relay-server
 ```
 
-The server will be accessible at `https://node-dfw1.relaynet.online.online` with automatic HTTP to HTTPS redirection.
+The server will be accessible at `https://node-dfw1.relaynet.online` with automatic HTTP to HTTPS redirection.

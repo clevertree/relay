@@ -124,7 +124,7 @@ PY
   FQDN="${VERCEL_SUBDOMAIN}.${VERCEL_DOMAIN}"
 
   # Configure git identity as requested to avoid commit prompts/errors
-  # email: admin@<fqdn> (e.g., admin@node-dfw1.relaynet.online.online), name: admin
+  # email: admin@<fqdn> (e.g., admin@node-dfw1.relaynet.online), name: admin
   git config --global user.email "admin@${FQDN}" || true
   git config --global user.name "admin" || true
 

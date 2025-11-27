@@ -9,6 +9,7 @@ tmp/
 .tmp/
 data/
 logs/
+tests/
 pnpm-lock.yaml
 
 # Storybook static output

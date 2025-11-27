@@ -86,7 +86,7 @@ git:
 
 - When commits land on `main`, `staging`, or `develop`, an asynchronous task will push to peers listed in the
   `RELAY_MASTER_PEER_LIST` environment variable. The value must be a semicolon-separated list, e.g.:
-    - `RELAY_MASTER_PEER_LIST=node-dfw1.relaynet.online.online;node2.relaynet.online;node3.relaynet.online`
+    - `RELAY_MASTER_PEER_LIST=node-dfw1.relaynet.online;node2.relaynet.online;node3.relaynet.online`
 - Async behavior ensures the commit path is not blocked; optional `debounceSeconds` coalesces rapid updates.
 
 6) GitHub webhook-triggered pulls
