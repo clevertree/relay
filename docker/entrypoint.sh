@@ -228,9 +228,7 @@ PY
       sleep 3
     done
     if [ -z "$PUB_IP" ]; then
-      echo "Could not determine public IP; stopping relay-server and exiting"
-      kill ${RELAY_PID} || true
-      exit 1
+      echo "Could not determine public IP; continuing without DNS upsert"
     fi
 
     # Upsert A record with retries
@@ -245,9 +243,7 @@ PY
       fi
     done
     if [ "$DNS_OK" != "yes" ]; then
-      echo "DNS upsert failed after retries; stopping relay-server and exiting"
-      kill ${RELAY_PID} || true
-      exit 1
+      echo "DNS upsert failed after retries; proceeding without DNS update"
     fi
   else
     echo "VERCEL_API_TOKEN not set; skipping DNS upsert"
