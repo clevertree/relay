@@ -4,7 +4,7 @@
 
 set -e
 
-ensure_repo() {
+clone_default_repo() {
   repo=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
   if [ ! -d "$repo" ] || [ ! -d "$repo/objects" ]; then
     tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
@@ -14,21 +14,6 @@ ensure_repo() {
       echo "Template clone timed out or failed; creating empty bare repo at $repo"
       rm -rf "$repo" || true
       git init --bare "$repo" || echo "Failed to git init bare repo, continuing"
-    fi
-  fi
-  # Ensure at least one repository exists by cloning template into a subdirectory if needed
-  template_repo_dir="$repo/relay-template"
-  if [ ! -d "$template_repo_dir" ]; then
-    tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
-    echo "Ensuring default content exists; attempting to import template into subdirectory (10s timeout)"
-    mkdir -p "$template_repo_dir"
-    if timeout 10s git clone "$tmpl" "$template_repo_dir"; then
-      # Add and commit the subdirectory to the bare repo
-      cd "$repo" || return
-      git --git-dir="$repo" --work-tree="$template_repo_dir" add . || echo "Failed to add to git, continuing"
-      git --git-dir="$repo" --work-tree="$template_repo_dir" commit -m "Add relay-template repository" || echo "Failed to commit, continuing"
-    else
-      echo "Template subdirectory clone failed or timed out; leaving empty repo (server will still serve)"
     fi
   fi
 }
@@ -62,7 +47,7 @@ start_git_daemon() {
 main() {
   start_ipfs
   start_deluged
-  ensure_repo
+  clone_default_repo
   start_git_daemon
 
   export RELAY_REPO_PATH=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
@@ -137,6 +122,11 @@ PY
   VERCEL_DOMAIN=${RELAY_DNS_DOMAIN:-relaynet.online}
   VERCEL_SUBDOMAIN=${RELAY_DNS_SUBDOMAIN:-node1}
   FQDN="${VERCEL_SUBDOMAIN}.${VERCEL_DOMAIN}"
+
+  # Configure git identity as requested to avoid commit prompts/errors
+  # email: admin@<fqdn> (e.g., admin@node1.relaynet.online), name: admin
+  git config --global user.email "admin@${FQDN}" || true
+  git config --global user.name "admin" || true
 
   get_public_ip() {
     # Try multiple services to determine public IPv4
