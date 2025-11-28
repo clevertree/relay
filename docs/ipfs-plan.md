@@ -115,7 +115,48 @@ Caching policy:
 
 ---
 
-## 5) Nginx vs Relay server: responsibilities
+## 5) Directory listing integration with IPFS (Git + IPFS merge)
+
+The Relay server augments directory listings with entries from IPFS when a repo branch declares an `ipfs.rootHash`.
+
+- When a client lists a directory, the server gathers entries from:
+  1. Git tree at the requested path (authoritative for names, sizes for blobs, and dates derived from the branch head).
+  2. IPFS directory cache for the same path (per‑repo, per‑branch).
+- Entries are deduplicated by name; when Git and IPFS both contain an item with the same name, Git’s size/date are
+  preferred in the listing output.
+- The listing includes Name, Size, and Date columns. Directories end with a trailing `/`.
+
+IPFS directory cache
+
+- Cache location per repo/branch: `/srv/relay/ipfs-cache/<repo>/<branch>/.ipfs-dircache/`.
+- One JSON cache file per directory path. File name is the directory path with `/` replaced by `_` (or `_root` for the
+  repository root).
+- Cache schema (per file):
+  - `cid`: the `ipfs.rootHash` value this cache file was generated for
+  - `repo`, `branch`, `dir` (path), `generated_at`
+  - `entries`: list of `{ name, kind: File|Dir, size?, date? }`
+
+Cache invalidation on CID change
+
+- A marker file `_CID` is stored in `.ipfs-dircache/` with the current `ipfs.rootHash`.
+- On directory‑listing requests, if the marker CID differs from `relay.yaml: ipfs.rootHash`, the server purges stale
+  cache JSON files under `.ipfs-dircache/` and rewrites the marker before regenerating any requested directory cache.
+
+How IPFS directory entries are discovered
+
+- Preferred: `ipfs object links --enc=json /ipfs/<CID>/<dir>`
+  - Extract `Name` and `Size` to classify items; missing/zero size is treated as a directory.
+- Fallback: `ipfs ls --size /ipfs/<CID>/<dir>`
+  - Parse lines of the form `CID Size Name` and classify `Size == 0` or `Name` with trailing `/` as directories.
+
+Notes
+
+- We do not prefetch entire trees; the dir cache only stores metadata names/sizes for directory entries.
+- File content remains on‑demand via the regular GET path and will be placed in `/srv/relay/ipfs-cache/<repo>/<branch>/…`.
+
+---
+
+## 6) Nginx vs Relay server: responsibilities
 
 Recommended split:
 
@@ -152,7 +193,7 @@ Open question to confirm with stakeholders:
 
 ---
 
-## 6) Updating the root hash after commits
+## 7) Updating the root hash after commits
 
 When a commit updates `relay.yaml: ipfs.rootHash`:
 
@@ -163,7 +204,7 @@ When a commit updates `relay.yaml: ipfs.rootHash`:
 
 ---
 
-## 7) Implementation notes for the Relay server
+## 8) Implementation notes for the Relay server
 
 Minimal API/logic required:
 
@@ -185,7 +226,7 @@ Security and correctness:
 
 ---
 
-## 8) Operational commands (reference)
+## 9) Operational commands (reference)
 
 Within the container:
 
@@ -203,7 +244,7 @@ ipfs pin add /ipfs/<rootCID>/path/to/file
 
 ---
 
-## 9) Configuration summary
+## 10) Configuration summary
 
 - IPFS repo path: `/srv/relay/ipfs`
 - IPFS API: `http://127.0.0.1:5001`
@@ -214,10 +255,19 @@ ipfs pin add /ipfs/<rootCID>/path/to/file
 
 ---
 
-## 10) Next steps
+## 11) Next steps
 
-1. Implement the server handler for the Git → cache → IPFS decision tree with deadline and status code semantics.
-2. Optionally wire nginx to serve cache hits directly via `alias` to `/srv/relay/ipfs-cache` for very large static
-   files.
-3. Add tests covering: cache hit, cache miss with successful fetch (<10s), cache miss with slow fetch (503), and
-   not‑found under CID (404).
+1. Implemented: server handler for the Git → cache → IPFS decision tree with deadline and status code semantics.
+2. Implemented: directory listing merge with IPFS dir cache and CID‑based invalidation.
+3. Implemented: Linux‑only IPFS tests (feature‑gated). Run inside Docker as described below.
+4. Optional: wire nginx to serve cache hits directly via `alias` to `/srv/relay/ipfs-cache` for very large static files.
+
+### Running IPFS tests inside Docker (Linux environment)
+
+```
+docker build -t relay-dev .
+docker run --rm -it -v "${PWD}:/work" -w /work relay-dev \
+  bash -lc "cargo test -p relay-server --features ipfs_tests -- --nocapture"
+```
+
+On Windows hosts, still run the tests inside Docker as above to avoid host path/CLI differences.

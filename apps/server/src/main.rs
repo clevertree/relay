@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 use tokio::{process::Command as TokioCommand, time::{timeout, Duration, Instant}};
 use std::sync::{Arc, Mutex};
 use pulldown_cmark::{html, Parser};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tower_http::trace::TraceLayer;
 use tracing_appender::rolling;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -593,6 +593,134 @@ mod tests {
         let _ = f.write_all(content.as_bytes());
     }
 
+    // IPFS dir listing is merged into directory response (Git + IPFS), sizes present
+    #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipfs_dir_listing_merged_with_git() {
+        // Start ephemeral IPFS
+        let ipfs_dir = tempdir().unwrap();
+        let api_port = 5020u16;
+        ensure_ipfs_daemon(ipfs_dir.path(), api_port).await;
+        let cache_dir = tempdir().unwrap();
+        std::env::set_var("RELAY_IPFS_CACHE_ROOT", cache_dir.path());
+
+        // Create a directory on disk to add to IPFS
+        let src_dir = tempdir().unwrap();
+        std::fs::create_dir_all(src_dir.path().join("assets")).unwrap();
+        write_file(&src_dir.path().join("assets/hello.txt"), "hello").await;
+        write_file(&src_dir.path().join("readme.md"), "# readme\n").await;
+        let root_cid = ipfs_add_dir(ipfs_dir.path(), api_port, src_dir.path()).await;
+        // Wait until path resolves under IPFS
+        for _ in 0..20 {
+            let status = TokioCommand::new("ipfs")
+                .arg("resolve").arg("-r")
+                .arg(format!("/ipfs/{}/assets/hello.txt", root_cid))
+                .env("IPFS_PATH", ipfs_dir.path())
+                .status().await.unwrap();
+            if status.success() { break; }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // Bare git with empty tree but relay.yaml pointing to CID
+        let repo_dir = tempdir().unwrap();
+        let repo = Repository::init_bare(repo_dir.path()).unwrap();
+        {
+            let sig = Signature::now("relay", "relay@local").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            let tree_id = tb.write().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+        }
+        // add relay.yaml
+        let yaml = format!("ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n", root_cid);
+        {
+            let head = repo.find_reference("refs/heads/main").unwrap();
+            let commit = head.peel_to_commit().unwrap();
+            let base_tree = commit.tree().unwrap();
+            let blob_oid = repo.blob(yaml.as_bytes()).unwrap();
+            let mut tb = repo.treebuilder(Some(&base_tree)).unwrap();
+            tb.insert("relay.yaml", blob_oid, 0o100644).unwrap();
+            let new_tree_id = tb.write().unwrap();
+            let new_tree = repo.find_tree(new_tree_id).unwrap();
+            let sig = Signature::now("relay", "relay@local").unwrap();
+            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "add relay.yaml", &new_tree, &[&commit]).unwrap();
+        }
+
+        // Build listing at IPFS subdir 'assets' (Git is empty), expect IPFS entries appear
+        std::env::set_var("IPFS_PATH", ipfs_dir.path());
+        let root_ref = repo.find_reference("refs/heads/main").unwrap();
+        let commit = root_ref.peel_to_commit().unwrap();
+        let tree = commit.tree().unwrap();
+        let (ct, md) = super::directory_response(&repo_dir.path().to_path_buf(), &tree, &tree, "assets", "text/markdown", "main", "");
+        assert_eq!(ct, "text/markdown");
+        let s = String::from_utf8(md).unwrap();
+        assert!(s.contains("hello.txt"), "listing should include IPFS file hello.txt: {}", s);
+        // Size column should show at least 5 bytes for hello.txt
+        assert!(s.contains("hello.txt") && s.contains("| 5 |"), "should show size 5 bytes: {}", s);
+    }
+
+    // Changing CID should refresh dir cache file
+    #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipfs_dir_cache_invalidation_on_cid_change() {
+        let ipfs_dir = tempdir().unwrap();
+        let api_port = 5021u16;
+        ensure_ipfs_daemon(ipfs_dir.path(), api_port).await;
+        std::env::set_var("IPFS_PATH", ipfs_dir.path());
+        let cache_dir = tempdir().unwrap();
+        std::env::set_var("RELAY_IPFS_CACHE_ROOT", cache_dir.path());
+
+        // Make first IPFS directory
+        let src1 = tempdir().unwrap();
+        write_file(&src1.path().join("a.txt"), "aaa").await;
+        let cid1 = ipfs_add_dir(ipfs_dir.path(), api_port, src1.path()).await;
+
+        // Make second IPFS directory
+        let src2 = tempdir().unwrap();
+        write_file(&src2.path().join("b.txt"), "bbbb").await;
+        let cid2 = ipfs_add_dir(ipfs_dir.path(), api_port, src2.path()).await;
+
+        // Bare git repo with relay.yaml -> cid1, then update to cid2
+        let repo_dir = tempdir().unwrap();
+        let repo = Repository::init_bare(repo_dir.path()).unwrap();
+        {
+            let sig = Signature::now("relay", "relay@local").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            let tree_id = tb.write().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+        }
+        let write_yaml_commit = |repo: &Repository, cid: &str| {
+            let yaml = format!("ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n", cid);
+            let head = repo.find_reference("refs/heads/main").unwrap();
+            let commit = head.peel_to_commit().unwrap();
+            let base_tree = commit.tree().unwrap();
+            let blob_oid = repo.blob(yaml.as_bytes()).unwrap();
+            let mut tb = repo.treebuilder(Some(&base_tree)).unwrap();
+            tb.insert("relay.yaml", blob_oid, 0o100644).unwrap();
+            let new_tree_id = tb.write().unwrap();
+            let new_tree = repo.find_tree(new_tree_id).unwrap();
+            let sig = Signature::now("relay", "relay@local").unwrap();
+            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "update relay.yaml", &new_tree, &[&commit]).unwrap();
+        };
+        write_yaml_commit(&repo, &cid1);
+
+        // First listing to generate cache with cid1
+        let head = repo.find_reference("refs/heads/main").unwrap();
+        let commit = head.peel_to_commit().unwrap();
+        let tree = commit.tree().unwrap();
+        let _ = super::directory_response(&repo_dir.path().to_path_buf(), &tree, &tree, "", "text/markdown", "main", "");
+
+        // Update CID and list again; ensure resulting markdown references new file name
+        write_yaml_commit(&repo, &cid2);
+        let head = repo.find_reference("refs/heads/main").unwrap();
+        let commit = head.peel_to_commit().unwrap();
+        let tree = commit.tree().unwrap();
+        let (_ct, md) = super::directory_response(&repo_dir.path().to_path_buf(), &tree, &tree, "", "text/markdown", "main", "");
+        let s = String::from_utf8(md).unwrap();
+        assert!(s.contains("b.txt"), "dir listing after CID change should show new entries: {}", s);
+    }
+
     // End-to-end: Git miss -> IPFS fetch success
     #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -654,6 +782,16 @@ mod tests {
         let path = format!("{}", rel_path.to_string_lossy());
         let query: Option<Query<HashMap<String, String>>> = None;
 
+        // Wait for resolution to ensure availability
+        for _ in 0..20 {
+            let status = TokioCommand::new("ipfs")
+                .arg("resolve").arg("-r")
+                .arg(format!("/ipfs/{}/{}", root_cid, rel_path.to_string_lossy()))
+                .env("IPFS_PATH", ipfs_dir.path())
+                .status().await.unwrap();
+            if status.success() { break; }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
         // Get file; should miss git and fetch from IPFS
         let resp = get_file(State(app_state), headers, Path(path), query).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -1383,13 +1521,244 @@ fn wrap_html_with_assets(title: &str, body: &str, branch: &str, repo: &str, repo
 // Helper to return directory listing as HTML or markdown depending on Accept header
 // root_tree is the tree at repo root (for CSS presence checks), listing_tree is the directory to list
 fn directory_response(repo_path: &PathBuf, _root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str, repo: &str) -> (String, Vec<u8>) {
-    let md = render_directory_markdown(listing_tree, base_path);
+    // Build merged entries from Git and (optional) IPFS dir cache
+    let mut entries = git_dir_entries(repo_path, listing_tree, base_path, branch);
+    if let (Some(root_cid), true) = read_ipfs_rules(repo_path, branch) {
+        match ipfs_dir_entries_cached(repo, branch, base_path, &root_cid) {
+            Ok(ipfs_entries) => {
+                let existing: HashSet<String> = entries.iter().map(|e| e.name.clone()).collect();
+                for e in ipfs_entries {
+                    if !existing.contains(&e.name) {
+                        entries.push(e);
+                    }
+                }
+                sort_entries(&mut entries);
+            }
+            Err(e) => {
+                debug!(?e, repo=%repo, branch=%branch, dir=%base_path, "IPFS dir cache unavailable — Git-only listing");
+                sort_entries(&mut entries);
+            }
+        }
+    } else {
+        sort_entries(&mut entries);
+    }
+    let md = render_directory_markdown_entries(&entries, base_path);
     if accept_hdr.contains("text/markdown") {
         ("text/markdown".to_string(), md)
     } else {
         let body = String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
         ("text/html; charset=utf-8".to_string(), wrap_html_with_assets("Directory", &body, branch, repo, repo_path, base_path))
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct DirEntry {
+    name: String,
+    kind: EntryKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    date: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum EntryKind { File, Dir }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct DirCacheFile {
+    cid: String,
+    repo: String,
+    branch: String,
+    dir: String, // base_path
+    generated_at: String,
+    entries: Vec<DirEntry>,
+}
+
+fn git_dir_entries(repo_path: &PathBuf, listing_tree: &git2::Tree, base_path: &str, branch: &str) -> Vec<DirEntry> {
+    // Sizes for blobs; dates left None for now (can be enhanced using revwalk per path)
+    let mut out: Vec<DirEntry> = Vec::new();
+    let head_time = head_commit_time(repo_path, branch)
+        .map(|secs| secs.to_string());
+    for entry in listing_tree.iter() {
+        let name = match entry.name() { Some(n) => n.to_string(), None => continue };
+        match entry.kind() {
+            Some(git2::ObjectType::Tree) => {
+                out.push(DirEntry { name, kind: EntryKind::Dir, size: None, date: head_time.clone() });
+            }
+            Some(git2::ObjectType::Blob) => {
+                let size = Repository::open_bare(repo_path)
+                    .and_then(|r| r.find_blob(entry.id()).map(|b| b.size()))
+                    .ok()
+                    .map(|s| s as u64);
+                out.push(DirEntry { name, kind: EntryKind::File, size, date: head_time.clone() });
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn head_commit_time(repo_path: &PathBuf, branch: &str) -> Option<i64> {
+    let repo = Repository::open_bare(repo_path).ok()?;
+    let refname = format!("refs/heads/{}", branch);
+    let reference = repo.find_reference(&refname).ok()?;
+    let commit = reference.peel_to_commit().ok()?;
+    Some(commit.time().seconds())
+}
+
+fn sort_entries(entries: &mut Vec<DirEntry>) {
+    entries.sort_by(|a, b| {
+        match (&a.kind, &b.kind) {
+            (EntryKind::Dir, EntryKind::File) => std::cmp::Ordering::Less,
+            (EntryKind::File, EntryKind::Dir) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+}
+
+fn ipfs_dir_entries_cached(repo: &str, branch: &str, base_path: &str, cid: &str) -> anyhow::Result<Vec<DirEntry>> {
+    // Cache under: <cache_root>/<repo|_>/<branch>/.ipfs-dircache/<base_path or _root>.json
+    let cache_root = std::env::var("RELAY_IPFS_CACHE_ROOT").unwrap_or_else(|_| DEFAULT_IPFS_CACHE_ROOT.to_string());
+    let repo_dir = if repo.is_empty() { "_" } else { repo };
+    let dir_key = {
+        let bp = base_path.trim_matches('/');
+        if bp.is_empty() { "_root".to_string() } else { bp.replace('/', "_") }
+    };
+    let dircache_dir = std::path::Path::new(&cache_root).join(repo_dir).join(branch).join(".ipfs-dircache");
+    // Invalidate cache if CID changed: store marker file and remove cache files when mismatched
+    let cid_marker = dircache_dir.join("_CID");
+    if let Ok(prev_cid) = std::fs::read_to_string(&cid_marker) {
+        if prev_cid.trim() != cid {
+            let _ = std::fs::create_dir_all(&dircache_dir);
+            if let Ok(entries) = std::fs::read_dir(&dircache_dir) {
+                for e in entries.flatten() {
+                    // keep the marker file, remove others
+                    if e.path() != cid_marker { let _ = std::fs::remove_file(e.path()); }
+                }
+            }
+            let _ = std::fs::write(&cid_marker, cid.as_bytes());
+        }
+    } else {
+        let _ = std::fs::create_dir_all(&dircache_dir);
+        let _ = std::fs::write(&cid_marker, cid.as_bytes());
+    }
+    let cache_file = dircache_dir.join(format!("{}.json", dir_key));
+    // Attempt to read
+    if let Ok(bytes) = std::fs::read(&cache_file) {
+        if let Ok(dc) = serde_json::from_slice::<DirCacheFile>(&bytes) {
+            if dc.cid == cid && dc.dir == base_path {
+                return Ok(dc.entries);
+            }
+        }
+    }
+    // Build fresh via `ipfs dag get` (preferred) or fallback to `ipfs ls` and store
+    let ipfs_path = if base_path.trim_matches('/').is_empty() {
+        format!("/ipfs/{}", cid)
+    } else {
+        format!("/ipfs/{}/{}", cid, base_path.trim_matches('/'))
+    };
+    // Try object links (JSON)
+    let mut entries: Vec<DirEntry> = Vec::new();
+    let dag_out = std::process::Command::new("ipfs")
+        .arg("object").arg("links").arg(&ipfs_path).arg("--enc=json")
+        .env("IPFS_PATH", std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+    let use_ls_fallback: bool;
+    match dag_out {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                let links = val.get("Links").or_else(|| val.get("links"));
+                if let Some(arr) = links.and_then(|l| l.as_array()) {
+                    for link in arr {
+                        let name = link.get("Name").or_else(|| link.get("name")).and_then(|s| s.as_str()).unwrap_or("");
+                        if name.is_empty() { continue; }
+                        let size = link.get("Size").or_else(|| link.get("size")).and_then(|n| n.as_u64());
+                        // Without type info, treat size==0 as dir, else file
+                        let is_dir = size == Some(0);
+                        entries.push(DirEntry { name: name.to_string(), kind: if is_dir { EntryKind::Dir } else { EntryKind::File }, size, date: None });
+                    }
+                }
+                use_ls_fallback = entries.is_empty();
+            } else { use_ls_fallback = true; }
+        }
+        _ => { use_ls_fallback = true; }
+    }
+    if use_ls_fallback {
+        let out = std::process::Command::new("ipfs")
+            .arg("ls").arg("--size").arg(&ipfs_path)
+            .env("IPFS_PATH", std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            anyhow::bail!("ipfs ls failed: {}", stderr);
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            // Expected: CID Size Name
+            if parts.len() >= 3 {
+                let name = parts[2].to_string();
+                let size = parts.get(1).and_then(|s| s.parse::<u64>().ok());
+                let is_dir = name.ends_with('/') || size == Some(0);
+                entries.push(DirEntry { name: name.trim_end_matches('/').to_string(), kind: if is_dir { EntryKind::Dir } else { EntryKind::File }, size, date: None });
+            } else if parts.len() == 2 {
+                let name = parts[1].to_string();
+                entries.push(DirEntry { name: name.trim_end_matches('/').to_string(), kind: EntryKind::File, size: None, date: None });
+            }
+        }
+    }
+    // Save cache
+    let _ = std::fs::create_dir_all(&dircache_dir);
+    let dc = DirCacheFile {
+        cid: cid.to_string(),
+        repo: repo.to_string(),
+        branch: branch.to_string(),
+        dir: base_path.to_string(),
+        generated_at: format!("{}", match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) { Ok(d) => d.as_secs(), Err(_) => 0 }),
+        entries: entries.clone(),
+    };
+    if let Ok(bytes) = serde_json::to_vec_pretty(&dc) { let _ = std::fs::write(&cache_file, bytes); }
+    Ok(entries)
+}
+
+fn render_directory_markdown_entries(entries: &Vec<DirEntry>, base_path: &str) -> Vec<u8> {
+    let mut lines: Vec<String> = Vec::new();
+    let title_path = if base_path.is_empty() { "/".to_string() } else { format!("/{}", base_path.trim_matches('/')) };
+    lines.push(format!("# Directory listing: {}", title_path));
+    // Breadcrumbs
+    let mut crumb = String::new();
+    crumb.push_str("[/](/)");
+    let trimmed = base_path.trim_matches('/');
+    if !trimmed.is_empty() {
+        let mut acc = String::new();
+        for (i, seg) in trimmed.split('/').enumerate() {
+            if i == 0 { acc.push_str(seg); } else { acc.push('/'); acc.push_str(seg); }
+            crumb.push_str(" › ");
+            crumb.push_str(&format!("[{}]({}/)", seg, acc));
+        }
+    }
+    lines.push(crumb);
+    lines.push(String::from(""));
+    // Table header
+    lines.push(String::from("| Name | Size | Date |"));
+    lines.push(String::from("|------|------:|------|"));
+    for e in entries {
+        let href = if base_path.is_empty() { e.name.clone() } else { format!("{}/{}", base_path.trim_matches('/'), e.name) };
+        let disp_name = if e.kind == EntryKind::Dir { format!("{}/", e.name) } else { e.name.clone() };
+        let size_disp = e.size.map(|n| format!("{}", n)).unwrap_or_else(|| "".to_string());
+        let date_disp = e.date.clone().unwrap_or_default();
+        let link = if e.kind == EntryKind::Dir { format!("[{}]({}/)", disp_name, href) } else { format!("[{}]({})", disp_name, href) };
+        lines.push(format!("| {} | {} | {} |", link, size_disp, date_disp));
+    }
+    if entries.is_empty() {
+        lines.push(String::from("(empty directory)"));
+    }
+    lines.join("\n").into_bytes()
 }
 
 fn render_404_markdown(repo_path: &PathBuf, branch: &str, repo: &str, missing_path: &str) -> Response {
