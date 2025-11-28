@@ -22,6 +22,11 @@ start_ipfs() {
   # Ensure API and Gateway listen on all interfaces for local testing
   IPFS_PATH="$IPFS_PATH" ipfs config Addresses.API "/ip4/0.0.0.0/tcp/5001" >/dev/null 2>&1 || true
   IPFS_PATH="$IPFS_PATH" ipfs config Addresses.Gateway "/ip4/0.0.0.0/tcp/8080" >/dev/null 2>&1 || true
+  # Enable high-performance swarm over TCP and QUIC
+  IPFS_PATH="$IPFS_PATH" ipfs config --json Addresses.Swarm '["/ip4/0.0.0.0/tcp/4001","/ip4/0.0.0.0/udp/4001/quic-v1","/ip4/0.0.0.0/udp/4001/quic"]' >/dev/null 2>&1 || true
+  # Allow remote control from localhost-only inside container for security by default
+  # Note: Inside container, use http://127.0.0.1:5001 for RPC; from outside, bind is 0.0.0.0
+  export IPFS_PATH
   IPFS_PATH="$IPFS_PATH" ipfs daemon &
 }
 

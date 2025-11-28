@@ -14,7 +14,9 @@ use percent_encoding::percent_decode_str as url_decode;
 // base64 no longer needed after removing SQLite row mapping
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+use tokio::{process::Command as TokioCommand, time::{timeout, Duration, Instant}};
+use std::sync::{Arc, Mutex};
 use pulldown_cmark::{html, Parser};
 use std::collections::HashMap;
 use tower_http::trace::TraceLayer;
@@ -32,6 +34,23 @@ const DEFAULT_BRANCH: &str = "main";
 // Disallowed extensions for general access; JavaScript is now allowed to be loaded (GET)
 // but remains blocked for writes via PUT/DELETE (enforced below and by hooks).
 const DISALLOWED: &[&str] = &[".html", ".htm"];
+
+// IPFS integration defaults (can be overridden via env)
+const DEFAULT_IPFS_API: &str = "http://127.0.0.1:5001";
+const DEFAULT_IPFS_PATH: &str = "/srv/relay/ipfs"; // for CLI fallback
+const DEFAULT_IPFS_CACHE_ROOT: &str = "/srv/relay/ipfs-cache";
+const DEFAULT_IPFS_TIMEOUT_SECS: u64 = 10;
+
+// Deduplicate concurrent fetches of the same cache target
+static mut FETCH_IN_PROGRESS: Option<Arc<Mutex<std::collections::HashSet<String>>>> = None;
+
+fn fetch_map() -> Arc<Mutex<std::collections::HashSet<String>>> {
+    unsafe {
+        FETCH_IN_PROGRESS
+            .get_or_insert_with(|| Arc::new(Mutex::new(std::collections::HashSet::new())))
+            .clone()
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -431,8 +450,11 @@ async fn query_alias_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use git2::Repository;
+    use git2::{Repository, Signature};
     use tempfile::tempdir;
+    use std::path::Path as FsPath;
+    use std::io::Write as _;
+    use std::time::Duration as StdDuration;
 
     #[test]
     fn test_md_to_html_bytes_basic() {
@@ -489,6 +511,206 @@ mod tests {
     
     #[test]
     fn test_row_to_json_basic_types_removed() {}
+
+    #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
+    async fn ensure_ipfs_daemon(ipfs_repo: &FsPath, api_port: u16) {
+        // init if needed
+        let _ = std::fs::create_dir_all(ipfs_repo);
+        let mut init = TokioCommand::new("ipfs");
+        init.arg("init")
+            .env("IPFS_PATH", ipfs_repo);
+        let _ = init.status().await;
+        // configure API address
+        let mut cfg = TokioCommand::new("ipfs");
+        cfg.arg("config").arg("Addresses.API").arg(format!("/ip4/127.0.0.1/tcp/{}", api_port))
+            .env("IPFS_PATH", ipfs_repo);
+        let _ = cfg.status().await;
+        // start daemon in background if not running
+        let mut id = TokioCommand::new("ipfs");
+        id.arg("id")
+            .env("IPFS_PATH", ipfs_repo);
+        if id.status().await.ok().map(|s| s.success()).unwrap_or(false) {
+            return;
+        }
+        let mut daemon = std::process::Command::new("ipfs");
+        daemon.arg("daemon")
+            .env("IPFS_PATH", ipfs_repo)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null());
+        let _child = daemon.spawn().expect("spawn ipfs daemon");
+        // wait for API to come up
+        for _ in 0..50 {
+            let mut id = TokioCommand::new("ipfs");
+            // Use IPFS_PATH and the api file written by the daemon
+            id.arg("id")
+                .env("IPFS_PATH", ipfs_repo);
+            if id.status().await.ok().map(|s| s.success()).unwrap_or(false) { break; }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
+    async fn ipfs_add_dir(ipfs_repo: &FsPath, _api_port: u16, dir: &FsPath) -> String {
+        // Use verbose recursive add to capture the directory line reliably across older go-ipfs versions
+        let mut cmd = TokioCommand::new("ipfs");
+        cmd.arg("add").arg("-r").arg(dir);
+        cmd.env("IPFS_PATH", ipfs_repo);
+        let out = cmd.output().await.expect("ipfs add");
+        assert!(out.status.success(), "ipfs add failed: {:?}", out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let dir_str = dir.to_string_lossy().to_string();
+        let base = dir.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let mut last_cid: Option<String> = None;
+        let mut dir_cid: Option<String> = None;
+        for line in stdout.lines() {
+            // expected: "added <cid> <path>"
+            let mut it = line.split_whitespace();
+            let first = it.next();
+            let second = it.next();
+            let rest = it.next();
+            if first == Some("added") {
+                if let Some(cid) = second.map(|s| s.to_string()) {
+                    last_cid = Some(cid.clone());
+                    if let Some(path) = rest {
+                        // Match either the exact directory path or a trailing basename match
+                        if path == dir_str || (!base.is_empty() && path.ends_with(base)) {
+                            dir_cid = Some(cid);
+                        }
+                    }
+                }
+            }
+        }
+        let cid = dir_cid.or(last_cid).unwrap_or_default();
+        assert!(!cid.is_empty(), "could not parse CID from ipfs add output: {}", stdout);
+        cid
+    }
+
+    #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
+    async fn write_file(p: &FsPath, content: &str) {
+        if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+        let mut f = std::fs::File::create(p).unwrap();
+        let _ = f.write_all(content.as_bytes());
+    }
+
+    // End-to-end: Git miss -> IPFS fetch success
+    #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipfs_fallback_fetch_success() {
+        // Temp IPFS repo and daemon
+        let ipfs_dir = tempdir().unwrap();
+        let api_port = 5015u16;
+        ensure_ipfs_daemon(ipfs_dir.path(), api_port).await;
+
+        // Create a directory with a file and add recursively to IPFS
+        let src_dir = tempdir().unwrap();
+        let rel_path = FsPath::new("assets/hello.txt");
+        write_file(&src_dir.path().join(rel_path), "hello from ipfs").await;
+        let root_cid = ipfs_add_dir(ipfs_dir.path(), api_port, src_dir.path()).await;
+
+        // Prepare bare git repo with relay.yaml pointing to root_cid; no actual file in git
+        let repo_dir = tempdir().unwrap();
+        let repo = Repository::init_bare(repo_dir.path()).unwrap();
+        // initial empty commit on main
+        {
+            let sig = Signature::now("relay", "relay@local").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            let tree_id = tb.write().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+        }
+        // Add relay.yaml to default branch for rules consumption by server endpoints expecting default branch
+        let yaml = format!("ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n", root_cid);
+        {
+            // Read existing tree and upsert relay.yaml blob
+            let head = repo.find_reference("refs/heads/main").unwrap();
+            let commit = head.peel_to_commit().unwrap();
+            let base_tree = commit.tree().unwrap();
+            let blob_oid = repo.blob(yaml.as_bytes()).unwrap();
+            // place relay.yaml at repo root
+            fn upsert(repo: &Repository, tree: &git2::Tree, filename: &str, blob: Oid) -> Oid {
+                let mut tb = repo.treebuilder(Some(tree)).unwrap();
+                tb.insert(filename, blob, 0o100644).unwrap();
+                tb.write().unwrap()
+            }
+            let new_tree_id = upsert(&repo, &base_tree, "relay.yaml", blob_oid);
+            let new_tree = repo.find_tree(new_tree_id).unwrap();
+            let sig = Signature::now("relay", "relay@local").unwrap();
+            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "add relay.yaml", &new_tree, &[&commit]).unwrap();
+        }
+
+        // Set envs for server to point to our temp git and ipfs
+        std::env::set_var("RELAY_IPFS_TIMEOUT_SECS", "10");
+        std::env::set_var("RELAY_IPFS_API", format!("http://127.0.0.1:{}", api_port));
+        std::env::set_var("IPFS_PATH", ipfs_dir.path());
+        let cache_dir = tempdir().unwrap();
+        std::env::set_var("RELAY_IPFS_CACHE_ROOT", cache_dir.path());
+
+        // Build minimal AppState
+        let app_state = AppState { repo_path: repo_dir.path().to_path_buf() };
+
+        // Request for the IPFS-backed file path under the same repo layout
+        let headers = HeaderMap::new();
+        let path = format!("{}", rel_path.to_string_lossy());
+        let query: Option<Query<HashMap<String, String>>> = None;
+
+        // Get file; should miss git and fetch from IPFS
+        let resp = get_file(State(app_state), headers, Path(path), query).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Verify cache populated
+        let cached = cache_dir.path().join("_").join("main").join(rel_path);
+        assert!(cached.exists(), "cached file should exist: {}", cached.display());
+    }
+
+    // Not-found under CID returns 404
+    #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipfs_fallback_not_found_404() {
+        let ipfs_dir = tempdir().unwrap();
+        let api_port = 5016u16;
+        ensure_ipfs_daemon(ipfs_dir.path(), api_port).await;
+
+        // Empty dir -> CID of an empty dir by adding a directory with no files
+        let empty_dir = tempdir().unwrap();
+        let root_cid = ipfs_add_dir(ipfs_dir.path(), api_port, empty_dir.path()).await;
+
+        // Git repo with relay.yaml pointing to cid
+        let repo_dir = tempdir().unwrap();
+        let repo = Repository::init_bare(repo_dir.path()).unwrap();
+        {
+            let sig = Signature::now("relay", "relay@local").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            let tree_id = tb.write().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+        }
+        let yaml = format!("ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n", root_cid);
+        {
+            let head = repo.find_reference("refs/heads/main").unwrap();
+            let commit = head.peel_to_commit().unwrap();
+            let base_tree = commit.tree().unwrap();
+            let blob_oid = repo.blob(yaml.as_bytes()).unwrap();
+            let mut tb = repo.treebuilder(Some(&base_tree)).unwrap();
+            tb.insert("relay.yaml", blob_oid, 0o100644).unwrap();
+            let new_tree_id = tb.write().unwrap();
+            let new_tree = repo.find_tree(new_tree_id).unwrap();
+            let sig = Signature::now("relay", "relay@local").unwrap();
+            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "add relay.yaml", &new_tree, &[&commit]).unwrap();
+        }
+
+        std::env::set_var("RELAY_IPFS_TIMEOUT_SECS", "2");
+        std::env::set_var("RELAY_IPFS_API", format!("http://127.0.0.1:{}", api_port));
+        std::env::set_var("IPFS_PATH", ipfs_dir.path());
+        let cache_dir = tempdir().unwrap();
+        std::env::set_var("RELAY_IPFS_CACHE_ROOT", cache_dir.path());
+
+        let app_state = AppState { repo_path: repo_dir.path().to_path_buf() };
+        let headers = HeaderMap::new();
+        let path = "assets/missing.txt".to_string();
+        let query: Option<Query<HashMap<String, String>>> = None;
+        let resp = get_file(State(app_state), headers, Path(path), query).await.into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 fn disallowed(path: &str) -> bool {
@@ -597,33 +819,49 @@ async fn get_file(
     };
     info!(%branch, "resolved branch");
 
-    // Open repo and branch
-    let repo = match Repository::open_bare(&state.repo_path) {
+    // Resolve via Git first (without holding git2 types across awaits)
+    match git_resolve_and_respond(&state.repo_path, &headers, &branch, &repo_name, &decoded) {
+        GitResolveResult::Respond(resp) => return resp,
+        GitResolveResult::NotFound(rel_missing) => {
+            // Git miss: attempt IPFS fallback with timeout and logging
+            return ipfs_fallback_or_404(&state, &branch, &repo_name, &rel_missing, &decoded).await;
+        }
+    }
+}
+
+enum GitResolveResult {
+    Respond(Response),
+    NotFound(String),
+}
+
+fn git_resolve_and_respond(repo_path: &PathBuf, headers: &HeaderMap, branch: &str, repo_name: &str, decoded: &str) -> GitResolveResult {
+    let repo = match Repository::open_bare(repo_path) {
         Ok(r) => r,
         Err(e) => {
             error!(?e, "open repo error");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
     let refname = format!("refs/heads/{}", branch);
     let reference = match repo.find_reference(&refname) {
         Ok(r) => r,
         Err(_) => {
-            return render_404_markdown(&state.repo_path, &branch, &repo_name, &decoded);
+            let resp = render_404_markdown(repo_path, branch, repo_name, decoded);
+            return GitResolveResult::Respond(resp);
         }
     };
     let commit = match reference.peel_to_commit() {
         Ok(c) => c,
         Err(e) => {
             error!(?e, "peel to commit error");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
     let tree = match commit.tree() {
         Ok(t) => t,
         Err(e) => {
             error!(?e, "tree error");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
 
@@ -633,105 +871,254 @@ async fn get_file(
         if repo_name.is_empty() {
             p.to_string()
         } else if p.is_empty() {
-            repo_name.clone()
+            repo_name.to_string()
         } else {
             format!("{}/{}", repo_name, p)
         }
     };
-    // Empty path for repo root?
     let rel = path_scoped.trim_matches('/');
+
+    // Empty path -> directory listing
     if rel.is_empty() {
         let accept_hdr = headers
             .get("accept")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        let (ct, body) = directory_response(&state.repo_path, &tree, &tree, rel, accept_hdr, &branch, &repo_name);
-        return (
+        let (ct, body) = directory_response(repo_path, &tree, &tree, rel, accept_hdr, branch, repo_name);
+        let resp = (
             StatusCode::OK,
-            [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())],
+            [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())],
             body,
         )
             .into_response();
+        return GitResolveResult::Respond(resp);
     }
 
-    // Try to resolve path within tree
+    // File/dir resolution
     let path_obj = std::path::Path::new(rel);
     let entry = match tree.get_path(path_obj) {
         Ok(e) => e,
-        Err(_) => {
-            return render_404_markdown(&state.repo_path, &branch, &repo_name, rel);
-        }
+        Err(_) => return GitResolveResult::NotFound(rel.to_string()),
     };
+
     match entry.kind() {
         Some(ObjectType::Blob) => {
             match repo.find_blob(entry.id()) {
                 Ok(blob) => {
-                    // If file looks like markdown (.md, .markdown), decide whether to
-                    // serve raw markdown or render to HTML depending on Accept header.
                     let lower = rel.to_ascii_lowercase();
                     let is_md = lower.ends_with(".md") || lower.ends_with(".markdown");
-                    let accept_hdr = headers
-                        .get("accept")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("");
+                    let accept_hdr = headers.get("accept").and_then(|v| v.to_str().ok()).unwrap_or("");
                     let wants_markdown = accept_hdr.contains("text/markdown");
                     if is_md {
                         let content = blob.content();
-                    if wants_markdown {
-                        // Serve raw markdown
-                        return (
-                            StatusCode::OK,
-                            [("Content-Type", "text/markdown".to_string()), (HEADER_BRANCH, branch.clone())],
-                            content.to_vec(),
-                        )
-                            .into_response();
-                    } else {
-                        // Render to HTML, wrap with CSS links and global JS module based on directory theme and site globals
-                        let html_frag = String::from_utf8(md_to_html_bytes(content)).unwrap_or_default();
-                        let base_dir = std::path::Path::new(rel)
-                            .parent()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "".to_string());
-                        // let css = css_hrefs_for(&tree, &base_dir, &branch);
-                        // let js = js_hrefs_for(&tree, &branch);
-                        let title = std::path::Path::new(rel).file_name().and_then(|s| s.to_str()).unwrap_or("Document");
-                        let wrapped = wrap_html_with_assets(title, &html_frag, &branch, &repo_name, &state.repo_path, &base_dir);
-                        return (
-                            StatusCode::OK,
-                            [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())],
-                            wrapped,
-                        )
-                            .into_response();
+                        if wants_markdown {
+                            let resp = (StatusCode::OK, [("Content-Type", "text/markdown".to_string()), (HEADER_BRANCH, branch.to_string())], content.to_vec()).into_response();
+                            return GitResolveResult::Respond(resp);
+                        } else {
+                            let html_frag = String::from_utf8(md_to_html_bytes(content)).unwrap_or_default();
+                            let base_dir = std::path::Path::new(rel).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "".to_string());
+                            let title = std::path::Path::new(rel).file_name().and_then(|s| s.to_str()).unwrap_or("Document");
+                            let wrapped = wrap_html_with_assets(title, &html_frag, branch, repo_name, repo_path, &base_dir);
+                            let resp = (StatusCode::OK, [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], wrapped).into_response();
+                            return GitResolveResult::Respond(resp);
+                        }
                     }
-                    }
-                    // Non-markdown: serve with detected mime
                     let ct = mime_guess::from_path(rel).first_or_octet_stream().essence_str().to_string();
-                    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())], blob.content().to_vec()).into_response()
+                    let resp = (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], blob.content().to_vec()).into_response();
+                    GitResolveResult::Respond(resp)
                 }
                 Err(e) => {
                     error!(?e, "blob read error");
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response())
                 }
             }
         }
         Some(ObjectType::Tree) => {
-            // Directory listing
             let sub_tree = match repo.find_tree(entry.id()) {
                 Ok(t) => t,
                 Err(e) => {
                     error!(?e, "subtree error");
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    return GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response());
                 }
             };
-            let accept_hdr = headers
-                .get("accept")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-                let (ct, body) = directory_response(&state.repo_path, &tree, &sub_tree, rel, accept_hdr, &branch, &repo_name);
-                (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())], body).into_response()
+            let accept_hdr = headers.get("accept").and_then(|v| v.to_str().ok()).unwrap_or("");
+            let (ct, body) = directory_response(repo_path, &tree, &sub_tree, rel, accept_hdr, branch, repo_name);
+            let resp = (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], body).into_response();
+            GitResolveResult::Respond(resp)
         }
-        _ => render_404_markdown(&state.repo_path, &branch, &repo_name, rel),
+        _ => GitResolveResult::Respond(render_404_markdown(repo_path, branch, repo_name, rel)),
     }
+}
+
+// Attempt IPFS fallback (Cache -> On-demand fetch -> Serve). Returns 200/404/503 as per plan.
+async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, rel_scoped: &str, original_decoded: &str) -> Response {
+    let started = Instant::now();
+    let timeout_total = std::env::var("RELAY_IPFS_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_IPFS_TIMEOUT_SECS);
+    let deadline = started + Duration::from_secs(timeout_total);
+
+    // Determine subpath relative to repo root (exclude repo prefix if present)
+    let subpath = if repo_name.is_empty() {
+        original_decoded.trim_matches('/').to_string()
+    } else {
+        let trimmed = original_decoded.trim_matches('/');
+        let prefix = format!("{}/", repo_name);
+        if let Some(rest) = trimmed.strip_prefix(&prefix) { rest.to_string() } else { trimmed.to_string() }
+    };
+
+    // Read relay.yaml for ipfs.rootHash and (optional) branches
+    let (root_cid_opt, allowed_branch) = read_ipfs_rules(&state.repo_path, branch);
+    let root_cid = match root_cid_opt {
+        Some(cid) => cid,
+        None => {
+            debug!(branch=%branch, repo=%repo_name, path=%subpath, "No ipfs.rootHash in relay.yaml — skipping IPFS fallback");
+            return render_404_markdown(&state.repo_path, branch, repo_name, rel_scoped);
+        }
+    };
+    if !allowed_branch {
+        debug!(branch=%branch, repo=%repo_name, path=%subpath, "Branch not listed in ipfs.branches — skipping IPFS fallback");
+        return render_404_markdown(&state.repo_path, branch, repo_name, rel_scoped);
+    }
+
+    // Compute cache file path
+    let cache_root = std::env::var("RELAY_IPFS_CACHE_ROOT").unwrap_or_else(|_| DEFAULT_IPFS_CACHE_ROOT.to_string());
+    let repo_dir = if repo_name.is_empty() { "_" } else { repo_name };
+    // Build a relative path from components to avoid issues with platform-specific separators
+    let mut rel_components = std::path::PathBuf::new();
+    for part in subpath.split('/') { if !part.is_empty() { rel_components.push(part); } }
+    let cache_path = std::path::Path::new(&cache_root).join(repo_dir).join(branch).join(rel_components);
+
+    // Serve from cache if exists
+    if cache_path.is_file() {
+        let ct = mime_guess::from_path(&cache_path).first_or_octet_stream().essence_str().to_string();
+        match tokio::fs::read(&cache_path).await {
+            Ok(bytes) => {
+                info!(elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, cache=%cache_path.to_string_lossy(), "IPFS cache hit");
+                return (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], bytes).into_response();
+            }
+            Err(e) => {
+                warn!(?e, cache=%cache_path.to_string_lossy(), "Failed reading cache file; will try fetch");
+            }
+        }
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = cache_path.parent() { let _ = tokio::fs::create_dir_all(parent).await; }
+
+    // Check if path exists under CID (using CLI `ipfs` commands)
+    let ipfs_path = format!("/ipfs/{}/{}", root_cid, subpath);
+
+    // Deduplicate concurrent fetches for the same file
+    let key = cache_path.to_string_lossy().to_string();
+    let map = fetch_map();
+    let mut should_fetch = false;
+    {
+        let mut set = map.lock().unwrap();
+        if !set.contains(&key) {
+            set.insert(key.clone());
+            should_fetch = true;
+        }
+    }
+
+    // Helper to drop the in-progress mark
+    struct MarkGuard { key: String }
+    impl Drop for MarkGuard { fn drop(&mut self) { let map = fetch_map(); let mut set = map.lock().unwrap(); set.remove(&self.key); } }
+
+    // If someone else is fetching, wait until deadline for the file to appear
+    if !should_fetch {
+        debug!(repo=%repo_name, branch=%branch, path=%subpath, "Another fetch in progress; waiting for cache file");
+        loop {
+            if cache_path.is_file() { break; }
+            if Instant::now() >= deadline { break; }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if cache_path.is_file() {
+            if let Ok(bytes) = tokio::fs::read(&cache_path).await {
+                let ct = mime_guess::from_path(&cache_path).first_or_octet_stream().essence_str().to_string();
+                info!(elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, cache=%cache_path.to_string_lossy(), "IPFS fetch de-duped — served from cache");
+                return (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], bytes).into_response();
+            }
+        }
+        // Fall through to 503 timeout below
+        warn!(elapsed_ms = %started.elapsed().as_millis(), repo=%repo_name, branch=%branch, path=%subpath, "Waited for peer fetch but file not available before deadline");
+        return (StatusCode::SERVICE_UNAVAILABLE, "IPFS fetch timeout").into_response();
+    }
+
+    let _guard = MarkGuard { key };
+
+    // Attempt fetch via CLI first: ipfs get /ipfs/<cid>/<subpath> -o <cache_path>
+    let mut cmd = TokioCommand::new("ipfs");
+    // Use IPFS_PATH to target the local daemon; avoid --api for compatibility
+    cmd.arg("get").arg(&ipfs_path)
+        .arg("-o").arg(&cache_path)
+        .env("IPFS_PATH", std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    match timeout(remaining, cmd.status()).await {
+        Ok(Ok(status)) if status.success() => {
+            // Serve file
+            match tokio::fs::read(&cache_path).await {
+                Ok(bytes) => {
+                    let ct = mime_guess::from_path(&cache_path).first_or_octet_stream().essence_str().to_string();
+                    info!(elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, cache=%cache_path.to_string_lossy(), "IPFS fetch ok");
+                    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], bytes).into_response()
+                }
+                Err(e) => {
+                    error!(?e, cache=%cache_path.to_string_lossy(), "Fetched but failed to read cache file");
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                }
+            }
+        }
+        Ok(Ok(status)) => {
+            warn!(?status, elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, "ipfs get failed");
+            // Decide 404 vs 503 by attempting a quick resolve within the remaining time
+            let mut res = TokioCommand::new("ipfs");
+            res.arg("resolve").arg("-r").arg(&ipfs_path)
+                .env("IPFS_PATH", std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            let rem = deadline.saturating_duration_since(Instant::now());
+            match timeout(rem, res.status()).await {
+                Ok(Ok(s)) if s.success() => (StatusCode::SERVICE_UNAVAILABLE, "IPFS fetch failed").into_response(),
+                Ok(_) => render_404_markdown(&state.repo_path, branch, repo_name, rel_scoped),
+                Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "IPFS fetch timeout").into_response(),
+            }
+        }
+        Ok(Err(e)) => {
+            error!(?e, elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, "ipfs get error");
+            StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
+        Err(_) => {
+            // Timeout
+            warn!(elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, "IPFS fetch timed out");
+            (StatusCode::SERVICE_UNAVAILABLE, "IPFS fetch timeout").into_response()
+        }
+    }
+}
+
+// Read ipfs.rootHash and branches from relay.yaml at the requested branch. Returns (root_cid, branch_allowed)
+fn read_ipfs_rules(repo_path: &PathBuf, branch: &str) -> (Option<String>, bool) {
+    let bytes = match read_file_from_repo(repo_path, branch, "relay.yaml") {
+        Ok(b) => b,
+        Err(_) => return (None, true), // no relay.yaml — allow branch but no CID
+    };
+    let yaml = match String::from_utf8(bytes) { Ok(s) => s, Err(_) => return (None, true) };
+    let v: serde_json::Value = match serde_yaml::from_str(&yaml) { Ok(v) => v, Err(_) => return (None, true) };
+    let ipfs = match v.get("ipfs") { Some(x) => x, None => return (None, true) };
+    let cid = ipfs.get("rootHash").and_then(|x| x.as_str()).map(|s| s.to_string());
+    let branches_ok = match ipfs.get("branches") {
+        Some(b) => {
+            if let Some(arr) = b.as_array() {
+                arr.iter().filter_map(|x| x.as_str()).any(|s| s == branch)
+            } else { true }
+        }
+        None => true,
+    };
+    (cid, branches_ok)
 }
 
 async fn get_root(
