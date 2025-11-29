@@ -1,21 +1,20 @@
 #!/usr/bin/env node
-const { spawnSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import { spawnSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import glob from 'glob';
+import yaml from 'js-yaml';
 
-const workspaceRoot = path.resolve(__dirname, '..');
+const workspaceRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const workspaceConfig = path.join(workspaceRoot, 'pnpm-workspace.yaml');
 let packageGlobs = ['apps/*', 'packages/*'];
 try {
-  const yaml = require('js-yaml');
   const cfg = fs.readFileSync(workspaceConfig, 'utf8');
   const doc = yaml.load(cfg);
   if (doc && doc.packages) packageGlobs = doc.packages;
 } catch (e) {
   // fallback to defaults above
 }
-
-const glob = require('glob');
 
 let failed = false;
 
