@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "pnpm dev:client",
     "dev:client": "cargo run --manifest-path apps/client/Cargo.toml",
+    "dev:client:valdi": "cargo run --manifest-path apps/client-valdi/Cargo.toml",
     "build:client": "cargo build --manifest-path apps/client/Cargo.toml",
+    "build:client:valdi": "cargo build --manifest-path apps/client-valdi/Cargo.toml",
     "dev:server": "cargo run --manifest-path apps/server/Cargo.toml -- serve",
     "dev:pair": "node scripts/e2e/two-local-servers.mjs",
     "build:server": "cargo build --manifest-path apps/server/Cargo.toml",
