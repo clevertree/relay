@@ -1,31 +1,37 @@
-use std::{net::SocketAddr, path::PathBuf, str::FromStr};
+use std::{net::SocketAddr, path::{Path as FsPath, PathBuf}, str::FromStr};
 
 use axum::{
     body::Bytes,
-    extract::{Path, Query, State},
+    extract::{Path as AxPath, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, options},
     Json, Router,
 };
-use tokio::net::TcpListener;
-use git2::{Oid, Repository, Signature, ObjectType};
+use git2::{ObjectType, Oid, Repository, Signature};
 use percent_encoding::percent_decode_str as url_decode;
+use tokio::net::TcpListener;
 // base64 no longer needed after removing SQLite row mapping
+use pulldown_cmark::{html, Parser as MdParser};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use tracing::{debug, error, info, warn};
-use tokio::{process::Command as TokioCommand, time::{timeout, Duration, Instant}};
-use std::sync::{Arc, Mutex};
-use pulldown_cmark::{html, Parser};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use thiserror::Error;
+use tokio::{
+    process::Command as TokioCommand,
+    time::{timeout, Duration, Instant},
+};
 use tower_http::trace::TraceLayer;
+use tracing::{debug, error, info, warn};
 use tracing_appender::rolling;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use clap::{Parser, Subcommand, Args};
 
 #[derive(Clone)]
 struct AppState {
     repo_path: PathBuf,
+    // Additional static directories to serve from root before Git/IPFS
+    static_paths: Vec<PathBuf>,
 }
 
 const HEADER_BRANCH: &str = "X-Relay-Branch";
@@ -52,28 +58,91 @@ fn fetch_map() -> Arc<Mutex<std::collections::HashSet<String>>> {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(name = "relay-server", version, about = "Relay Server and CLI utilities", propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Run the HTTP server
+    Serve(ServeArgs),
+    /// Add a directory to IPFS (recursively) and print the root CID
+    IpfsAdd(IpfsAddArgs),
+}
+
+#[derive(Args, Debug)]
+struct ServeArgs {
+    /// Bare Git repository path
+    #[arg(long)]
+    repo: Option<PathBuf>,
+    /// Additional static directory to serve files from (may be repeated)
+    #[arg(long = "static", value_name = "DIR")]
+    static_paths: Vec<PathBuf>,
+    /// Bind address (host:port)
+    #[arg(long)]
+    bind: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct IpfsAddArgs {
+    /// Directory to add to IPFS
+    dir: PathBuf,
+    /// IPFS repository directory (IPFS_PATH); if omitted, uses env/IPFS defaults
+    #[arg(long)]
+    ipfs_path: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
+    if let Some(Commands::IpfsAdd(args)) = cli.command.as_ref() {
+        return ipfs_add_cli(args).await;
+    }
+
     // Set up logging: stdout + rolling file appender
     // Ensure logs directory exists
     let _ = std::fs::create_dir_all("logs");
     let file_appender = rolling::daily("logs", "server.log");
     let (file_nb, _guard) = tracing_appender::non_blocking(file_appender);
     let env_filter = tracing_subscriber::EnvFilter::from_default_env();
-    let stdout_layer = fmt::layer().with_target(true).with_thread_ids(false).with_thread_names(false).compact();
-    let file_layer = fmt::layer().with_writer(file_nb).with_target(true).compact();
+    let stdout_layer = fmt::layer()
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .compact();
+    let file_layer = fmt::layer()
+        .with_writer(file_nb)
+        .with_target(true)
+        .compact();
     tracing_subscriber::registry()
         .with(env_filter)
         .with(stdout_layer)
         .with(file_layer)
         .init();
 
-    let repo_path = std::env::var("RELAY_REPO_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("data/repo.git"));
+    // Determine serve args from CLI/env
+    let (repo_path, static_paths, bind_cli): (PathBuf, Vec<PathBuf>, Option<String>) = match cli.command {
+        Some(Commands::Serve(sa)) => {
+            let rp = sa
+                .repo
+                .or_else(|| std::env::var("RELAY_REPO_PATH").ok().map(PathBuf::from))
+                .unwrap_or_else(|| PathBuf::from("data/repo.git"));
+            (rp, sa.static_paths, sa.bind)
+        }
+        _ => {
+            let rp = std::env::var("RELAY_REPO_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("data/repo.git"));
+            (rp, Vec::new(), None)
+        }
+    };
     ensure_bare_repo(&repo_path)?;
 
-    let state = AppState { repo_path };
+    let state = AppState { repo_path, static_paths };
 
     // Build router (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
     let app = Router::new()
@@ -81,17 +150,70 @@ async fn main() -> anyhow::Result<()> {
         .route("/swagger-ui", get(get_swagger_ui))
         .route("/env", axum::routing::post(post_env))
         .route("/", get(get_root).options(options_capabilities))
-        .route("/*path", get(get_file).put(put_file).delete(delete_file).options(options_capabilities))
+        .route(
+            "/*path",
+            get(get_file)
+                .put(put_file)
+                .delete(delete_file)
+                .options(options_capabilities),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     // Peer tracker removed; no background registration
 
-    let bind = std::env::var("RELAY_BIND").unwrap_or_else(|_| "0.0.0.0:8088".into());
+    let bind = bind_cli
+        .or_else(|| std::env::var("RELAY_BIND").ok())
+        .unwrap_or_else(|| "0.0.0.0:8088".into());
     let addr = SocketAddr::from_str(&bind)?;
     info!(%addr, "Relay server listening");
     let listener = TcpListener::bind(&addr).await?;
     axum::serve(listener, app.into_make_service()).await?;
+    Ok(())
+}
+
+// CLI: ipfs-add implementation
+async fn ipfs_add_cli(args: &IpfsAddArgs) -> anyhow::Result<()> {
+    let dir = &args.dir;
+    if !dir.is_dir() {
+        anyhow::bail!("Not a directory: {}", dir.display());
+    }
+    let mut cmd = TokioCommand::new("ipfs");
+    cmd.arg("add").arg("-r").arg(dir);
+    if let Some(p) = &args.ipfs_path {
+        cmd.env("IPFS_PATH", p);
+    }
+    let out = cmd.output().await?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("ipfs add failed: {}", stderr);
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let dir_str = dir.to_string_lossy().to_string();
+    let base = dir.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let mut last_cid: Option<String> = None;
+    let mut dir_cid: Option<String> = None;
+    for line in stdout.lines() {
+        let mut it = line.split_whitespace();
+        let first = it.next();
+        let second = it.next();
+        let rest = it.next();
+        if first == Some("added") {
+            if let Some(cid) = second.map(|s| s.to_string()) {
+                last_cid = Some(cid.clone());
+                if let Some(path) = rest {
+                    if path == dir_str || (!base.is_empty() && path.ends_with(base)) {
+                        dir_cid = Some(cid);
+                    }
+                }
+            }
+        }
+    }
+    let cid = dir_cid.or(last_cid).unwrap_or_default();
+    if cid.is_empty() {
+        anyhow::bail!("could not parse CID from ipfs add output");
+    }
+    println!("{}", cid);
     Ok(())
 }
 
@@ -105,11 +227,7 @@ info:
   version: 0.0.0
 paths: {}
 "#;
-    (
-        StatusCode::OK,
-        [("Content-Type", "application/yaml")],
-        yaml,
-    )
+    (StatusCode::OK, [("Content-Type", "application/yaml")], yaml)
 }
 
 // Serve Swagger UI HTML page
@@ -145,11 +263,7 @@ async fn get_swagger_ui() -> impl IntoResponse {
 </script>
 </body>
 </html>"#;
-    (
-        StatusCode::OK,
-        [("Content-Type", "text/html")],
-        html,
-    )
+    (StatusCode::OK, [("Content-Type", "text/html")], html)
 }
 
 /// Parse simple KEY=VALUE lines from a .env-like string. Ignores comments and blank lines.
@@ -157,15 +271,23 @@ fn parse_dotenv(s: &str) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     for line in s.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
         let mut parts = line.splitn(2, '=');
         let k = parts.next().unwrap_or("").trim();
         let v = parts.next().unwrap_or("").trim();
-        if k.is_empty() { continue; }
+        if k.is_empty() {
+            continue;
+        }
         // Strip surrounding quotes if present
-        let val = if (v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')) {
+        let val = if (v.starts_with('"') && v.ends_with('"'))
+            || (v.starts_with('\'') && v.ends_with('\''))
+        {
             v[1..v.len().saturating_sub(1)].to_string()
-        } else { v.to_string() };
+        } else {
+            v.to_string()
+        };
         map.insert(k.to_string(), val);
     }
     map
@@ -183,13 +305,19 @@ async fn post_env(
     // Read .env and .env.local from the repo at this branch
     let mut merged: HashMap<String, String> = HashMap::new();
     let from_repo = |name: &str| -> Option<String> {
-        read_file_from_repo(&state.repo_path, &branch, name).ok().and_then(|b| String::from_utf8(b).ok())
+        read_file_from_repo(&state.repo_path, &branch, name)
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
     };
     if let Some(env_txt) = from_repo(".env") {
-        for (k, v) in parse_dotenv(&env_txt) { merged.entry(k).or_insert(v); }
+        for (k, v) in parse_dotenv(&env_txt) {
+            merged.entry(k).or_insert(v);
+        }
     }
     if let Some(env_local_txt) = from_repo(".env.local") {
-        for (k, v) in parse_dotenv(&env_local_txt) { merged.insert(k, v); }
+        for (k, v) in parse_dotenv(&env_local_txt) {
+            merged.insert(k, v);
+        }
     }
     // Overlay OS env
     for (k, v) in std::env::vars() {
@@ -205,7 +333,7 @@ async fn post_env(
 
 fn ensure_bare_repo(path: &PathBuf) -> anyhow::Result<()> {
     if path.exists() {
-        let _ = Repository::open_bare(path) ?;
+        let _ = Repository::open_bare(path)?;
         return Ok(());
     }
     std::fs::create_dir_all(path)?;
@@ -247,10 +375,19 @@ async fn options_capabilities(
 ) -> impl IntoResponse {
     // Branch and repo resolution from request context
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
-    let repo_name = repo_from(&state.repo_path, &headers, &query.as_ref().map(|q| q.0.clone()), &branch);
+    let repo_name = repo_from(
+        &state.repo_path,
+        &headers,
+        &query.as_ref().map(|q| q.0.clone()),
+        &branch,
+    );
 
     // Enumerate branches and repos
-    let (mut branches, mut repos, mut branch_heads): (Vec<String>, Vec<String>, Vec<(String, String)>) = match Repository::open_bare(&state.repo_path) {
+    let (mut branches, mut repos, mut branch_heads): (
+        Vec<String>,
+        Vec<String>,
+        Vec<(String, String)>,
+    ) = match Repository::open_bare(&state.repo_path) {
         Ok(repo) => {
             let branches = list_branches(&repo);
             let repos = list_repos(&state.repo_path, &branch).unwrap_or_default();
@@ -261,19 +398,41 @@ async fn options_capabilities(
     };
 
     // Filter by requested branch (if explicitly set via header/query/cookie)
-    if let Some(req_branch) = query.as_ref().and_then(|q| q.0.get("branch").cloned()).or_else(|| headers.get(HEADER_BRANCH).and_then(|v| v.to_str().ok()).map(|s| s.to_string())) {
+    if let Some(req_branch) = query
+        .as_ref()
+        .and_then(|q| q.0.get("branch").cloned())
+        .or_else(|| {
+            headers
+                .get(HEADER_BRANCH)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        })
+    {
         if !req_branch.is_empty() {
             branches.retain(|b| b == &req_branch);
             branch_heads.retain(|(b, _)| b == &req_branch);
         }
     }
     // Filter repos list by requested repo (if present); also limit branch heads to those branches where the repo exists
-    if let Some(req_repo) = query.as_ref().and_then(|q| q.0.get("repo").cloned()).or_else(|| headers.get(HEADER_REPO).and_then(|v| v.to_str().ok()).map(|s| s.to_string())) {
+    if let Some(req_repo) = query
+        .as_ref()
+        .and_then(|q| q.0.get("repo").cloned())
+        .or_else(|| {
+            headers
+                .get(HEADER_REPO)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        })
+    {
         if !req_repo.is_empty() {
             repos.retain(|r| r == &req_repo);
             // Keep only heads for branches where this repo exists
             branch_heads.retain(|(b, _)| {
-                if let Ok(list) = list_repos(&state.repo_path, b) { list.iter().any(|r| r == &req_repo) } else { false }
+                if let Ok(list) = list_repos(&state.repo_path, b) {
+                    list.iter().any(|r| r == &req_repo)
+                } else {
+                    false
+                }
             });
         }
     }
@@ -292,7 +451,11 @@ async fn options_capabilities(
     });
     (
         StatusCode::OK,
-        [("Allow", allow.to_string()), (HEADER_BRANCH, branch), (HEADER_REPO, repo_name.clone().unwrap_or_default())],
+        [
+            ("Allow", allow.to_string()),
+            (HEADER_BRANCH, branch),
+            (HEADER_REPO, repo_name.clone().unwrap_or_default()),
+        ],
         Json(body),
     )
 }
@@ -305,7 +468,8 @@ fn list_branch_heads(repo_path: &PathBuf) -> Vec<(String, String)> {
             while let Some(Ok((b, _))) = iter.next() {
                 if let Ok(name_opt) = b.name() {
                     if let Some(name) = name_opt {
-                        if let Ok(reference) = repo.find_reference(&format!("refs/heads/{}", name)) {
+                        if let Ok(reference) = repo.find_reference(&format!("refs/heads/{}", name))
+                        {
                             if let Ok(commit) = reference.peel_to_commit() {
                                 out.push((name.to_string(), commit.id().to_string()));
                             }
@@ -356,8 +520,20 @@ async fn post_query(
         .unwrap_or(DEFAULT_BRANCH)
         .to_string();
     let req: QueryRequest = match body {
-        Some(Json(v)) => serde_json::from_value(v).unwrap_or(QueryRequest { page: Some(0), page_size: Some(25), filter: None, sort: None, params: None }),
-        None => QueryRequest { page: Some(0), page_size: Some(25), filter: None, sort: None, params: None },
+        Some(Json(v)) => serde_json::from_value(v).unwrap_or(QueryRequest {
+            page: Some(0),
+            page_size: Some(25),
+            filter: None,
+            sort: None,
+            params: None,
+        }),
+        None => QueryRequest {
+            page: Some(0),
+            page_size: Some(25),
+            filter: None,
+            sort: None,
+            params: None,
+        },
     };
 
     // Open repo and read rules (for db spec)
@@ -367,12 +543,21 @@ async fn post_query(
     };
     let rules_bytes = match read_file_from_repo(&state.repo_path, DEFAULT_BRANCH, "relay.yaml") {
         Ok(b) => b,
-        Err(_) => return (StatusCode::BAD_REQUEST, "relay.yaml not found on default branch").into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "relay.yaml not found on default branch",
+            )
+                .into_response()
+        }
     };
     let rules_yaml = String::from_utf8_lossy(&rules_bytes);
-    let rules_val: serde_json::Value = match serde_yaml::from_str::<serde_json::Value>(&rules_yaml) {
+    let rules_val: serde_json::Value = match serde_yaml::from_str::<serde_json::Value>(&rules_yaml)
+    {
         Ok(v) => v,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("invalid relay.yaml: {e}")).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("invalid relay.yaml: {e}")).into_response()
+        }
     };
     let db_val = match rules_val.get("db") {
         Some(v) => v.clone(),
@@ -380,25 +565,55 @@ async fn post_query(
     };
     let spec: DbSpec = match serde_json::from_value(db_val) {
         Ok(s) => s,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("invalid rules.db spec: {e}")).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("invalid rules.db spec: {e}"),
+            )
+                .into_response()
+        }
     };
     if spec.engine.to_lowercase() != "polodb" {
-        return (StatusCode::BAD_REQUEST, format!("unsupported db.engine: {}", spec.engine)).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("unsupported db.engine: {}", spec.engine),
+        )
+            .into_response();
     }
     // Resolve DB path: env RELAY_DB_PATH or default under repo git dir
     let db_path = std::env::var("RELAY_DB_PATH").unwrap_or_else(|_| {
-        repo.path().join("relay_index.polodb").to_string_lossy().to_string()
+        repo.path()
+            .join("relay_index.polodb")
+            .to_string_lossy()
+            .to_string()
     });
-    let db = match Db::open(&db_path) { Ok(d) => d, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB open failed: {e}")).into_response() };
+    let db = match Db::open(&db_path) {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("DB open failed: {e}"),
+            )
+                .into_response()
+        }
+    };
     if let Err(e) = db.ensure_indexes(&spec) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("ensure indexes failed: {e}")).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("ensure indexes failed: {e}"),
+        )
+            .into_response();
     }
     // Build query params
     let mut qp = QueryParams::default();
     qp.page = req.page;
     qp.page_size = req.page_size;
     qp.sort = req.sort.clone();
-    qp.filter = if let Some(f) = req.filter { Some(f) } else { req.params };
+    qp.filter = if let Some(f) = req.filter {
+        Some(f)
+    } else {
+        req.params
+    };
     let qr = match db.query(&spec, Some(&branch), &qp) {
         Ok(r) => r,
         Err(e) => return (StatusCode::BAD_REQUEST, format!("query failed: {e}")).into_response(),
@@ -431,7 +646,11 @@ async fn query_alias_middleware(
             new_path.push('/');
             new_path.push_str(orig_path);
         }
-        let new_pq = if let Some(q) = orig_query { format!("{}?{}", new_path, q) } else { new_path };
+        let new_pq = if let Some(q) = orig_query {
+            format!("{}?{}", new_path, q)
+        } else {
+            new_path
+        };
         // Rebuild request with POST method and new URI path
         let (mut parts, body) = req.into_parts();
         parts.method = Method::POST;
@@ -451,10 +670,10 @@ async fn query_alias_middleware(
 mod tests {
     use super::*;
     use git2::{Repository, Signature};
-    use tempfile::tempdir;
-    use std::path::Path as FsPath;
     use std::io::Write as _;
+    use std::path::Path as FsPath;
     use std::time::Duration as StdDuration;
+    use tempfile::tempdir;
 
     #[test]
     fn test_md_to_html_bytes_basic() {
@@ -471,7 +690,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let repo = Repository::init_bare(dir.path()).unwrap();
 
-    // create an in-memory tree with README.md blob
+        // create an in-memory tree with README.md blob
         let oid = repo
             .blob("# Title\n\nSome content".as_bytes())
             .expect("create blob");
@@ -484,7 +703,7 @@ mod tests {
 
         let repo_path = dir.path().to_path_buf();
         let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "", DEFAULT_BRANCH, "");
-    assert!(ct.starts_with("text/html"), "ct was {}", ct);
+        assert!(ct.starts_with("text/html"), "ct was {}", ct);
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("<h1>Title</h1>") || s.contains("<a href=\"README.md\""));
     }
@@ -503,12 +722,20 @@ mod tests {
         let tree = repo.find_tree(tree_oid).unwrap();
 
         let repo_path = dir.path().to_path_buf();
-        let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "text/markdown", DEFAULT_BRANCH, "");
+        let (ct, bytes) = directory_response(
+            &repo_path,
+            &tree,
+            &tree,
+            "",
+            "text/markdown",
+            DEFAULT_BRANCH,
+            "",
+        );
         assert_eq!(ct, "text/markdown");
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("# Title") || s.contains("README.md"));
     }
-    
+
     #[test]
     fn test_row_to_json_basic_types_removed() {}
 
@@ -517,23 +744,24 @@ mod tests {
         // init if needed
         let _ = std::fs::create_dir_all(ipfs_repo);
         let mut init = TokioCommand::new("ipfs");
-        init.arg("init")
-            .env("IPFS_PATH", ipfs_repo);
+        init.arg("init").env("IPFS_PATH", ipfs_repo);
         let _ = init.status().await;
         // configure API address
         let mut cfg = TokioCommand::new("ipfs");
-        cfg.arg("config").arg("Addresses.API").arg(format!("/ip4/127.0.0.1/tcp/{}", api_port))
+        cfg.arg("config")
+            .arg("Addresses.API")
+            .arg(format!("/ip4/127.0.0.1/tcp/{}", api_port))
             .env("IPFS_PATH", ipfs_repo);
         let _ = cfg.status().await;
         // start daemon in background if not running
         let mut id = TokioCommand::new("ipfs");
-        id.arg("id")
-            .env("IPFS_PATH", ipfs_repo);
+        id.arg("id").env("IPFS_PATH", ipfs_repo);
         if id.status().await.ok().map(|s| s.success()).unwrap_or(false) {
             return;
         }
         let mut daemon = std::process::Command::new("ipfs");
-        daemon.arg("daemon")
+        daemon
+            .arg("daemon")
             .env("IPFS_PATH", ipfs_repo)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -543,9 +771,10 @@ mod tests {
         for _ in 0..50 {
             let mut id = TokioCommand::new("ipfs");
             // Use IPFS_PATH and the api file written by the daemon
-            id.arg("id")
-                .env("IPFS_PATH", ipfs_repo);
-            if id.status().await.ok().map(|s| s.success()).unwrap_or(false) { break; }
+            id.arg("id").env("IPFS_PATH", ipfs_repo);
+            if id.status().await.ok().map(|s| s.success()).unwrap_or(false) {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
@@ -582,13 +811,19 @@ mod tests {
             }
         }
         let cid = dir_cid.or(last_cid).unwrap_or_default();
-        assert!(!cid.is_empty(), "could not parse CID from ipfs add output: {}", stdout);
+        assert!(
+            !cid.is_empty(),
+            "could not parse CID from ipfs add output: {}",
+            stdout
+        );
         cid
     }
 
     #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
     async fn write_file(p: &FsPath, content: &str) {
-        if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let mut f = std::fs::File::create(p).unwrap();
         let _ = f.write_all(content.as_bytes());
     }
@@ -613,11 +848,16 @@ mod tests {
         // Wait until path resolves under IPFS
         for _ in 0..20 {
             let status = TokioCommand::new("ipfs")
-                .arg("resolve").arg("-r")
+                .arg("resolve")
+                .arg("-r")
                 .arg(format!("/ipfs/{}/assets/hello.txt", root_cid))
                 .env("IPFS_PATH", ipfs_dir.path())
-                .status().await.unwrap();
-            if status.success() { break; }
+                .status()
+                .await
+                .unwrap();
+            if status.success() {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
@@ -629,10 +869,15 @@ mod tests {
             let mut tb = repo.treebuilder(None).unwrap();
             let tree_id = tb.write().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+            let _ = repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
         }
         // add relay.yaml
-        let yaml = format!("ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n", root_cid);
+        let yaml = format!(
+            "ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n",
+            root_cid
+        );
         {
             let head = repo.find_reference("refs/heads/main").unwrap();
             let commit = head.peel_to_commit().unwrap();
@@ -643,7 +888,16 @@ mod tests {
             let new_tree_id = tb.write().unwrap();
             let new_tree = repo.find_tree(new_tree_id).unwrap();
             let sig = Signature::now("relay", "relay@local").unwrap();
-            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "add relay.yaml", &new_tree, &[&commit]).unwrap();
+            let _ = repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    "add relay.yaml",
+                    &new_tree,
+                    &[&commit],
+                )
+                .unwrap();
         }
 
         // Build listing at IPFS subdir 'assets' (Git is empty), expect IPFS entries appear
@@ -651,12 +905,28 @@ mod tests {
         let root_ref = repo.find_reference("refs/heads/main").unwrap();
         let commit = root_ref.peel_to_commit().unwrap();
         let tree = commit.tree().unwrap();
-        let (ct, md) = super::directory_response(&repo_dir.path().to_path_buf(), &tree, &tree, "assets", "text/markdown", "main", "");
+        let (ct, md) = super::directory_response(
+            &repo_dir.path().to_path_buf(),
+            &tree,
+            &tree,
+            "assets",
+            "text/markdown",
+            "main",
+            "",
+        );
         assert_eq!(ct, "text/markdown");
         let s = String::from_utf8(md).unwrap();
-        assert!(s.contains("hello.txt"), "listing should include IPFS file hello.txt: {}", s);
+        assert!(
+            s.contains("hello.txt"),
+            "listing should include IPFS file hello.txt: {}",
+            s
+        );
         // Size column should show at least 5 bytes for hello.txt
-        assert!(s.contains("hello.txt") && s.contains("| 5 |"), "should show size 5 bytes: {}", s);
+        assert!(
+            s.contains("hello.txt") && s.contains("| 5 |"),
+            "should show size 5 bytes: {}",
+            s
+        );
     }
 
     // Changing CID should refresh dir cache file
@@ -688,7 +958,9 @@ mod tests {
             let mut tb = repo.treebuilder(None).unwrap();
             let tree_id = tb.write().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+            let _ = repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
         }
         let write_yaml_commit = |repo: &Repository, cid: &str| {
             let yaml = format!("ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n", cid);
@@ -701,7 +973,16 @@ mod tests {
             let new_tree_id = tb.write().unwrap();
             let new_tree = repo.find_tree(new_tree_id).unwrap();
             let sig = Signature::now("relay", "relay@local").unwrap();
-            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "update relay.yaml", &new_tree, &[&commit]).unwrap();
+            let _ = repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    "update relay.yaml",
+                    &new_tree,
+                    &[&commit],
+                )
+                .unwrap();
         };
         write_yaml_commit(&repo, &cid1);
 
@@ -709,16 +990,36 @@ mod tests {
         let head = repo.find_reference("refs/heads/main").unwrap();
         let commit = head.peel_to_commit().unwrap();
         let tree = commit.tree().unwrap();
-        let _ = super::directory_response(&repo_dir.path().to_path_buf(), &tree, &tree, "", "text/markdown", "main", "");
+        let _ = super::directory_response(
+            &repo_dir.path().to_path_buf(),
+            &tree,
+            &tree,
+            "",
+            "text/markdown",
+            "main",
+            "",
+        );
 
         // Update CID and list again; ensure resulting markdown references new file name
         write_yaml_commit(&repo, &cid2);
         let head = repo.find_reference("refs/heads/main").unwrap();
         let commit = head.peel_to_commit().unwrap();
         let tree = commit.tree().unwrap();
-        let (_ct, md) = super::directory_response(&repo_dir.path().to_path_buf(), &tree, &tree, "", "text/markdown", "main", "");
+        let (_ct, md) = super::directory_response(
+            &repo_dir.path().to_path_buf(),
+            &tree,
+            &tree,
+            "",
+            "text/markdown",
+            "main",
+            "",
+        );
         let s = String::from_utf8(md).unwrap();
-        assert!(s.contains("b.txt"), "dir listing after CID change should show new entries: {}", s);
+        assert!(
+            s.contains("b.txt"),
+            "dir listing after CID change should show new entries: {}",
+            s
+        );
     }
 
     // End-to-end: Git miss -> IPFS fetch success
@@ -745,10 +1046,15 @@ mod tests {
             let mut tb = repo.treebuilder(None).unwrap();
             let tree_id = tb.write().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+            let _ = repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
         }
         // Add relay.yaml to default branch for rules consumption by server endpoints expecting default branch
-        let yaml = format!("ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n", root_cid);
+        let yaml = format!(
+            "ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n",
+            root_cid
+        );
         {
             // Read existing tree and upsert relay.yaml blob
             let head = repo.find_reference("refs/heads/main").unwrap();
@@ -764,7 +1070,16 @@ mod tests {
             let new_tree_id = upsert(&repo, &base_tree, "relay.yaml", blob_oid);
             let new_tree = repo.find_tree(new_tree_id).unwrap();
             let sig = Signature::now("relay", "relay@local").unwrap();
-            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "add relay.yaml", &new_tree, &[&commit]).unwrap();
+            let _ = repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    "add relay.yaml",
+                    &new_tree,
+                    &[&commit],
+                )
+                .unwrap();
         }
 
         // Set envs for server to point to our temp git and ipfs
@@ -775,7 +1090,9 @@ mod tests {
         std::env::set_var("RELAY_IPFS_CACHE_ROOT", cache_dir.path());
 
         // Build minimal AppState
-        let app_state = AppState { repo_path: repo_dir.path().to_path_buf() };
+        let app_state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+        };
 
         // Request for the IPFS-backed file path under the same repo layout
         let headers = HeaderMap::new();
@@ -785,19 +1102,30 @@ mod tests {
         // Wait for resolution to ensure availability
         for _ in 0..20 {
             let status = TokioCommand::new("ipfs")
-                .arg("resolve").arg("-r")
+                .arg("resolve")
+                .arg("-r")
                 .arg(format!("/ipfs/{}/{}", root_cid, rel_path.to_string_lossy()))
                 .env("IPFS_PATH", ipfs_dir.path())
-                .status().await.unwrap();
-            if status.success() { break; }
+                .status()
+                .await
+                .unwrap();
+            if status.success() {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         // Get file; should miss git and fetch from IPFS
-        let resp = get_file(State(app_state), headers, Path(path), query).await.into_response();
+        let resp = get_file(State(app_state), headers, Path(path), query)
+            .await
+            .into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         // Verify cache populated
         let cached = cache_dir.path().join("_").join("main").join(rel_path);
-        assert!(cached.exists(), "cached file should exist: {}", cached.display());
+        assert!(
+            cached.exists(),
+            "cached file should exist: {}",
+            cached.display()
+        );
     }
 
     // Not-found under CID returns 404
@@ -820,9 +1148,14 @@ mod tests {
             let mut tb = repo.treebuilder(None).unwrap();
             let tree_id = tb.write().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+            let _ = repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
         }
-        let yaml = format!("ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n", root_cid);
+        let yaml = format!(
+            "ipfs:\n  rootHash: \"{}\"\n  branches: [ \"main\" ]\n",
+            root_cid
+        );
         {
             let head = repo.find_reference("refs/heads/main").unwrap();
             let commit = head.peel_to_commit().unwrap();
@@ -833,7 +1166,16 @@ mod tests {
             let new_tree_id = tb.write().unwrap();
             let new_tree = repo.find_tree(new_tree_id).unwrap();
             let sig = Signature::now("relay", "relay@local").unwrap();
-            let _ = repo.commit(Some("refs/heads/main"), &sig, &sig, "add relay.yaml", &new_tree, &[&commit]).unwrap();
+            let _ = repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    "add relay.yaml",
+                    &new_tree,
+                    &[&commit],
+                )
+                .unwrap();
         }
 
         std::env::set_var("RELAY_IPFS_TIMEOUT_SECS", "2");
@@ -842,11 +1184,15 @@ mod tests {
         let cache_dir = tempdir().unwrap();
         std::env::set_var("RELAY_IPFS_CACHE_ROOT", cache_dir.path());
 
-        let app_state = AppState { repo_path: repo_dir.path().to_path_buf() };
+        let app_state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+        };
         let headers = HeaderMap::new();
         let path = "assets/missing.txt".to_string();
         let query: Option<Query<HashMap<String, String>>> = None;
-        let resp = get_file(State(app_state), headers, Path(path), query).await.into_response();
+        let resp = get_file(State(app_state), headers, Path(path), query)
+            .await
+            .into_response();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }
@@ -870,14 +1216,18 @@ fn branch_from(headers: &HeaderMap, query: &Option<HashMap<String, String>>) -> 
         }
     }
     if let Some(h) = headers.get(HEADER_BRANCH).and_then(|v| v.to_str().ok()) {
-        if !h.is_empty() { return h.to_string(); }
+        if !h.is_empty() {
+            return h.to_string();
+        }
     }
     if let Some(cookie_hdr) = headers.get("cookie").and_then(|v| v.to_str().ok()) {
         for part in cookie_hdr.split(';') {
             let mut kv = part.trim().splitn(2, '=');
             let k = kv.next().unwrap_or("").trim();
             let v = kv.next().unwrap_or("");
-            if k == "relay-branch" && !v.is_empty() { return v.to_string(); }
+            if k == "relay-branch" && !v.is_empty() {
+                return v.to_string();
+            }
         }
     }
     DEFAULT_BRANCH.to_string()
@@ -885,17 +1235,32 @@ fn branch_from(headers: &HeaderMap, query: &Option<HashMap<String, String>>) -> 
 
 fn sanitize_repo_name(name: &str) -> Option<String> {
     let trimmed = name.trim().trim_matches('/');
-    if trimmed.is_empty() { return None; }
-    if trimmed.contains("..") { return None; }
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains("..") {
+        return None;
+    }
     Some(trimmed.to_string())
 }
 
-fn repo_from(repo_path: &PathBuf, headers: &HeaderMap, query: &Option<HashMap<String, String>>, branch: &str) -> Option<String> {
+fn repo_from(
+    repo_path: &PathBuf,
+    headers: &HeaderMap,
+    query: &Option<HashMap<String, String>>,
+    branch: &str,
+) -> Option<String> {
     // Precedence: query ?repo= -> header X-Relay-Repo -> cookie relay-repo -> env RELAY_DEFAULT_REPO -> first in list_repos -> default empty repo
     if let Some(q) = query {
-        if let Some(r) = q.get("repo").and_then(|s| sanitize_repo_name(s)) { return Some(r); }
+        if let Some(r) = q.get("repo").and_then(|s| sanitize_repo_name(s)) {
+            return Some(r);
+        }
     }
-    if let Some(h) = headers.get(HEADER_REPO).and_then(|v| v.to_str().ok()).and_then(|s| sanitize_repo_name(s)) {
+    if let Some(h) = headers
+        .get(HEADER_REPO)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| sanitize_repo_name(s))
+    {
         return Some(h);
     }
     if let Some(cookie_hdr) = headers.get("cookie").and_then(|v| v.to_str().ok()) {
@@ -904,14 +1269,20 @@ fn repo_from(repo_path: &PathBuf, headers: &HeaderMap, query: &Option<HashMap<St
             let k = kv.next().unwrap_or("").trim();
             let v = kv.next().unwrap_or("");
             if k == "relay-repo" {
-                if let Some(s) = sanitize_repo_name(v) { return Some(s); }
+                if let Some(s) = sanitize_repo_name(v) {
+                    return Some(s);
+                }
             }
         }
     }
     if let Ok(env_def) = std::env::var("RELAY_DEFAULT_REPO") {
-        if let Some(s) = sanitize_repo_name(&env_def) { return Some(s); }
+        if let Some(s) = sanitize_repo_name(&env_def) {
+            return Some(s);
+        }
     }
-    if let Ok(list) = list_repos(repo_path, branch) { return list.into_iter().next(); }
+    if let Ok(list) = list_repos(repo_path, branch) {
+        return list.into_iter().next();
+    }
     // If no subdirectories found, serve the root as the default repository
     Some("".to_string())
 }
@@ -925,7 +1296,9 @@ fn list_repos(repo_path: &PathBuf, branch: &str) -> anyhow::Result<Vec<String>> 
     let mut out: Vec<String> = Vec::new();
     for entry in tree.iter() {
         if entry.kind() == Some(ObjectType::Tree) {
-            if let Some(name) = entry.name() { out.push(name.to_string()); }
+            if let Some(name) = entry.name() {
+                out.push(name.to_string());
+            }
         }
     }
     out.sort();
@@ -935,30 +1308,50 @@ fn list_repos(repo_path: &PathBuf, branch: &str) -> anyhow::Result<Vec<String>> 
 async fn get_file(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(path): Path<String>,
+    AxPath(path): AxPath<String>,
     query: Option<Query<HashMap<String, String>>>,
-)-> impl IntoResponse {
+) -> impl IntoResponse {
     info!(%path, "get_file called");
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
     info!(decoded = %decoded, "decoded path");
-    if disallowed(&decoded) {
-        return (StatusCode::FORBIDDEN, "Disallowed file type").into_response();
+    // 1) Try static directories first
+    if let Some(resp) = try_static(&state, &decoded).await {
+        return resp;
     }
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
-    let repo_name = match repo_from(&state.repo_path, &headers, &query.as_ref().map(|q| q.0.clone()), &branch) {
+    let repo_name = match repo_from(
+        &state.repo_path,
+        &headers,
+        &query.as_ref().map(|q| q.0.clone()),
+        &branch,
+    ) {
         Some(r) => r,
         None => {
             return (
                 StatusCode::NOT_FOUND,
-                [("Content-Type", "text/plain".to_string()), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, "".to_string())],
+                [
+                    ("Content-Type", "text/plain".to_string()),
+                    (HEADER_BRANCH, branch.clone()),
+                    (HEADER_REPO, "".to_string()),
+                ],
                 "Repository not found".to_string(),
-            ).into_response();
+            )
+                .into_response();
         }
     };
     info!(%branch, "resolved branch");
 
-    // Resolve via Git first (without holding git2 types across awaits)
-    match git_resolve_and_respond(&state.repo_path, &headers, &branch, &repo_name, &decoded) {
+    // For html/js we skip Git (never serve from repo); otherwise resolve via Git first
+    let is_html_js = {
+        let l = decoded.to_ascii_lowercase();
+        l.ends_with(".html") || l.ends_with(".htm") || l.ends_with(".js")
+    };
+    let git_result = if is_html_js {
+        GitResolveResult::NotFound(decoded.trim_matches('/').to_string())
+    } else {
+        git_resolve_and_respond(&state.repo_path, &headers, &branch, &repo_name, &decoded)
+    };
+    match git_result {
         GitResolveResult::Respond(resp) => return resp,
         GitResolveResult::NotFound(rel_missing) => {
             // Git miss: attempt IPFS fallback with timeout and logging
@@ -967,12 +1360,69 @@ async fn get_file(
     }
 }
 
+// Try to serve a file from configured static directories. Returns Some(response) on success, None to continue.
+async fn try_static(state: &AppState, decoded: &str) -> Option<Response> {
+    if state.static_paths.is_empty() {
+        return None;
+    }
+    // Prevent path traversal: normalize to components and re-join with '/'
+    let mut rel = String::new();
+    for part in decoded.split('/') {
+        if part.is_empty() || part == "." || part == ".." {
+            continue;
+        }
+        if !rel.is_empty() {
+            rel.push('/');
+        }
+        rel.push_str(part);
+    }
+    if rel.is_empty() {
+        return None;
+    }
+    for base in &state.static_paths {
+        let candidate = base.join(rel.replace('/', std::path::MAIN_SEPARATOR.to_string().as_str()));
+        // Ensure candidate stays within base
+        if let (Ok(canon_base), Ok(canon_file)) = (base.canonicalize(), candidate.canonicalize()) {
+            if !canon_file.starts_with(&canon_base) {
+                continue;
+            }
+        }
+        if candidate.is_file() {
+            match tokio::fs::read(&candidate).await {
+                Ok(bytes) => {
+                    let ct = mime_guess::from_path(&candidate)
+                        .first_or_octet_stream()
+                        .essence_str()
+                        .to_string();
+                    let resp = (
+                        StatusCode::OK,
+                        [("Content-Type", ct)],
+                        bytes,
+                    )
+                        .into_response();
+                    return Some(resp);
+                }
+                Err(e) => {
+                    warn!(?e, path=%candidate.to_string_lossy(), "Failed to read static file");
+                }
+            }
+        }
+    }
+    None
+}
+
 enum GitResolveResult {
     Respond(Response),
     NotFound(String),
 }
 
-fn git_resolve_and_respond(repo_path: &PathBuf, headers: &HeaderMap, branch: &str, repo_name: &str, decoded: &str) -> GitResolveResult {
+fn git_resolve_and_respond(
+    repo_path: &PathBuf,
+    headers: &HeaderMap,
+    branch: &str,
+    repo_name: &str,
+    decoded: &str,
+) -> GitResolveResult {
     let repo = match Repository::open_bare(repo_path) {
         Ok(r) => r,
         Err(e) => {
@@ -1022,10 +1472,15 @@ fn git_resolve_and_respond(repo_path: &PathBuf, headers: &HeaderMap, branch: &st
             .get("accept")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        let (ct, body) = directory_response(repo_path, &tree, &tree, rel, accept_hdr, branch, repo_name);
+        let (ct, body) =
+            directory_response(repo_path, &tree, &tree, rel, accept_hdr, branch, repo_name);
         let resp = (
             StatusCode::OK,
-            [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())],
+            [
+                ("Content-Type", ct),
+                (HEADER_BRANCH, branch.to_string()),
+                (HEADER_REPO, repo_name.to_string()),
+            ],
             body,
         )
             .into_response();
@@ -1040,48 +1495,101 @@ fn git_resolve_and_respond(repo_path: &PathBuf, headers: &HeaderMap, branch: &st
     };
 
     match entry.kind() {
-        Some(ObjectType::Blob) => {
-            match repo.find_blob(entry.id()) {
-                Ok(blob) => {
-                    let lower = rel.to_ascii_lowercase();
-                    let is_md = lower.ends_with(".md") || lower.ends_with(".markdown");
-                    let accept_hdr = headers.get("accept").and_then(|v| v.to_str().ok()).unwrap_or("");
-                    let wants_markdown = accept_hdr.contains("text/markdown");
-                    if is_md {
-                        let content = blob.content();
-                        if wants_markdown {
-                            let resp = (StatusCode::OK, [("Content-Type", "text/markdown".to_string()), (HEADER_BRANCH, branch.to_string())], content.to_vec()).into_response();
-                            return GitResolveResult::Respond(resp);
-                        } else {
-                            let html_frag = String::from_utf8(md_to_html_bytes(content)).unwrap_or_default();
-                            let base_dir = std::path::Path::new(rel).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "".to_string());
-                            let title = std::path::Path::new(rel).file_name().and_then(|s| s.to_str()).unwrap_or("Document");
-                            let wrapped = wrap_html_with_assets(title, &html_frag, branch, repo_name, repo_path, &base_dir);
-                            let resp = (StatusCode::OK, [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], wrapped).into_response();
-                            return GitResolveResult::Respond(resp);
-                        }
+        Some(ObjectType::Blob) => match repo.find_blob(entry.id()) {
+            Ok(blob) => {
+                let lower = rel.to_ascii_lowercase();
+                let is_md = lower.ends_with(".md") || lower.ends_with(".markdown");
+                let accept_hdr = headers
+                    .get("accept")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                let wants_markdown = accept_hdr.contains("text/markdown");
+                if is_md {
+                    let content = blob.content();
+                    if wants_markdown {
+                        let resp = (
+                            StatusCode::OK,
+                            [
+                                ("Content-Type", "text/markdown".to_string()),
+                                (HEADER_BRANCH, branch.to_string()),
+                            ],
+                            content.to_vec(),
+                        )
+                            .into_response();
+                        return GitResolveResult::Respond(resp);
+                    } else {
+                        let html_frag =
+                            String::from_utf8(md_to_html_bytes(content)).unwrap_or_default();
+                        let base_dir = std::path::Path::new(rel)
+                            .parent()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "".to_string());
+                        let title = std::path::Path::new(rel)
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("Document");
+                        let wrapped = simple_html_page(title, &html_frag, branch, repo_name);
+                        let resp = (
+                            StatusCode::OK,
+                            [
+                                ("Content-Type", "text/html; charset=utf-8".to_string()),
+                                (HEADER_BRANCH, branch.to_string()),
+                                (HEADER_REPO, repo_name.to_string()),
+                            ],
+                            wrapped,
+                        )
+                            .into_response();
+                        return GitResolveResult::Respond(resp);
                     }
-                    let ct = mime_guess::from_path(rel).first_or_octet_stream().essence_str().to_string();
-                    let resp = (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], blob.content().to_vec()).into_response();
-                    GitResolveResult::Respond(resp)
                 }
-                Err(e) => {
-                    error!(?e, "blob read error");
-                    GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response())
-                }
+                let ct = mime_guess::from_path(rel)
+                    .first_or_octet_stream()
+                    .essence_str()
+                    .to_string();
+                let resp = (
+                    StatusCode::OK,
+                    [
+                        ("Content-Type", ct),
+                        (HEADER_BRANCH, branch.to_string()),
+                        (HEADER_REPO, repo_name.to_string()),
+                    ],
+                    blob.content().to_vec(),
+                )
+                    .into_response();
+                GitResolveResult::Respond(resp)
             }
-        }
+            Err(e) => {
+                error!(?e, "blob read error");
+                GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response())
+            }
+        },
         Some(ObjectType::Tree) => {
             let sub_tree = match repo.find_tree(entry.id()) {
                 Ok(t) => t,
                 Err(e) => {
                     error!(?e, "subtree error");
-                    return GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                    return GitResolveResult::Respond(
+                        StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                    );
                 }
             };
-            let accept_hdr = headers.get("accept").and_then(|v| v.to_str().ok()).unwrap_or("");
-            let (ct, body) = directory_response(repo_path, &tree, &sub_tree, rel, accept_hdr, branch, repo_name);
-            let resp = (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], body).into_response();
+            let accept_hdr = headers
+                .get("accept")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            let (ct, body) = directory_response(
+                repo_path, &tree, &sub_tree, rel, accept_hdr, branch, repo_name,
+            );
+            let resp = (
+                StatusCode::OK,
+                [
+                    ("Content-Type", ct),
+                    (HEADER_BRANCH, branch.to_string()),
+                    (HEADER_REPO, repo_name.to_string()),
+                ],
+                body,
+            )
+                .into_response();
             GitResolveResult::Respond(resp)
         }
         _ => GitResolveResult::Respond(render_404_markdown(repo_path, branch, repo_name, rel)),
@@ -1089,7 +1597,13 @@ fn git_resolve_and_respond(repo_path: &PathBuf, headers: &HeaderMap, branch: &st
 }
 
 // Attempt IPFS fallback (Cache -> On-demand fetch -> Serve). Returns 200/404/503 as per plan.
-async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, rel_scoped: &str, original_decoded: &str) -> Response {
+async fn ipfs_fallback_or_404(
+    state: &AppState,
+    branch: &str,
+    repo_name: &str,
+    rel_scoped: &str,
+    original_decoded: &str,
+) -> Response {
     let started = Instant::now();
     let timeout_total = std::env::var("RELAY_IPFS_TIMEOUT_SECS")
         .ok()
@@ -1103,7 +1617,11 @@ async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, r
     } else {
         let trimmed = original_decoded.trim_matches('/');
         let prefix = format!("{}/", repo_name);
-        if let Some(rest) = trimmed.strip_prefix(&prefix) { rest.to_string() } else { trimmed.to_string() }
+        if let Some(rest) = trimmed.strip_prefix(&prefix) {
+            rest.to_string()
+        } else {
+            trimmed.to_string()
+        }
     };
 
     // Read relay.yaml for ipfs.rootHash and (optional) branches
@@ -1121,20 +1639,40 @@ async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, r
     }
 
     // Compute cache file path
-    let cache_root = std::env::var("RELAY_IPFS_CACHE_ROOT").unwrap_or_else(|_| DEFAULT_IPFS_CACHE_ROOT.to_string());
+    let cache_root = std::env::var("RELAY_IPFS_CACHE_ROOT")
+        .unwrap_or_else(|_| DEFAULT_IPFS_CACHE_ROOT.to_string());
     let repo_dir = if repo_name.is_empty() { "_" } else { repo_name };
     // Build a relative path from components to avoid issues with platform-specific separators
     let mut rel_components = std::path::PathBuf::new();
-    for part in subpath.split('/') { if !part.is_empty() { rel_components.push(part); } }
-    let cache_path = std::path::Path::new(&cache_root).join(repo_dir).join(branch).join(rel_components);
+    for part in subpath.split('/') {
+        if !part.is_empty() {
+            rel_components.push(part);
+        }
+    }
+    let cache_path = std::path::Path::new(&cache_root)
+        .join(repo_dir)
+        .join(branch)
+        .join(rel_components);
 
     // Serve from cache if exists
     if cache_path.is_file() {
-        let ct = mime_guess::from_path(&cache_path).first_or_octet_stream().essence_str().to_string();
+        let ct = mime_guess::from_path(&cache_path)
+            .first_or_octet_stream()
+            .essence_str()
+            .to_string();
         match tokio::fs::read(&cache_path).await {
             Ok(bytes) => {
                 info!(elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, cache=%cache_path.to_string_lossy(), "IPFS cache hit");
-                return (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], bytes).into_response();
+                return (
+                    StatusCode::OK,
+                    [
+                        ("Content-Type", ct),
+                        (HEADER_BRANCH, branch.to_string()),
+                        (HEADER_REPO, repo_name.to_string()),
+                    ],
+                    bytes,
+                )
+                    .into_response();
             }
             Err(e) => {
                 warn!(?e, cache=%cache_path.to_string_lossy(), "Failed reading cache file; will try fetch");
@@ -1143,7 +1681,9 @@ async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, r
     }
 
     // Ensure parent directory exists
-    if let Some(parent) = cache_path.parent() { let _ = tokio::fs::create_dir_all(parent).await; }
+    if let Some(parent) = cache_path.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
 
     // Check if path exists under CID (using CLI `ipfs` commands)
     let ipfs_path = format!("/ipfs/{}/{}", root_cid, subpath);
@@ -1161,22 +1701,46 @@ async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, r
     }
 
     // Helper to drop the in-progress mark
-    struct MarkGuard { key: String }
-    impl Drop for MarkGuard { fn drop(&mut self) { let map = fetch_map(); let mut set = map.lock().unwrap(); set.remove(&self.key); } }
+    struct MarkGuard {
+        key: String,
+    }
+    impl Drop for MarkGuard {
+        fn drop(&mut self) {
+            let map = fetch_map();
+            let mut set = map.lock().unwrap();
+            set.remove(&self.key);
+        }
+    }
 
     // If someone else is fetching, wait until deadline for the file to appear
     if !should_fetch {
         debug!(repo=%repo_name, branch=%branch, path=%subpath, "Another fetch in progress; waiting for cache file");
         loop {
-            if cache_path.is_file() { break; }
-            if Instant::now() >= deadline { break; }
+            if cache_path.is_file() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         if cache_path.is_file() {
             if let Ok(bytes) = tokio::fs::read(&cache_path).await {
-                let ct = mime_guess::from_path(&cache_path).first_or_octet_stream().essence_str().to_string();
+                let ct = mime_guess::from_path(&cache_path)
+                    .first_or_octet_stream()
+                    .essence_str()
+                    .to_string();
                 info!(elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, cache=%cache_path.to_string_lossy(), "IPFS fetch de-duped — served from cache");
-                return (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], bytes).into_response();
+                return (
+                    StatusCode::OK,
+                    [
+                        ("Content-Type", ct),
+                        (HEADER_BRANCH, branch.to_string()),
+                        (HEADER_REPO, repo_name.to_string()),
+                    ],
+                    bytes,
+                )
+                    .into_response();
             }
         }
         // Fall through to 503 timeout below
@@ -1189,9 +1753,14 @@ async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, r
     // Attempt fetch via CLI first: ipfs get /ipfs/<cid>/<subpath> -o <cache_path>
     let mut cmd = TokioCommand::new("ipfs");
     // Use IPFS_PATH to target the local daemon; avoid --api for compatibility
-    cmd.arg("get").arg(&ipfs_path)
-        .arg("-o").arg(&cache_path)
-        .env("IPFS_PATH", std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()))
+    cmd.arg("get")
+        .arg(&ipfs_path)
+        .arg("-o")
+        .arg(&cache_path)
+        .env(
+            "IPFS_PATH",
+            std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()),
+        )
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
@@ -1201,9 +1770,21 @@ async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, r
             // Serve file
             match tokio::fs::read(&cache_path).await {
                 Ok(bytes) => {
-                    let ct = mime_guess::from_path(&cache_path).first_or_octet_stream().essence_str().to_string();
+                    let ct = mime_guess::from_path(&cache_path)
+                        .first_or_octet_stream()
+                        .essence_str()
+                        .to_string();
                     info!(elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, cache=%cache_path.to_string_lossy(), "IPFS fetch ok");
-                    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo_name.to_string())], bytes).into_response()
+                    (
+                        StatusCode::OK,
+                        [
+                            ("Content-Type", ct),
+                            (HEADER_BRANCH, branch.to_string()),
+                            (HEADER_REPO, repo_name.to_string()),
+                        ],
+                        bytes,
+                    )
+                        .into_response()
                 }
                 Err(e) => {
                     error!(?e, cache=%cache_path.to_string_lossy(), "Fetched but failed to read cache file");
@@ -1215,20 +1796,31 @@ async fn ipfs_fallback_or_404(state: &AppState, branch: &str, repo_name: &str, r
             warn!(?status, elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, "ipfs get failed");
             // Decide 404 vs 503 by attempting a quick resolve within the remaining time
             let mut res = TokioCommand::new("ipfs");
-            res.arg("resolve").arg("-r").arg(&ipfs_path)
-                .env("IPFS_PATH", std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()))
+            res.arg("resolve")
+                .arg("-r")
+                .arg(&ipfs_path)
+                .env(
+                    "IPFS_PATH",
+                    std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()),
+                )
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
             let rem = deadline.saturating_duration_since(Instant::now());
             match timeout(rem, res.status()).await {
-                Ok(Ok(s)) if s.success() => (StatusCode::SERVICE_UNAVAILABLE, "IPFS fetch failed").into_response(),
+                Ok(Ok(s)) if s.success() => {
+                    (StatusCode::SERVICE_UNAVAILABLE, "IPFS fetch failed").into_response()
+                }
                 Ok(_) => render_404_markdown(&state.repo_path, branch, repo_name, rel_scoped),
                 Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "IPFS fetch timeout").into_response(),
             }
         }
         Ok(Err(e)) => {
             error!(?e, elapsed_ms = %started.elapsed().as_millis(), cid=%root_cid, repo=%repo_name, branch=%branch, path=%subpath, "ipfs get error");
-            StatusCode::SERVICE_UNAVAILABLE.into_response()
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("IPFS error: {}", e),
+            )
+                .into_response()
         }
         Err(_) => {
             // Timeout
@@ -1244,15 +1836,29 @@ fn read_ipfs_rules(repo_path: &PathBuf, branch: &str) -> (Option<String>, bool) 
         Ok(b) => b,
         Err(_) => return (None, true), // no relay.yaml — allow branch but no CID
     };
-    let yaml = match String::from_utf8(bytes) { Ok(s) => s, Err(_) => return (None, true) };
-    let v: serde_json::Value = match serde_yaml::from_str(&yaml) { Ok(v) => v, Err(_) => return (None, true) };
-    let ipfs = match v.get("ipfs") { Some(x) => x, None => return (None, true) };
-    let cid = ipfs.get("rootHash").and_then(|x| x.as_str()).map(|s| s.to_string());
+    let yaml = match String::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return (None, true),
+    };
+    let v: serde_json::Value = match serde_yaml::from_str(&yaml) {
+        Ok(v) => v,
+        Err(_) => return (None, true),
+    };
+    let ipfs = match v.get("ipfs") {
+        Some(x) => x,
+        None => return (None, true),
+    };
+    let cid = ipfs
+        .get("rootHash")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
     let branches_ok = match ipfs.get("branches") {
         Some(b) => {
             if let Some(arr) = b.as_array() {
                 arr.iter().filter_map(|x| x.as_str()).any(|s| s == branch)
-            } else { true }
+            } else {
+                true
+            }
         }
         None => true,
     };
@@ -1266,14 +1872,24 @@ async fn get_root(
 ) -> impl IntoResponse {
     // Explicitly implement root directory listing to avoid extractor mismatch
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
-    let repo_name = match repo_from(&state.repo_path, &headers, &query.as_ref().map(|q| q.0.clone()), &branch) {
+    let repo_name = match repo_from(
+        &state.repo_path,
+        &headers,
+        &query.as_ref().map(|q| q.0.clone()),
+        &branch,
+    ) {
         Some(r) => r,
         None => {
             return (
                 StatusCode::NOT_FOUND,
-                [("Content-Type", "text/plain".to_string()), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, "".to_string())],
+                [
+                    ("Content-Type", "text/plain".to_string()),
+                    (HEADER_BRANCH, branch.clone()),
+                    (HEADER_REPO, "".to_string()),
+                ],
                 "Repository not found".to_string(),
-            ).into_response();
+            )
+                .into_response();
         }
     };
     info!(%branch, "get_root resolved branch");
@@ -1309,32 +1925,66 @@ async fn get_root(
         .get("accept")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let (ct, body) = directory_response(&state.repo_path, &tree, &tree, if repo_name.is_empty() { "" } else { &repo_name }, accept_hdr, &branch, &repo_name);
-    (StatusCode::OK, [("Content-Type", ct), (HEADER_BRANCH, branch.clone()), (HEADER_REPO, repo_name.clone())], body).into_response()
+    let (ct, body) = directory_response(
+        &state.repo_path,
+        &tree,
+        &tree,
+        if repo_name.is_empty() { "" } else { &repo_name },
+        accept_hdr,
+        &branch,
+        &repo_name,
+    );
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", ct),
+            (HEADER_BRANCH, branch.clone()),
+            (HEADER_REPO, repo_name.clone()),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 async fn put_file(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(path): Path<String>,
+    AxPath(path): AxPath<String>,
     query: Option<Query<HashMap<String, String>>>,
     body: Bytes,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
     if write_disallowed(&decoded) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Disallowed file type"}))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Disallowed file type"})),
+        )
+            .into_response();
     }
     // Allow branch from query string too
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
-    let repo_name = match repo_from(&state.repo_path, &headers, &query.as_ref().map(|q| q.0.clone()), &branch) {
+    let repo_name = match repo_from(
+        &state.repo_path,
+        &headers,
+        &query.as_ref().map(|q| q.0.clone()),
+        &branch,
+    ) {
         Some(r) => r,
         None => {
             // Optionally allow creating a new repo directory on PUT
-            if std::env::var("RELAY_ALLOW_CREATE_REPO").ok().map(|v| v == "true" || v == "1").unwrap_or(true) {
+            if std::env::var("RELAY_ALLOW_CREATE_REPO")
+                .ok()
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(true)
+            {
                 // proceed with scoped path even if repo dir doesn't yet exist (tree builder will create)
                 String::from("new")
             } else {
-                return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Repository not found"}))).into_response();
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"error": "Repository not found"})),
+                )
+                    .into_response();
             }
         }
     };
@@ -1349,7 +1999,10 @@ async fn put_file(
         }
     };
     match write_file_to_repo(&state.repo_path, &branch, &scoped_path, &body) {
-        Ok((commit, branch)) => Json(serde_json::json!({"commit": commit, "branch": branch, "path": decoded})).into_response(),
+        Ok((commit, branch)) => {
+            Json(serde_json::json!({"commit": commit, "branch": branch, "path": decoded}))
+                .into_response()
+        }
         Err(e) => {
             error!(?e, "write error");
             let msg = e.to_string();
@@ -1365,16 +2018,23 @@ async fn put_file(
 async fn delete_file(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(path): Path<String>,
+    AxPath(path): AxPath<String>,
     query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
     if write_disallowed(&decoded) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Disallowed file type"}))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Disallowed file type"})),
+        )
+            .into_response();
     }
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
     match delete_file_in_repo(&state.repo_path, &branch, &decoded) {
-        Ok((commit, branch)) => Json(serde_json::json!({"commit": commit, "branch": branch, "path": decoded})).into_response(),
+        Ok((commit, branch)) => {
+            Json(serde_json::json!({"commit": commit, "branch": branch, "path": decoded}))
+                .into_response()
+        }
         Err(ReadError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(e) => {
             error!(?e, "delete error");
@@ -1395,26 +2055,46 @@ fn list_branches(repo: &Repository) -> Vec<String> {
     let mut out = vec![];
     if let Ok(mut iter) = repo.branches(None) {
         while let Some(Ok((b, _))) = iter.next() {
-            if let Ok(name) = b.name() { if let Some(s) = name { out.push(s.to_string()); } }
+            if let Ok(name) = b.name() {
+                if let Some(s) = name {
+                    out.push(s.to_string());
+                }
+            }
         }
     }
     out
 }
 
-fn read_file_from_repo(repo_path: &PathBuf, branch: &str, path: &str) -> Result<Vec<u8>, ReadError> {
+fn read_file_from_repo(
+    repo_path: &PathBuf,
+    branch: &str,
+    path: &str,
+) -> Result<Vec<u8>, ReadError> {
     let repo = Repository::open_bare(repo_path).map_err(|e| ReadError::Other(e.into()))?;
     let refname = format!("refs/heads/{}", branch);
-    let reference = repo.find_reference(&refname).map_err(|_| ReadError::NotFound)?;
-    let commit = reference.peel_to_commit().map_err(|_| ReadError::NotFound)?;
+    let reference = repo
+        .find_reference(&refname)
+        .map_err(|_| ReadError::NotFound)?;
+    let commit = reference
+        .peel_to_commit()
+        .map_err(|_| ReadError::NotFound)?;
     let tree = commit.tree().map_err(|e| ReadError::Other(e.into()))?;
-    let entry = tree.get_path(std::path::Path::new(path)).map_err(|_| ReadError::NotFound)?;
-    let blob = repo.find_blob(entry.id()).map_err(|e| ReadError::Other(e.into()))?;
+    let entry = tree
+        .get_path(std::path::Path::new(path))
+        .map_err(|_| ReadError::NotFound)?;
+    let blob = repo
+        .find_blob(entry.id())
+        .map_err(|e| ReadError::Other(e.into()))?;
     Ok(blob.content().to_vec())
 }
 
 fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
     let mut lines: Vec<String> = Vec::new();
-    let title_path = if base_path.is_empty() { "/".to_string() } else { format!("/{}", base_path.trim_matches('/')) };
+    let title_path = if base_path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", base_path.trim_matches('/'))
+    };
     lines.push(format!("# Directory listing: {}", title_path));
     // Breadcrumbs
     let mut crumb = String::new();
@@ -1423,7 +2103,12 @@ fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
     if !trimmed.is_empty() {
         let mut acc = String::new();
         for (i, seg) in trimmed.split('/').enumerate() {
-            if i == 0 { acc.push_str(seg); } else { acc.push('/'); acc.push_str(seg); }
+            if i == 0 {
+                acc.push_str(seg);
+            } else {
+                acc.push('/');
+                acc.push_str(seg);
+            }
             crumb.push_str(" › ");
             crumb.push_str(&format!("[{}]({}/)", seg, acc));
         }
@@ -1434,14 +2119,25 @@ fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
     let mut dirs: Vec<String> = Vec::new();
     let mut files: Vec<String> = Vec::new();
     for entry in tree.iter() {
-        let name = match entry.name() { Some(n) => n.to_string(), None => continue };
+        let name = match entry.name() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
         match entry.kind() {
             Some(git2::ObjectType::Tree) => {
-                let href = if base_path.is_empty() { format!("{}", name) } else { format!("{}/{}", base_path.trim_matches('/'), name) };
+                let href = if base_path.is_empty() {
+                    format!("{}", name)
+                } else {
+                    format!("{}/{}", base_path.trim_matches('/'), name)
+                };
                 dirs.push(format!("- [{0}/]({0}/)", href));
             }
             Some(git2::ObjectType::Blob) => {
-                let href = if base_path.is_empty() { format!("{}", name) } else { format!("{}/{}", base_path.trim_matches('/'), name) };
+                let href = if base_path.is_empty() {
+                    format!("{}", name)
+                } else {
+                    format!("{}/{}", base_path.trim_matches('/'), name)
+                };
                 files.push(format!("- [{0}]({0})", href));
             }
             _ => {}
@@ -1460,67 +2156,35 @@ fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
 // Convert markdown bytes to HTML bytes (fragment — no head/body wrapping)
 fn md_to_html_bytes(bytes: &[u8]) -> Vec<u8> {
     let s = String::from_utf8_lossy(bytes);
-    let parser = Parser::new(&s);
+    let parser = MdParser::new(&s);
     let mut out = String::new();
     html::push_html(&mut out, parser);
     out.into_bytes()
 }
 
-
-// Wrap an HTML fragment using a template resolved from the repo (or bundled fallback)
-// Template lookup order:
-// 1) Env RELAY_REPO_PATH_TEMPLATE_HTML (filename, default "template.html") in the same directory as the requested asset
-// 2) Walk parent directories up to repo root looking for the filename
-// 3) Fallback to bundled relay-lib/assets/template.html
-// Variables replaced by name: {title}, {head}, {body}
-fn wrap_html_with_assets(title: &str, body: &str, branch: &str, repo: &str, repo_path: &PathBuf, base_dir: &str) -> Vec<u8> {
-    fn join_rel(base: &str, name: &str) -> String {
-        if base.is_empty() { name.to_string() } else { format!("{}/{}", base.trim_matches('/'), name) }
-    }
-    // Determine template file name
-    let tmpl_name = std::env::var("RELAY_REPO_PATH_TEMPLATE_HTML").unwrap_or_else(|_| "template.html".to_string());
-    // Try to read template from same dir then ascend
-    let mut current = base_dir.trim_matches('/').to_string();
-    let template_html: String = loop {
-        let candidate_rel = join_rel(&current, &tmpl_name);
-        match read_file_from_repo(repo_path, branch, &candidate_rel) {
-            Ok(bytes) => {
-                break String::from_utf8(bytes).unwrap_or_else(|_| relay_lib::assets::TEMPLATE_HTML.to_string());
-            }
-            Err(_) => {
-                // Ascend
-                if current.is_empty() {
-                    // Try at repo root explicitly with just the filename
-                    if let Ok(bytes) = read_file_from_repo(repo_path, branch, &tmpl_name) {
-                        break String::from_utf8(bytes).unwrap_or_else(|_| relay_lib::assets::TEMPLATE_HTML.to_string());
-                    }
-                    break relay_lib::assets::TEMPLATE_HTML.to_string();
-                } else {
-                    if let Some(parent) = std::path::Path::new(&current).parent() {
-                        current = parent.to_string_lossy().to_string();
-                    } else {
-                        current.clear();
-                    }
-                }
-            }
-        }
-    };
-    // Compose head: meta + branch marker; callers can extend later if needed
-    let mut head = String::new();
-    head.push_str("<meta charset=\"utf-8\">\n");
-    head.push_str(&format!("<meta name=\"relay-branch\" content=\"{}\">\n", branch));
-    head.push_str(&format!("<meta name=\"relay-repo\" content=\"{}\">\n", repo));
-    // Do named replacement
-    let html = template_html
-        .replace("{title}", title)
-        .replace("{head}", &head)
-        .replace("{body}", body);
+// Simple HTML wrapper for directory listings; no template lookup from repo
+fn simple_html_page(title: &str, body: &str, branch: &str, repo: &str) -> Vec<u8> {
+    let html = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta name=\"relay-branch\" content=\"{branch}\">\n<meta name=\"relay-repo\" content=\"{repo}\">\n<title>{title}</title></head><body>{body}</body></html>",
+        title = title,
+        body = body,
+        branch = branch,
+        repo = repo
+    );
     html.into_bytes()
 }
 
 // Helper to return directory listing as HTML or markdown depending on Accept header
 // root_tree is the tree at repo root (for CSS presence checks), listing_tree is the directory to list
-fn directory_response(repo_path: &PathBuf, _root_tree: &git2::Tree, listing_tree: &git2::Tree, base_path: &str, accept_hdr: &str, branch: &str, repo: &str) -> (String, Vec<u8>) {
+fn directory_response(
+    repo_path: &PathBuf,
+    _root_tree: &git2::Tree,
+    listing_tree: &git2::Tree,
+    base_path: &str,
+    accept_hdr: &str,
+    branch: &str,
+    repo: &str,
+) -> (String, Vec<u8>) {
     // Build merged entries from Git and (optional) IPFS dir cache
     let mut entries = git_dir_entries(repo_path, listing_tree, base_path, branch);
     if let (Some(root_cid), true) = read_ipfs_rules(repo_path, branch) {
@@ -1547,7 +2211,10 @@ fn directory_response(repo_path: &PathBuf, _root_tree: &git2::Tree, listing_tree
         ("text/markdown".to_string(), md)
     } else {
         let body = String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
-        ("text/html; charset=utf-8".to_string(), wrap_html_with_assets("Directory", &body, branch, repo, repo_path, base_path))
+        (
+            "text/html; charset=utf-8".to_string(),
+            simple_html_page("Directory", &body, branch, repo),
+        )
     }
 }
 
@@ -1562,7 +2229,10 @@ struct DirEntry {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-enum EntryKind { File, Dir }
+enum EntryKind {
+    File,
+    Dir,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct DirCacheFile {
@@ -1574,23 +2244,40 @@ struct DirCacheFile {
     entries: Vec<DirEntry>,
 }
 
-fn git_dir_entries(repo_path: &PathBuf, listing_tree: &git2::Tree, base_path: &str, branch: &str) -> Vec<DirEntry> {
+fn git_dir_entries(
+    repo_path: &PathBuf,
+    listing_tree: &git2::Tree,
+    base_path: &str,
+    branch: &str,
+) -> Vec<DirEntry> {
     // Sizes for blobs; dates left None for now (can be enhanced using revwalk per path)
     let mut out: Vec<DirEntry> = Vec::new();
-    let head_time = head_commit_time(repo_path, branch)
-        .map(|secs| secs.to_string());
+    let head_time = head_commit_time(repo_path, branch).map(|secs| secs.to_string());
     for entry in listing_tree.iter() {
-        let name = match entry.name() { Some(n) => n.to_string(), None => continue };
+        let name = match entry.name() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
         match entry.kind() {
             Some(git2::ObjectType::Tree) => {
-                out.push(DirEntry { name, kind: EntryKind::Dir, size: None, date: head_time.clone() });
+                out.push(DirEntry {
+                    name,
+                    kind: EntryKind::Dir,
+                    size: None,
+                    date: head_time.clone(),
+                });
             }
             Some(git2::ObjectType::Blob) => {
                 let size = Repository::open_bare(repo_path)
                     .and_then(|r| r.find_blob(entry.id()).map(|b| b.size()))
                     .ok()
                     .map(|s| s as u64);
-                out.push(DirEntry { name, kind: EntryKind::File, size, date: head_time.clone() });
+                out.push(DirEntry {
+                    name,
+                    kind: EntryKind::File,
+                    size,
+                    date: head_time.clone(),
+                });
             }
             _ => {}
         }
@@ -1607,24 +2294,35 @@ fn head_commit_time(repo_path: &PathBuf, branch: &str) -> Option<i64> {
 }
 
 fn sort_entries(entries: &mut Vec<DirEntry>) {
-    entries.sort_by(|a, b| {
-        match (&a.kind, &b.kind) {
-            (EntryKind::Dir, EntryKind::File) => std::cmp::Ordering::Less,
-            (EntryKind::File, EntryKind::Dir) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
+    entries.sort_by(|a, b| match (&a.kind, &b.kind) {
+        (EntryKind::Dir, EntryKind::File) => std::cmp::Ordering::Less,
+        (EntryKind::File, EntryKind::Dir) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
 }
 
-fn ipfs_dir_entries_cached(repo: &str, branch: &str, base_path: &str, cid: &str) -> anyhow::Result<Vec<DirEntry>> {
+fn ipfs_dir_entries_cached(
+    repo: &str,
+    branch: &str,
+    base_path: &str,
+    cid: &str,
+) -> anyhow::Result<Vec<DirEntry>> {
     // Cache under: <cache_root>/<repo|_>/<branch>/.ipfs-dircache/<base_path or _root>.json
-    let cache_root = std::env::var("RELAY_IPFS_CACHE_ROOT").unwrap_or_else(|_| DEFAULT_IPFS_CACHE_ROOT.to_string());
+    let cache_root = std::env::var("RELAY_IPFS_CACHE_ROOT")
+        .unwrap_or_else(|_| DEFAULT_IPFS_CACHE_ROOT.to_string());
     let repo_dir = if repo.is_empty() { "_" } else { repo };
     let dir_key = {
         let bp = base_path.trim_matches('/');
-        if bp.is_empty() { "_root".to_string() } else { bp.replace('/', "_") }
+        if bp.is_empty() {
+            "_root".to_string()
+        } else {
+            bp.replace('/', "_")
+        }
     };
-    let dircache_dir = std::path::Path::new(&cache_root).join(repo_dir).join(branch).join(".ipfs-dircache");
+    let dircache_dir = std::path::Path::new(&cache_root)
+        .join(repo_dir)
+        .join(branch)
+        .join(".ipfs-dircache");
     // Invalidate cache if CID changed: store marker file and remove cache files when mismatched
     let cid_marker = dircache_dir.join("_CID");
     if let Ok(prev_cid) = std::fs::read_to_string(&cid_marker) {
@@ -1633,7 +2331,9 @@ fn ipfs_dir_entries_cached(repo: &str, branch: &str, base_path: &str, cid: &str)
             if let Ok(entries) = std::fs::read_dir(&dircache_dir) {
                 for e in entries.flatten() {
                     // keep the marker file, remove others
-                    if e.path() != cid_marker { let _ = std::fs::remove_file(e.path()); }
+                    if e.path() != cid_marker {
+                        let _ = std::fs::remove_file(e.path());
+                    }
                 }
             }
             let _ = std::fs::write(&cid_marker, cid.as_bytes());
@@ -1660,8 +2360,14 @@ fn ipfs_dir_entries_cached(repo: &str, branch: &str, base_path: &str, cid: &str)
     // Try object links (JSON)
     let mut entries: Vec<DirEntry> = Vec::new();
     let dag_out = std::process::Command::new("ipfs")
-        .arg("object").arg("links").arg(&ipfs_path).arg("--enc=json")
-        .env("IPFS_PATH", std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()))
+        .arg("object")
+        .arg("links")
+        .arg(&ipfs_path)
+        .arg("--enc=json")
+        .env(
+            "IPFS_PATH",
+            std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()),
+        )
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output();
@@ -1673,23 +2379,50 @@ fn ipfs_dir_entries_cached(repo: &str, branch: &str, base_path: &str, cid: &str)
                 let links = val.get("Links").or_else(|| val.get("links"));
                 if let Some(arr) = links.and_then(|l| l.as_array()) {
                     for link in arr {
-                        let name = link.get("Name").or_else(|| link.get("name")).and_then(|s| s.as_str()).unwrap_or("");
-                        if name.is_empty() { continue; }
-                        let size = link.get("Size").or_else(|| link.get("size")).and_then(|n| n.as_u64());
+                        let name = link
+                            .get("Name")
+                            .or_else(|| link.get("name"))
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("");
+                        if name.is_empty() {
+                            continue;
+                        }
+                        let size = link
+                            .get("Size")
+                            .or_else(|| link.get("size"))
+                            .and_then(|n| n.as_u64());
                         // Without type info, treat size==0 as dir, else file
                         let is_dir = size == Some(0);
-                        entries.push(DirEntry { name: name.to_string(), kind: if is_dir { EntryKind::Dir } else { EntryKind::File }, size, date: None });
+                        entries.push(DirEntry {
+                            name: name.to_string(),
+                            kind: if is_dir {
+                                EntryKind::Dir
+                            } else {
+                                EntryKind::File
+                            },
+                            size,
+                            date: None,
+                        });
                     }
                 }
                 use_ls_fallback = entries.is_empty();
-            } else { use_ls_fallback = true; }
+            } else {
+                use_ls_fallback = true;
+            }
         }
-        _ => { use_ls_fallback = true; }
+        _ => {
+            use_ls_fallback = true;
+        }
     }
     if use_ls_fallback {
         let out = std::process::Command::new("ipfs")
-            .arg("ls").arg("--size").arg(&ipfs_path)
-            .env("IPFS_PATH", std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()))
+            .arg("ls")
+            .arg("--size")
+            .arg(&ipfs_path)
+            .env(
+                "IPFS_PATH",
+                std::env::var("IPFS_PATH").unwrap_or_else(|_| DEFAULT_IPFS_PATH.to_string()),
+            )
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .output()?;
@@ -1705,10 +2438,24 @@ fn ipfs_dir_entries_cached(repo: &str, branch: &str, base_path: &str, cid: &str)
                 let name = parts[2].to_string();
                 let size = parts.get(1).and_then(|s| s.parse::<u64>().ok());
                 let is_dir = name.ends_with('/') || size == Some(0);
-                entries.push(DirEntry { name: name.trim_end_matches('/').to_string(), kind: if is_dir { EntryKind::Dir } else { EntryKind::File }, size, date: None });
+                entries.push(DirEntry {
+                    name: name.trim_end_matches('/').to_string(),
+                    kind: if is_dir {
+                        EntryKind::Dir
+                    } else {
+                        EntryKind::File
+                    },
+                    size,
+                    date: None,
+                });
             } else if parts.len() == 2 {
                 let name = parts[1].to_string();
-                entries.push(DirEntry { name: name.trim_end_matches('/').to_string(), kind: EntryKind::File, size: None, date: None });
+                entries.push(DirEntry {
+                    name: name.trim_end_matches('/').to_string(),
+                    kind: EntryKind::File,
+                    size: None,
+                    date: None,
+                });
             }
         }
     }
@@ -1719,16 +2466,28 @@ fn ipfs_dir_entries_cached(repo: &str, branch: &str, base_path: &str, cid: &str)
         repo: repo.to_string(),
         branch: branch.to_string(),
         dir: base_path.to_string(),
-        generated_at: format!("{}", match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) { Ok(d) => d.as_secs(), Err(_) => 0 }),
+        generated_at: format!(
+            "{}",
+            match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                Ok(d) => d.as_secs(),
+                Err(_) => 0,
+            }
+        ),
         entries: entries.clone(),
     };
-    if let Ok(bytes) = serde_json::to_vec_pretty(&dc) { let _ = std::fs::write(&cache_file, bytes); }
+    if let Ok(bytes) = serde_json::to_vec_pretty(&dc) {
+        let _ = std::fs::write(&cache_file, bytes);
+    }
     Ok(entries)
 }
 
 fn render_directory_markdown_entries(entries: &Vec<DirEntry>, base_path: &str) -> Vec<u8> {
     let mut lines: Vec<String> = Vec::new();
-    let title_path = if base_path.is_empty() { "/".to_string() } else { format!("/{}", base_path.trim_matches('/')) };
+    let title_path = if base_path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", base_path.trim_matches('/'))
+    };
     lines.push(format!("# Directory listing: {}", title_path));
     // Breadcrumbs
     let mut crumb = String::new();
@@ -1737,7 +2496,12 @@ fn render_directory_markdown_entries(entries: &Vec<DirEntry>, base_path: &str) -
     if !trimmed.is_empty() {
         let mut acc = String::new();
         for (i, seg) in trimmed.split('/').enumerate() {
-            if i == 0 { acc.push_str(seg); } else { acc.push('/'); acc.push_str(seg); }
+            if i == 0 {
+                acc.push_str(seg);
+            } else {
+                acc.push('/');
+                acc.push_str(seg);
+            }
             crumb.push_str(" › ");
             crumb.push_str(&format!("[{}]({}/)", seg, acc));
         }
@@ -1748,11 +2512,26 @@ fn render_directory_markdown_entries(entries: &Vec<DirEntry>, base_path: &str) -
     lines.push(String::from("| Name | Size | Date |"));
     lines.push(String::from("|------|------:|------|"));
     for e in entries {
-        let href = if base_path.is_empty() { e.name.clone() } else { format!("{}/{}", base_path.trim_matches('/'), e.name) };
-        let disp_name = if e.kind == EntryKind::Dir { format!("{}/", e.name) } else { e.name.clone() };
-        let size_disp = e.size.map(|n| format!("{}", n)).unwrap_or_else(|| "".to_string());
+        let href = if base_path.is_empty() {
+            e.name.clone()
+        } else {
+            format!("{}/{}", base_path.trim_matches('/'), e.name)
+        };
+        let disp_name = if e.kind == EntryKind::Dir {
+            format!("{}/", e.name)
+        } else {
+            e.name.clone()
+        };
+        let size_disp = e
+            .size
+            .map(|n| format!("{}", n))
+            .unwrap_or_else(|| "".to_string());
         let date_disp = e.date.clone().unwrap_or_default();
-        let link = if e.kind == EntryKind::Dir { format!("[{}]({}/)", disp_name, href) } else { format!("[{}]({})", disp_name, href) };
+        let link = if e.kind == EntryKind::Dir {
+            format!("[{}]({}/)", disp_name, href)
+        } else {
+            format!("[{}]({})", disp_name, href)
+        };
         lines.push(format!("| {} | {} | {} |", link, size_disp, date_disp));
     }
     if entries.is_empty() {
@@ -1761,7 +2540,12 @@ fn render_directory_markdown_entries(entries: &Vec<DirEntry>, base_path: &str) -
     lines.join("\n").into_bytes()
 }
 
-fn render_404_markdown(repo_path: &PathBuf, branch: &str, repo: &str, missing_path: &str) -> Response {
+fn render_404_markdown(
+    repo_path: &PathBuf,
+    branch: &str,
+    repo: &str,
+    missing_path: &str,
+) -> Response {
     // Determine parent directory of the missing path for theme.css lookup
     let parent_dir = {
         let trimmed = missing_path.trim_matches('/');
@@ -1777,7 +2561,10 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, repo: &str, missing_pa
     let used_custom = custom.is_some();
     let mut body_html: String = match custom {
         Some(ref bytes) => String::from_utf8(md_to_html_bytes(&bytes)).unwrap_or_default(),
-        None => String::from_utf8(md_to_html_bytes(relay_lib::assets::DEFAULT_404_MD.as_bytes())).unwrap_or_default(),
+        None => String::from_utf8(md_to_html_bytes(
+            relay_lib::assets::DEFAULT_404_MD.as_bytes(),
+        ))
+        .unwrap_or_default(),
     };
 
     if let Ok(repo) = Repository::open_bare(repo_path) {
@@ -1787,15 +2574,20 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, repo: &str, missing_pa
                 if let Ok(root) = commit.tree() {
                     // If we used the default 404 content, append a parent directory listing
                     if !used_custom {
-                        let tree_to_list = if parent_dir.is_empty() { Some(root) } else {
+                        let tree_to_list = if parent_dir.is_empty() {
+                            Some(root)
+                        } else {
                             match root.get_path(std::path::Path::new(&parent_dir)) {
-                                Ok(e) if e.kind() == Some(ObjectType::Tree) => repo.find_tree(e.id()).ok(),
+                                Ok(e) if e.kind() == Some(ObjectType::Tree) => {
+                                    repo.find_tree(e.id()).ok()
+                                }
                                 _ => Some(root),
                             }
                         };
                         if let Some(t) = tree_to_list {
                             let md = render_directory_markdown(&t, &parent_dir);
-                            let dir_html = String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
+                            let dir_html =
+                                String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
                             body_html.push_str("\n\n");
                             body_html.push_str(&dir_html);
                         }
@@ -1805,18 +2597,27 @@ fn render_404_markdown(repo_path: &PathBuf, branch: &str, repo: &str, missing_pa
         }
     }
 
-    let wrapped = wrap_html_with_assets("Not Found", &body_html, branch, repo, repo_path, &parent_dir);
+    let wrapped = simple_html_page("Not Found", &body_html, branch, repo);
     (
         StatusCode::NOT_FOUND,
-        [("Content-Type", "text/html; charset=utf-8".to_string()), (HEADER_BRANCH, branch.to_string()), (HEADER_REPO, repo.to_string())],
+        [
+            ("Content-Type", "text/html; charset=utf-8".to_string()),
+            (HEADER_BRANCH, branch.to_string()),
+            (HEADER_REPO, repo.to_string()),
+        ],
         wrapped,
     )
-    .into_response()
+        .into_response()
 }
 
 // Use bundled default 404 markdown from relay-lib assets
 
-fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[u8]) -> anyhow::Result<(String, String)> {
+fn write_file_to_repo(
+    repo_path: &PathBuf,
+    branch: &str,
+    path: &str,
+    content: &[u8],
+) -> anyhow::Result<(String, String)> {
     let repo = Repository::open_bare(repo_path)?;
     let refname = format!("refs/heads/{}", branch);
     let sig = Signature::now("relay", "relay@local")?;
@@ -1849,9 +2650,12 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
                     if let Some(meta_schema) = rules_val.get("metaSchema") {
                         // Compile schema and validate
                         // Leak to satisfy jsonschema static lifetime requirement
-                        let leaked_schema: &'static serde_json::Value = Box::leak(Box::new(meta_schema.clone()));
-                        let compiled = jsonschema::JSONSchema::compile(leaked_schema)
-                            .map_err(|e| anyhow::anyhow!("invalid metaSchema in relay.yaml: {}", e))?;
+                        let leaked_schema: &'static serde_json::Value =
+                            Box::leak(Box::new(meta_schema.clone()));
+                        let compiled =
+                            jsonschema::JSONSchema::compile(leaked_schema).map_err(|e| {
+                                anyhow::anyhow!("invalid metaSchema in relay.yaml: {}", e)
+                            })?;
                         let meta_json: serde_json::Value = serde_json::from_slice(content)
                             .map_err(|e| anyhow::anyhow!("meta.json is not valid JSON: {}", e))?;
                         if !compiled.is_valid(&meta_json) {
@@ -1861,7 +2665,10 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
                                     msgs.push(format!("{} at {}", e, e.instance_path));
                                 }
                             }
-                            return Err(anyhow::anyhow!("meta.json failed schema validation: {}", msgs.join("; ")));
+                            return Err(anyhow::anyhow!(
+                                "meta.json failed schema validation: {}",
+                                msgs.join("; ")
+                            ));
                         }
                     }
                 }
@@ -1871,11 +2678,19 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
 
     // Update tree recursively for the path
     let mut components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if components.is_empty() { anyhow::bail!("empty path"); }
+    if components.is_empty() {
+        anyhow::bail!("empty path");
+    }
     let filename = components.pop().unwrap().to_string();
 
     // Helper to descend and produce updated subtree oid
-    fn upsert_path(repo: &Repository, tree: &git2::Tree, comps: &[&str], filename: &str, blob_oid: Oid) -> anyhow::Result<Oid> {
+    fn upsert_path(
+        repo: &Repository,
+        tree: &git2::Tree,
+        comps: &[&str],
+        filename: &str,
+        blob_oid: Oid,
+    ) -> anyhow::Result<Oid> {
         let mut tb = repo.treebuilder(Some(tree))?;
         if comps.is_empty() {
             // Insert file at this level
@@ -1913,18 +2728,29 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
 
     // Run pre-receive hook via relay-hooks binary
     // Provide stdin: "<old> <new> <ref>\n"
-    let old_oid = parent_commit.as_ref().map(|c| c.id()).unwrap_or_else(|| Oid::zero());
+    let old_oid = parent_commit
+        .as_ref()
+        .map(|c| c.id())
+        .unwrap_or_else(|| Oid::zero());
     let hook_input = format!("{} {} {}\n", old_oid, commit_oid, &refname);
     let hook_bin = std::env::var("RELAY_HOOKS_BIN").unwrap_or_else(|_| "relay-hooks".to_string());
     let mut cmd = std::process::Command::new(hook_bin);
-    cmd.arg("--hook").arg("pre-receive")
+    cmd.arg("--hook")
+        .arg("pre-receive")
         .env("GIT_DIR", repo.path())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| anyhow::anyhow!("failed to spawn relay-hooks: {}", e))?;
-    if let Some(mut stdin) = child.stdin.take() { use std::io::Write; let _ = stdin.write_all(hook_input.as_bytes()); }
-    let output = child.wait_with_output().map_err(|e| anyhow::anyhow!("failed waiting for relay-hooks: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("failed to spawn relay-hooks: {}", e))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(hook_input.as_bytes());
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| anyhow::anyhow!("failed waiting for relay-hooks: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         error!(%stderr, status = ?output.status, "pre-receive hook rejected commit");
@@ -1933,22 +2759,33 @@ fn write_file_to_repo(repo_path: &PathBuf, branch: &str, path: &str, content: &[
 
     // Update ref to new commit
     match repo.find_reference(&refname) {
-        Ok(mut r) => { r.set_target(commit_oid, &msg)?; },
-        Err(_) => { repo.reference(&refname, commit_oid, true, &msg)?; }
+        Ok(mut r) => {
+            r.set_target(commit_oid, &msg)?;
+        }
+        Err(_) => {
+            repo.reference(&refname, commit_oid, true, &msg)?;
+        }
     }
 
     // Optional: run update hook (best-effort)
-    let _ = std::process::Command::new(std::env::var("RELAY_HOOKS_BIN").unwrap_or_else(|_| "relay-hooks".to_string()))
-        .arg("--hook").arg("update")
-        .env("GIT_DIR", repo.path())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    let _ = std::process::Command::new(
+        std::env::var("RELAY_HOOKS_BIN").unwrap_or_else(|_| "relay-hooks".to_string()),
+    )
+    .arg("--hook")
+    .arg("update")
+    .env("GIT_DIR", repo.path())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .status();
 
     Ok((commit_oid.to_string(), branch.to_string()))
 }
 
-fn delete_file_in_repo(repo_path: &PathBuf, branch: &str, path: &str) -> Result<(String, String), ReadError> {
+fn delete_file_in_repo(
+    repo_path: &PathBuf,
+    branch: &str,
+    path: &str,
+) -> Result<(String, String), ReadError> {
     let repo = Repository::open_bare(repo_path).map_err(|e| ReadError::Other(e.into()))?;
     let refname = format!("refs/heads/{}", branch);
     let sig = Signature::now("relay", "relay@local").map_err(|e| ReadError::Other(e.into()))?;
@@ -1962,16 +2799,28 @@ fn delete_file_in_repo(repo_path: &PathBuf, branch: &str, path: &str) -> Result<
     };
 
     // Recursively remove path
-    fn remove_path(repo: &Repository, tree: &git2::Tree, comps: &[&str], filename: &str) -> anyhow::Result<Option<Oid>> {
+    fn remove_path(
+        repo: &Repository,
+        tree: &git2::Tree,
+        comps: &[&str],
+        filename: &str,
+    ) -> anyhow::Result<Option<Oid>> {
         let mut tb = repo.treebuilder(Some(tree))?;
         if comps.is_empty() {
             // remove file
-            if tb.remove(filename).is_err() { return Ok(None); }
+            if tb.remove(filename).is_err() {
+                return Ok(None);
+            }
             return Ok(Some(tb.write()?));
         }
         let head = comps[0];
-        let entry = match tree.get_name(head) { Some(e) => e, None => return Ok(None) };
-        if entry.kind() != Some(ObjectType::Tree) { return Ok(None); }
+        let entry = match tree.get_name(head) {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        if entry.kind() != Some(ObjectType::Tree) {
+            return Ok(None);
+        }
         let subtree = repo.find_tree(entry.id())?;
         if let Some(new_sub_oid) = remove_path(repo, &subtree, &comps[1..], filename)? {
             let mut tb2 = repo.treebuilder(Some(tree))?;
@@ -1982,19 +2831,25 @@ fn delete_file_in_repo(repo_path: &PathBuf, branch: &str, path: &str) -> Result<
     }
 
     let mut comps: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if comps.is_empty() { return Err(ReadError::NotFound); }
+    if comps.is_empty() {
+        return Err(ReadError::NotFound);
+    }
     let filename = comps.pop().unwrap().to_string();
-    let new_oid_opt = remove_path(&repo, &base_tree, &comps, &filename).map_err(|e| ReadError::Other(e))?;
-    let new_oid = match new_oid_opt { Some(oid) => oid, None => return Err(ReadError::NotFound) };
-    let new_tree = repo.find_tree(new_oid).map_err(|e| ReadError::Other(e.into()))?;
+    let new_oid_opt =
+        remove_path(&repo, &base_tree, &comps, &filename).map_err(|e| ReadError::Other(e))?;
+    let new_oid = match new_oid_opt {
+        Some(oid) => oid,
+        None => return Err(ReadError::NotFound),
+    };
+    let new_tree = repo
+        .find_tree(new_oid)
+        .map_err(|e| ReadError::Other(e.into()))?;
     let msg = format!("DELETE {}", path);
     let commit_oid = if let Some(ref parent) = parent_commit {
-        repo
-            .commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[parent])
+        repo.commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[parent])
             .map_err(|e| ReadError::Other(e.into()))?
     } else {
-        repo
-            .commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[])
+        repo.commit(Some(&refname), &sig, &sig, &msg, &new_tree, &[])
             .map_err(|e| ReadError::Other(e.into()))?
     };
     Ok((commit_oid.to_string(), branch.to_string()))

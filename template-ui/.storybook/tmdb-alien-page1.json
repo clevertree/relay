@@ -1,0 +1,10 @@
+{
+  "page":1,
+  "results":[
+    {"id":348,"title":"Alien","release_date":"1979-05-25","poster_path":"/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg","genre_ids":[27,878],"overview":"During its return to the earth...","vote_average":8.166},
+    {"id":817189,"title":"Alien","release_date":"2017-05-16","poster_path":"/sI5eeqdoiZ62zv11WSMEev6Ynim.jpg","genre_ids":[878],"overview":"","vote_average":6.7},
+    {"id":601796,"title":"Alienoid","release_date":"2022-07-20","poster_path":"/8QVDXDiOGHRcAD4oM6MXjE0osSj.jpg","genre_ids":[878,28,14,12],"overview":"Gurus in the late Goryeo dynasty...","vote_average":6.793}
+  ],
+  "total_pages":63,
+  "total_results":1251
+}

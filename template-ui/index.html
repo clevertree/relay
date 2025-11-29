@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>{title}</title>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="/template-ui/sitelate-ui/site/globals.generated.css">
+    <script type="module" src="/template-ui/sitelate-ui/site/dropzone/dropzone.js"></script>
+    <script type="module" src="/template-ui/sitelate-ui/site/modal/modal.js"></script>
+    <script type="module" src="/template-ui/sitelate-ui/site/movies/movie-viewer.js"></script>
+    <script type="module" src="/template-ui/sitelate-ui/site/movies/movie-search.js"></script>
+    <script type="module" src="/template-ui/sitelate-ui/site/movies/movie-upsert.js"></script>
+
+    {head}
+</head>
+<body>
+<article class="themed mx-auto max-w-[1320px] px-5 pb-16">
+    <header class="site-header mb-4 flex-wrap">
+        <div class="flex items-center gap-2 flex-1 min-w-[260px]">
+            <h1 class="m-0 text-2xl font-semibold">Movie Library</h1>
+        </div>
+        <div class="flex items-center gap-3 header-controls">
+            <!-- device toggle: keeps markup same, toggles body class -->
+            <div class="device-toggle" style="display:flex;align-items:center;gap:.5rem">
+                <label style="font-size:12px;margin-right:6px">Mode</label>
+                <button id="toggle-device" aria-pressed="false"
+                        class="px-2 py-1 rounded-md border bg-[color:var(--panel)] text-[color:var(--text)]">Desktop
+                </button>
+            </div>
+
+            <movie-search class="w-[360px] search-el"></movie-search>
+            <button id="open-create-modal"
+                    class="px-3 py-2 rounded-md border border-black/15 bg-[color:var(--accent)] text-white whitespace-nowrap">
+                New
+                Movie
+            </button>
+        </div>
+    </header>
+
+    <relay-modal id="create-modal" title="Add New Movie">
+        <movie-upsert></movie-upsert>
+    </relay-modal>
+
+    <div class="search-wrapper">
+        <!-- optional filters could go here -->
+    </div>
+
+    <section class="movies-grid grid gap-4" id="movies-grid">
+        <!-- Each movie card should be rendered by movie components or server insertion -->
+        {body}
+    </section>
+
+</article>
+
+<script type="module">
+    // Wire the header button to open the modal
+    const openBtn = document.getElementById('open-create-modal');
+    const modal = document.getElementById('create-modal');
+    openBtn?.addEventListener('click', () => modal?.open());
+    // When upsert succeeds, close modal and ask any movie-search components to refresh
+    modal?.addEventListener('movie-upsert:success', (ev) => {
+        modal.close();
+        document.querySelectorAll('movie-search').forEach(el => el.dispatchEvent(new CustomEvent('movie-search:refresh')));
+    });
+
+    // Device toggle: switch body.mobile-mode class while keeping markup the same
+    const toggle = document.getElementById('toggle-device');
+    const searchEl = document.querySelector('.search-el');
+    const setMode = (mobile) => {
+        document.documentElement.classList.toggle('mobile-mode', mobile);
+        if (toggle) {
+            toggle.textContent = mobile ? 'Mobile' : 'Desktop';
+            toggle.setAttribute('aria-pressed', mobile ? 'true' : 'false');
+        }
+        // allow movie-search to expand to full width on mobile
+        if (searchEl) {
+            if (mobile) searchEl.style.width = '100%';
+            else searchEl.style.width = '360px';
+        }
+    };
+
+    toggle?.addEventListener('click', () => {
+        const isMobile = document.documentElement.classList.toggle('mobile-mode');
+        // persist selection
+        try {
+            localStorage.setItem('ui-mode', isMobile ? 'mobile' : 'desktop');
+        } catch (e) {
+        }
+        setMode(isMobile);
+    });
+
+    // Initialize from prefers-color-scheme or previous setting
+    (function initMode() {
+        const saved = localStorage.getItem('ui-mode');
+        const prefersMobile = window.matchMedia && window.matchMedia('(max-width: 480px)').matches;
+        const mobile = saved ? saved === 'mobile' : prefersMobile;
+        setMode(mobile);
+    })();
+</script>
+</body>
+</html>

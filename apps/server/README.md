@@ -1,6 +1,6 @@
 Relay Server (Rust)
 
-Implements the Relay API over a bare Git repository.
+Implements the Relay API over a bare Git repository with optional static directory and IPFS fallback for UI assets.
 
 Repository policy
 
@@ -63,16 +63,25 @@ Testing policy
 - The hooks runner enforces that `relay.yaml` exists and validates it; writes/commits will be rejected if `relay.yaml`
   is missing or invalid.
 
-Run
+CLI & Run
 
 1) Build everything
    cargo build --workspace
 
 2) Run server (ensure hooks binary is reachable)
    # Windows PowerShell
-   $env:RELAY_HOOKS_BIN = "${pwd}\target\debug\relay-hooks.exe"; cargo run --manifest-path apps/server/Cargo.toml
+   $env:RELAY_HOOKS_BIN = "${pwd}\target\debug\relay-hooks.exe"; cargo run --manifest-path apps/server/Cargo.toml -- serve
 
-3) Try requests
+   Options:
+     --repo <PATH>        Path to the bare Git repository (default from RELAY_REPO_PATH or ./data/repo.git)
+     --static <DIR>       Additional static directory to serve files from (can repeat)
+     --bind <HOST:PORT>   Bind address (default from RELAY_BIND or 0.0.0.0:8088)
+
+3) Create an IPFS hash for a built UI directory and seed it locally
+   # This runs `ipfs add -r <dir>` and prints the root CID
+   cargo run --manifest-path apps/server/Cargo.toml -- ipfs-add template-ui/dist
+
+4) Try requests
     - Root listing with breadcrumbs:
       curl -i "http://localhost:8088/?branch=main"
     - Put a file (validates via hooks):
@@ -89,6 +98,16 @@ Run
     - Query (QUERY alias):
       curl -i -X QUERY "http://localhost:8088" -H "X-Relay-Branch: main" -H "Content-Type: application/json" --data '{"
       filter":{"title":"Inception"}}'
+
+Serving order (GET requests)
+
+1. Static directories: if `--static` paths are provided, the server will first try to serve the file from these directories.
+2. Git repository: if the request is not for `.html`, `.htm`, or `.js`, the server reads from the selected bare repo/branch.
+3. IPFS fallback: if not found in static or Git, the server falls back to IPFS using the CID in `ipfs.rootHash` from `relay.yaml` on the selected branch. A 404 is returned if the file does not exist in IPFS; a 503 is returned on timeout with a reason message.
+
+Notes:
+- The server never serves `.html`, `.htm`, or `.js` files from the Git repository. HTML/JS must come from static directories during development or from IPFS in production.
+- Directory responses are rendered as Markdown or simple HTML and may merge IPFS directory entries when `ipfs.rootHash` is present.
 
 Logs
 
@@ -116,3 +135,15 @@ docker run -p 80:80 -p 443:443 \
 ```
 
 The server will be accessible at `https://node-dfw1.relaynet.online` with automatic HTTP to HTTPS redirection.
+
+Developing and deploying a UI for repositories
+
+A. Build/export all HTML/JS/asset files of your UI (e.g., into `template-ui/dist`).
+B. Test locally: run the server and add your UI folder as an additional static directory, then exercise the app.
+   - Example:
+     cargo run --manifest-path apps/server/Cargo.toml -- serve --repo ./data/repo.git --static ./template-ui/dist
+C. When QA is complete, create an IPFS hash and seed it via the CLI:
+   - Example:
+     cargo run --manifest-path apps/server/Cargo.toml -- ipfs-add ./template-ui/dist
+     # Copy the printed CID
+D. Update `relay.yaml` on your repo branch to set `ipfs.rootHash` to the new CID and deploy/push. The server will then serve UI assets from IPFS.

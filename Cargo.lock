@@ -4537,6 +4537,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
+ "clap",
  "git2",
  "jsonschema",
  "mime_guess",

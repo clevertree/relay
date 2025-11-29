@@ -1,0 +1,6 @@
+{
+  "results": [
+    {"id": "local-1","title": "Alien","release_date":"1979-05-25","poster_local":"https://image.tmdb.org/t/p/w500/6Kg6xJ7Rf2TQp4x0c6tG6Jq2Q6N.jpg","genre":["Horror","Science Fiction"],"source":"local"},
+    {"id": "local-2","title": "Luis and the Aliens","release_date":"2018-05-09","poster_local":"https://image.tmdb.org/t/p/w500/5bGJ6eZq1Y2t7B3b0Wg5b2wK6m.jpg","genre":["Animation","Family"],"source":"local"}
+  ]
+}

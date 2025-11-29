@@ -22,7 +22,6 @@
       <excludeFolder url="file://$MODULE_DIR$/logs" />
       <excludeFolder url="file://$MODULE_DIR$/terraform/rackspace-spot/.terraform" />
       <excludeFolder url="file://$MODULE_DIR$/scripts/e2e/tmp" />
-      <excludeFolder url="file://$MODULE_DIR$/template/media" />
       <excludeFolder url="file://$MODULE_DIR$/tests" />
     </content>
     <orderEntry type="inheritedJdk" />
