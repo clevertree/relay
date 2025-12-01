@@ -1,6 +1,5 @@
 .idea/
-/.output.txt
-/.idea
+.output.txt
 **/target/
 apps/server/Cargo.lock
 **/.DS_Store

@@ -1,0 +1,52 @@
+# Node modules
+node_modules/
+
+# Android build outputs
+android/build/
+android/app/build/
+android/.gradle/
+
+# iOS build outputs
+ios/Pods/
+ios/build/
+
+# Gradle
+.gradle/
+*.keystore
+
+# Xcode / macOS
+.DS_Store
+*.xcodeproj/
+*.xcworkspace/
+
+# Metro/packager
+*.metro-cache
+hs_err_pid*
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# IDEs and editors
+.idea/
+.vscode/
+*.iml
+
+# Environment
+.env
+.env.*
+
+# Misc
+build/
+tmp/
+dist/
+.expo/
+.expo-shared/
+
+# Local android studio files
+local.properties
+
+# Keep the original Android app directory ignore (legacy)
+android/app
