@@ -195,10 +195,6 @@ Bundled assets and templating
   - `assets/rules.schema.yaml`
   - `assets/template.html` (placeholders: `{title}`, `{head}`, `{body}`)
   - `assets/404.md`
-- The server resolves an HTML template in this order when rendering markdown or error pages:
-  1. File named by env `RELAY_REPO_PATH_TEMPLATE_HTML` (defaults to `template.html`) in the same repo directory as the requested asset
-  2. Ascend parent directories up to repo root looking for the file
-  3. Fallback to bundled `relay-lib/assets/template.html`
 
 Notes
 

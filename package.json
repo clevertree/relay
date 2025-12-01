@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "pnpm dev:client",
     "dev:client": "cargo run --manifest-path apps/client/Cargo.toml",
+    "dev:client:valdi": "cargo run --manifest-path apps/client-valdi/Cargo.toml",
     "build:client": "cargo build --manifest-path apps/client/Cargo.toml",
+    "build:client:valdi": "cargo build --manifest-path apps/client-valdi/Cargo.toml",
     "dev:server": "cargo run --manifest-path apps/server/Cargo.toml -- serve",
     "dev:pair": "node scripts/e2e/two-local-servers.mjs",
     "build:server": "cargo build --manifest-path apps/server/Cargo.toml",
@@ -19,7 +21,11 @@
     "build-storybook": "storybook build",
     "tailwind:build": "tailwindcss -c tailwind.config.cjs -i template-ui/site/globals.css -o template/site/globals.generated.css --minify",
     "tailwind:watch": "tailwindcss -c tailwind.config.cjs -i template-ui/site/globals.css -o template/site/globals.generated.css -w",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "rn:start": "pnpm --filter client-react-native start",
+    "rn:android": "pnpm --filter client-react-native android",
+    "rn:ios": "pnpm --filter client-react-native ios",
+    "rn:typecheck": "pnpm --filter client-react-native typecheck"
   },
   "devDependencies": {
     "@chromatic-com/storybook": "4.1.3",

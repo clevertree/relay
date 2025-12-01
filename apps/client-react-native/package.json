@@ -1,0 +1,26 @@
+{
+  "name": "client-react-native",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Relay Client – React Native app (Android/iOS, optional desktop)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "react-native start",
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-native": "0.76.5",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-native": "0.76.0",
+    "metro-react-native-babel-preset": "0.77.0",
+    "typescript": "5.6.3"
+  }
+}

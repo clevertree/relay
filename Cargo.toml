@@ -1,10 +1,12 @@
 [workspace]
 members = [
     "apps/server",
-    "apps/client",
+    "apps/client-flutter/rust",
     "crates/hooks",
     "crates/relay-lib",
     "crates/relay-cli",
+    "crates/relay-client-core",
     "crates/streaming-files",
+    "apps/client-react-native/rust",
 ]
 resolver = "2"
