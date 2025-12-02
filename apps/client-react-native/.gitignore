@@ -2,8 +2,15 @@
 node_modules/
 
 # Android build outputs
+# Android build outputs and intermediates
+android/.gradle/
+android/.cxx/
 android/build/
 android/app/build/
+android/app/.cxx/
+android/**/build/
+android/**/.cxx/
+android/**/.externalNativeBuild/
 android/.gradle/
 
 # iOS build outputs
@@ -13,6 +20,9 @@ ios/build/
 # Gradle
 .gradle/
 *.keystore
+**/gradle-wrapper.jar
+**/gradle-wrapper.properties
+**/gradle/wrapper/gradle-wrapper.jar
 
 # Xcode / macOS
 .DS_Store
@@ -48,5 +58,26 @@ dist/
 # Local android studio files
 local.properties
 
-# Keep the original Android app directory ignore (legacy)
-android/app
+# Android native and build artifacts to ignore (keep config files checked in)
+# - Keep Gradle settings, build scripts, and manifest files tracked
+# - Ignore only generated, intermediate, temporary, and large binary outputs
+
+# Native build outputs
+*.so
+*.o
+*.obj
+*.dylib
+
+# NDK / CMake
+.externalNativeBuild/
+.cxx/
+
+# Kotlin/Java compiled classes
+**/classes/
+**/tmp/
+
+# Proguard
+**/mapping/
+
+# Jetifier/AndroidX caches
+.jetifier
