@@ -12,10 +12,6 @@ import {
 } from 'react-native';
 import WebView, {WebViewMessageEvent} from 'react-native-webview';
 
-// Debug: module loaded
-// eslint-disable-next-line no-console
-console.log('WebViewPlugin module loaded');
-
 interface WebViewPluginProps {
   host: string;
   branch?: string;

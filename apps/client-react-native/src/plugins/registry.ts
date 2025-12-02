@@ -46,6 +46,12 @@ export const BUILTIN_PLUGINS: PluginDescriptor[] = [
     description: 'Default native repository browser with Visit/Search functionality',
   },
   {
+    id: 'builtin-declarative',
+    type: 'repo-provided',
+    name: 'Declarative Plugin',
+    description: 'Load repo-provided declarative plugins with markdown/grid/detail views',
+  },
+  {
     id: 'builtin-webview',
     type: 'webview',
     name: 'WebView Plugin',

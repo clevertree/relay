@@ -13,10 +13,6 @@ import {fetchPeerOptions} from '../services/probing';
 import * as Plugins from '../plugins';
 import PluginSwitcher from '../plugins/PluginSwitcher';
 
-// Debug: module load
-// eslint-disable-next-line no-console
-console.log('RepoTab module loaded, Plugins keys=', Object.keys(Plugins));
-
 interface RepoTabProps {
   tabId: string;
 }
@@ -96,19 +92,14 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
   const renderPluginContent = () => {
     // Map plugin IDs to component factories
     const mapping: Record<string, any> = {
-      'builtin-webview': (Plugins as any).WebViewPlugin || (Plugins as any).WebViewPlugin,
-      'native-repo-browser': (Plugins as any).DefaultNativePlugin || (Plugins as any).DefaultNativePlugin,
+      'builtin-webview': (Plugins as any).WebViewPlugin,
+      'native-repo-browser': (Plugins as any).DefaultNativePlugin,
+      'builtin-declarative': (Plugins as any).DeclarativePlugin,
     };
 
     const Component = mapping[tab.pluginId] ?? mapping['native-repo-browser'];
 
-    // More detailed diagnostics to capture non-component values
-    // eslint-disable-next-line no-console
-    console.log('Selected pluginId=', tab.pluginId, 'mappedComponent=', Component);
-
     if (!Component) {
-      // eslint-disable-next-line no-console
-      console.error('Plugin component undefined for pluginId=', tab.pluginId, 'available plugins=', Object.keys(Plugins));
       return (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Plugin not available: {tab.pluginId}</Text>
@@ -121,8 +112,6 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
 
     // Validate ResolvedComponent is renderable
     if (typeof ResolvedComponent !== 'function' && typeof ResolvedComponent !== 'object') {
-      // eslint-disable-next-line no-console
-      console.error('Resolved plugin component is not a React component', typeof ResolvedComponent, ResolvedComponent);
       return (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Invalid plugin component for: {tab.pluginId}</Text>
@@ -139,6 +128,9 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
           setPathInput(path);
           updateTab(tabId, (t) => ({...t, path}));
         }}
+        // Additional props for declarative plugins
+        manifestUrl={tab.pluginManifestUrl}
+        expectedHash={tab.pluginHash}
       />
     );
   };

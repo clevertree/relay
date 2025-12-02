@@ -1,7 +1,7 @@
 /**
- * Simple Markdown Renderer for React Native
+ * Advanced Markdown Renderer for React Native
  * Converts markdown text to React Native components.
- * Supports basic formatting and custom tags like <video url="..."/>
+ * Supports formatting, media tags (<video>, <audio>), and custom component renderers.
  */
 
 import React from 'react';
@@ -17,7 +17,9 @@ import {
 interface MarkdownViewProps {
   content: string;
   baseUrl?: string;
+  branch?: string;
   onLinkPress?: (url: string) => void;
+  customRenderers?: Record<string, (props: any) => React.ReactNode>;
 }
 
 type MarkdownNode = 
@@ -30,11 +32,28 @@ type MarkdownNode =
   | {type: 'codeblock'; content: string; language?: string}
   | {type: 'link'; href: string; content: string}
   | {type: 'image'; src: string; alt?: string}
-  | {type: 'video'; url: string}
+  | {type: 'video'; url: string; title?: string}
+  | {type: 'audio'; url: string; title?: string}
+  | {type: 'custom'; tagName: string; attrs: Record<string, string>; content?: string}
   | {type: 'list'; ordered: boolean; items: MarkdownNode[][]}
   | {type: 'listitem'; children: MarkdownNode[]}
   | {type: 'blockquote'; children: MarkdownNode[]}
   | {type: 'hr'};
+
+/**
+ * Parse HTML attributes from a string
+ */
+function parseAttributes(attrStr: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const attrRegex = /(\w+)="([^"]*)"/g;
+  let match;
+  
+  while ((match = attrRegex.exec(attrStr))) {
+    attrs[match[1].toLowerCase()] = match[2];
+  }
+  
+  return attrs;
+}
 
 /**
  * Parse markdown text into an AST-like structure
@@ -127,11 +146,34 @@ function parseMarkdown(content: string): MarkdownNode[] {
     }
 
     // Custom video tag
-    const videoMatch = line.match(/<video\s+url="([^"]+)"[^>]*\/>/i);
+    const videoMatch = line.match(/<video\s+url="([^"]+)"(?:\s+title="([^"]*)")?\s*\/>/i);
     if (videoMatch) {
-      nodes.push({type: 'video', url: videoMatch[1]});
+      nodes.push({type: 'video', url: videoMatch[1], title: videoMatch[2]});
       i++;
       continue;
+    }
+
+    // Custom audio tag
+    const audioMatch = line.match(/<audio\s+url="([^"]+)"(?:\s+title="([^"]*)")?\s*\/>/i);
+    if (audioMatch) {
+      nodes.push({type: 'audio', url: audioMatch[1], title: audioMatch[2]});
+      i++;
+      continue;
+    }
+
+    // Custom tags (generic)
+    const customMatch = line.match(/<(\w+)(\s+[^>]*)\/>/);
+    if (customMatch) {
+      const tagName = customMatch[1];
+      const attrStr = customMatch[2];
+      const attrs = parseAttributes(attrStr);
+      
+      // Only treat as custom if not a standard HTML tag
+      if (!['video', 'audio', 'image', 'img'].includes(tagName.toLowerCase())) {
+        nodes.push({type: 'custom', tagName, attrs, content: ''});
+        i++;
+        continue;
+      }
     }
 
     // Image (standalone)
@@ -152,7 +194,8 @@ function parseMarkdown(content: string): MarkdownNode[] {
       !lines[i].startsWith('>') &&
       !/^[\-\*]\s/.test(lines[i]) &&
       !/^\d+\.\s/.test(lines[i]) &&
-      !/<video/.test(lines[i])
+      !/<video/.test(lines[i]) &&
+      !/<audio/.test(lines[i])
     ) {
       paragraphLines.push(lines[i]);
       i++;
@@ -238,14 +281,22 @@ function parseInline(text: string): MarkdownNode[] {
 const RenderNode: React.FC<{
   node: MarkdownNode;
   baseUrl?: string;
+  branch?: string;
   onLinkPress?: (url: string) => void;
-}> = ({node, baseUrl, onLinkPress}) => {
+  customRenderers?: Record<string, (props: any) => React.ReactNode>;
+}> = ({node, baseUrl, branch, onLinkPress, customRenderers}) => {
   const resolveUrl = (url: string) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       return url;
     }
     if (baseUrl) {
-      return `${baseUrl.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
+      // Add branch query parameter if provided
+      const resolved = `${baseUrl.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
+      if (branch) {
+        const separator = resolved.includes('?') ? '&' : '?';
+        return `${resolved}${separator}branch=${encodeURIComponent(branch)}`;
+      }
+      return resolved;
     }
     return url;
   };
@@ -316,10 +367,51 @@ const RenderNode: React.FC<{
       );
 
     case 'video':
-      // Placeholder for video - would use react-native-video in real implementation
       return (
-        <View style={styles.videoPlaceholder}>
-          <Text style={styles.videoText}>🎬 Video: {node.url}</Text>
+        <View style={styles.mediaContainer}>
+          <View style={styles.videoPlaceholder}>
+            <Text style={styles.videoText}>🎬</Text>
+            <Text style={styles.mediaTitle}>{node.title || 'Video'}</Text>
+          </View>
+          <Text style={styles.mediaUrl} numberOfLines={1}>
+            {resolveUrl(node.url)}
+          </Text>
+        </View>
+      );
+
+    case 'audio':
+      return (
+        <View style={styles.mediaContainer}>
+          <View style={styles.audioPlaceholder}>
+            <Text style={styles.audioText}>🎵</Text>
+            <Text style={styles.mediaTitle}>{node.title || 'Audio'}</Text>
+          </View>
+          <Text style={styles.mediaUrl} numberOfLines={1}>
+            {resolveUrl(node.url)}
+          </Text>
+        </View>
+      );
+
+    case 'custom':
+      // Check if custom renderer is provided
+      if (customRenderers && customRenderers[node.tagName]) {
+        return customRenderers[node.tagName]({
+          attrs: node.attrs,
+          content: node.content,
+          resolveUrl,
+        });
+      }
+      // Fallback to generic custom tag display
+      return (
+        <View style={styles.customTag}>
+          <Text style={styles.customTagName}>&lt;{node.tagName}&gt;</Text>
+          {Object.entries(node.attrs).length > 0 && (
+            <Text style={styles.customTagAttrs}>
+              {Object.entries(node.attrs)
+                .map(([k, v]) => `${k}="${v}"`)
+                .join(' ')}
+            </Text>
+          )}
         </View>
       );
 
@@ -361,14 +453,23 @@ const RenderNode: React.FC<{
 export const MarkdownView: React.FC<MarkdownViewProps> = ({
   content,
   baseUrl,
+  branch,
   onLinkPress,
+  customRenderers,
 }) => {
   const nodes = parseMarkdown(content);
 
   return (
     <View style={styles.container}>
       {nodes.map((node, i) => (
-        <RenderNode key={i} node={node} baseUrl={baseUrl} onLinkPress={onLinkPress} />
+        <RenderNode
+          key={i}
+          node={node}
+          baseUrl={baseUrl}
+          branch={branch}
+          onLinkPress={onLinkPress}
+          customRenderers={customRenderers}
+        />
       ))}
     </View>
   );
@@ -442,15 +543,64 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     borderRadius: 6,
   },
-  videoPlaceholder: {
-    backgroundColor: '#f0f0f0',
-    padding: 20,
+  mediaContainer: {
+    backgroundColor: '#f8f9fa',
+    padding: 12,
     borderRadius: 6,
     marginVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  videoPlaceholder: {
+    backgroundColor: '#e3f2fd',
+    padding: 16,
+    borderRadius: 6,
     alignItems: 'center',
+    marginBottom: 8,
   },
   videoText: {
+    fontSize: 32,
+    marginBottom: 4,
+  },
+  audioPlaceholder: {
+    backgroundColor: '#f3e5f5',
+    padding: 16,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  audioText: {
+    fontSize: 32,
+    marginBottom: 4,
+  },
+  mediaTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  mediaUrl: {
+    fontSize: 12,
     color: '#666',
+    fontFamily: 'monospace',
+  },
+  customTag: {
+    backgroundColor: '#fff3e0',
+    padding: 12,
+    borderRadius: 6,
+    marginVertical: 8,
+    borderWidth: 1,
+    borderColor: '#ffe0b2',
+  },
+  customTagName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#e65100',
+    marginBottom: 4,
+  },
+  customTagAttrs: {
+    fontSize: 11,
+    color: '#bf360c',
+    fontFamily: 'monospace',
   },
   list: {
     marginVertical: 8,

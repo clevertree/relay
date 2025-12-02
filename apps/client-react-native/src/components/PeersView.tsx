@@ -13,10 +13,6 @@ import {useAppState, type PeerInfo, type PeerProbe} from '../state/store';
 import {RelayCore} from '../../native/RelayCoreModule';
 import {fullProbePeer} from '../services/probing';
 
-// Debug: log module load
-// eslint-disable-next-line no-console
-console.log('PeersView module loaded');
-
 const AUTO_REFRESH_INTERVAL_MS = 10000; // 10 seconds
 
 interface PeersViewProps {
