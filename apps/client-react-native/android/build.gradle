@@ -1,5 +1,23 @@
+buildscript {
+    ext {
+        ndkVersion = "27.0.12077973"
+        buildToolsVersion = "34.0.0"
+        compileSdkVersion = 34
+        minSdkVersion = 23
+        targetSdkVersion = 34
+    }
+}
+
 plugins {
     id("com.facebook.react.rootproject")
+}
+
+ext {
+    ndkVersion = "27.0.12077973"
+    buildToolsVersion = "34.0.0"
+    compileSdkVersion = 34
+    minSdkVersion = 23
+    targetSdkVersion = 34
 }
 
 // Ensure libraries depending on the deprecated artifact `com.facebook.react:react-native`
