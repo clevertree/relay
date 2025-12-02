@@ -4,7 +4,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "pnpm dev:client",
+    "dev": "npm --prefix apps/client run dev",
     "dev:client": "cargo run --manifest-path apps/client/Cargo.toml",
     "dev:client:valdi": "cargo run --manifest-path apps/client-valdi/Cargo.toml",
     "build:client": "cargo build --manifest-path apps/client/Cargo.toml",
@@ -21,10 +21,10 @@
     "tailwind:build": "tailwindcss -c tailwind.config.cjs -i template-ui/site/globals.css -o template/site/globals.generated.css --minify",
     "tailwind:watch": "tailwindcss -c tailwind.config.cjs -i template-ui/site/globals.css -o template/site/globals.generated.css -w",
     "test:e2e": "playwright test",
-    "rn:start": "pnpm --filter client-react-native start",
-    "rn:android": "pnpm --filter client-react-native android",
-    "rn:ios": "pnpm --filter client-react-native ios",
-    "rn:typecheck": "pnpm --filter client-react-native typecheck"
+    "rn:start": "npm --prefix apps/client-react-native run start",
+    "rn:android": "npm --prefix apps/client-react-native run android",
+    "rn:ios": "npm --prefix apps/client-react-native run ios",
+    "rn:typecheck": "npm --prefix apps/client-react-native run typecheck"
   },
   "devDependencies": {
     "@chromatic-com/storybook": "4.1.3",

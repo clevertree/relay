@@ -1,21 +1,19 @@
-buildscript {
-    ext {
-        buildToolsVersion = "35.0.0"
-        minSdkVersion = 24
-        compileSdkVersion = 35
-        targetSdkVersion = 34
-        ndkVersion = "26.1.10909125"
-        kotlinVersion = "1.9.24"
-    }
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath("com.android.tools.build:gradle:8.5.0")
-        classpath("com.facebook.react:react-native-gradle-plugin:0.75.4")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24")
+plugins {
+    id("com.facebook.react.rootproject")
+}
+
+// Ensure libraries depending on the deprecated artifact `com.facebook.react:react-native`
+// are redirected to the new artifact published by RN 0.75+
+configurations.all {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("com.facebook.react:react-native")).using(module("com.facebook.react:react-android:0.75.4"))
     }
 }
 
-apply plugin: "com.facebook.react.rootproject"
+subprojects { subproj ->
+    subproj.configurations.configureEach { cfg ->
+        cfg.resolutionStrategy.dependencySubstitution {
+            substitute(module("com.facebook.react:react-native")).using(module("com.facebook.react:react-android:0.75.4"))
+        }
+    }
+}

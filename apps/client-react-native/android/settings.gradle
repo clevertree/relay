@@ -4,16 +4,20 @@ pluginManagement {
 		google()
 		mavenCentral()
 	}
-	includeBuild('../node_modules/@react-native/gradle-plugin') {
-		dependencySubstitution {
-			substitute(module("com.facebook.react:react-native-gradle-plugin")).using(project(":react-native-gradle-plugin"))
-		}
-	}
+	includeBuild('../node_modules/@react-native/gradle-plugin')
 }
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 
 dependencyResolutionManagement {
+	repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+	repositories {
+		mavenCentral()
+		google()
+		mavenLocal()
+		maven { url = uri("$rootDir/../node_modules/react-native/android") }
+		maven { url = uri("$rootDir/../node_modules/jsc-android/dist") }
+	}
 	versionCatalogs {
 		libs {
 			from(files("../node_modules/react-native/gradle/libs.versions.toml"))
@@ -23,6 +27,3 @@ dependencyResolutionManagement {
 
 rootProject.name = 'RelayTemp'
 include ':app'
-include ':ReactAndroid'
-
-project(':ReactAndroid').projectDir = file('../node_modules/react-native/ReactAndroid')
