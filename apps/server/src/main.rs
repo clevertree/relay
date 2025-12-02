@@ -550,57 +550,6 @@ mod tests {
     }
 
     #[test]
-    fn test_directory_response_html_default() {
-        // create a temporary git repo with a README.md at root
-        let dir = tempdir().unwrap();
-        let repo = Repository::init_bare(dir.path()).unwrap();
-
-        // create an in-memory tree with README.md blob
-        let oid = repo
-            .blob("# Title\n\nSome content".as_bytes())
-            .expect("create blob");
-        // we need to create a tree that references the blob. For tests, we'll
-        // just build a tree manually using TreeBuilder
-        let mut tb = repo.treebuilder(None).unwrap();
-        tb.insert("README.md", oid, 0o100644).unwrap();
-        let tree_oid = tb.write().unwrap();
-        let tree = repo.find_tree(tree_oid).unwrap();
-
-        let repo_path = dir.path().to_path_buf();
-        let (ct, bytes) = directory_response(&repo_path, &tree, &tree, "", "", DEFAULT_BRANCH, "");
-        assert!(ct.starts_with("text/html"), "ct was {}", ct);
-        let s = String::from_utf8(bytes).unwrap();
-        assert!(s.contains("<h1>Title</h1>") || s.contains("<a href=\"README.md\""));
-    }
-
-    #[test]
-    fn test_directory_response_markdown_requested() {
-        let dir = tempdir().unwrap();
-        let repo = Repository::init_bare(dir.path()).unwrap();
-
-        let mut tb = repo.treebuilder(None).unwrap();
-        let oid = repo
-            .blob("# Title\n\nSome content".as_bytes())
-            .expect("create blob");
-        tb.insert("README.md", oid, 0o100644).unwrap();
-        let tree_oid = tb.write().unwrap();
-        let tree = repo.find_tree(tree_oid).unwrap();
-
-        let repo_path = dir.path().to_path_buf();
-        let (ct, bytes) = directory_response(
-            &repo_path,
-            &tree,
-            &tree,
-            "",
-            "text/markdown",
-            DEFAULT_BRANCH,
-            "",
-        );
-        assert_eq!(ct, "text/markdown");
-        let s = String::from_utf8(bytes).unwrap();
-        assert!(s.contains("# Title") || s.contains("README.md"));
-    }
-
     #[test]
     fn test_row_to_json_basic_types_removed() {}
 
@@ -1242,24 +1191,24 @@ async fn run_get_script_or_404(
         .and_then(|r| r.peel_to_commit())
     {
         Ok(c) => c,
-        Err(_) => return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+        Err(_) => return (StatusCode::NOT_FOUND, "Not Found").into_response(),
     };
     let tree = match commit.tree() {
         Ok(t) => t,
-        Err(_) => return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+        Err(_) => return (StatusCode::NOT_FOUND, "Not Found").into_response(),
     };
     let entry = match tree.get_path(std::path::Path::new(".relay/get.mjs")) {
         Ok(e) => e,
-        Err(_) => return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+        Err(_) => return (StatusCode::NOT_FOUND, "Not Found").into_response(),
     };
     let blob = match entry.to_object(&repo).and_then(|o| o.peel_to_blob()) {
         Ok(b) => b,
-        Err(_) => return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+        Err(_) => return (StatusCode::NOT_FOUND, "Not Found").into_response(),
     };
     let tmp = std::env::temp_dir().join(format!("relay-get-{}-{}.mjs", branch, commit.id()));
     if let Err(e) = std::fs::write(&tmp, blob.content()) {
         error!(?e, "failed to write get.mjs temp file");
-        return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing);
+        return (StatusCode::NOT_FOUND, "Not Found").into_response();
     }
     let node_bin = std::env::var("RELAY_NODE_BIN").unwrap_or_else(|_| "node".to_string());
     let mut cmd = std::process::Command::new(node_bin);
@@ -1279,20 +1228,20 @@ async fn run_get_script_or_404(
         Err(e) => {
             error!(?e, "failed to execute get.mjs");
             let _ = std::fs::remove_file(&tmp);
-            return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing);
+            return (StatusCode::NOT_FOUND, "Not Found").into_response();
         }
     };
     let _ = std::fs::remove_file(&tmp);
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         warn!(%stderr, "get.mjs non-success status");
-        return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing);
+        return (StatusCode::NOT_FOUND, "Not Found").into_response();
     }
     let val: serde_json::Value = match serde_json::from_slice(&output.stdout) {
         Ok(v) => v,
         Err(e) => {
             warn!(?e, "get.mjs returned invalid JSON");
-            return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing);
+            return (StatusCode::NOT_FOUND, "Not Found").into_response();
         }
     };
     let kind = val.get("kind").and_then(|k| k.as_str()).unwrap_or("");
@@ -1319,7 +1268,7 @@ async fn run_get_script_or_404(
                     .into_response(),
                 Err(e) => {
                     warn!(?e, "failed to decode get.mjs bodyBase64");
-                    render_404_markdown(&state.repo_path, branch, repo_name, rel_missing)
+                    (StatusCode::NOT_FOUND, "Not Found").into_response()
                 }
             }
         }
@@ -1335,7 +1284,7 @@ async fn run_get_script_or_404(
             )
                 .into_response()
         }
-        _ => render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+        _ => (StatusCode::NOT_FOUND, "Not Found").into_response(),
     }
 }
 
@@ -1413,8 +1362,7 @@ fn git_resolve_and_respond(
     let reference = match repo.find_reference(&refname) {
         Ok(r) => r,
         Err(_) => {
-            let resp = render_404_markdown(repo_path, branch, repo_name, decoded);
-            return GitResolveResult::Respond(resp);
+            return GitResolveResult::NotFound(decoded.to_string());
         }
     };
     let commit = match reference.peel_to_commit() {
@@ -1445,25 +1393,9 @@ fn git_resolve_and_respond(
     };
     let rel = path_scoped.trim_matches('/');
 
-    // Empty path -> directory listing
+    // Empty path -> delegate to repo script (.relay/get.mjs)
     if rel.is_empty() {
-        let accept_hdr = headers
-            .get("accept")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        let (ct, body) =
-            directory_response(repo_path, &tree, &tree, rel, accept_hdr, branch, repo_name);
-        let resp = (
-            StatusCode::OK,
-            [
-                ("Content-Type", ct),
-                (HEADER_BRANCH, branch.to_string()),
-                (HEADER_REPO, repo_name.to_string()),
-            ],
-            body,
-        )
-            .into_response();
-        return GitResolveResult::Respond(resp);
+        return GitResolveResult::NotFound(rel.to_string());
     }
 
     // File/dir resolution
@@ -1501,7 +1433,7 @@ fn git_resolve_and_respond(
             // Defer directory listing logic to repo script (.relay/get.mjs)
             GitResolveResult::NotFound(rel.to_string())
         }
-        _ => GitResolveResult::Respond(render_404_markdown(repo_path, branch, repo_name, rel)),
+        _ => GitResolveResult::NotFound(rel.to_string()),
     }
 }
 
@@ -1766,248 +1698,6 @@ fn simple_html_page(title: &str, body: &str, branch: &str, repo: &str) -> Vec<u8
     );
     html.into_bytes()
 }
-
-// Helper to return directory listing as HTML or markdown depending on Accept header
-// root_tree is the tree at repo root (for CSS presence checks), listing_tree is the directory to list
-fn directory_response(
-    repo_path: &PathBuf,
-    _root_tree: &git2::Tree,
-    listing_tree: &git2::Tree,
-    base_path: &str,
-    accept_hdr: &str,
-    branch: &str,
-    repo: &str,
-) -> (String, Vec<u8>) {
-    // Build entries from Git; IPFS directory merging is delegated to .relay/get.mjs
-    let mut entries = git_dir_entries(repo_path, listing_tree, base_path, branch);
-    sort_entries(&mut entries);
-    let md = render_directory_markdown_entries(&entries, base_path);
-    if accept_hdr.contains("text/markdown") {
-        ("text/markdown".to_string(), md)
-    } else {
-        let body = String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
-        (
-            "text/html; charset=utf-8".to_string(),
-            simple_html_page("Directory", &body, branch, repo),
-        )
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct DirEntry {
-    name: String,
-    kind: EntryKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    size: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    date: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-enum EntryKind {
-    File,
-    Dir,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct DirCacheFile {
-    cid: String,
-    repo: String,
-    branch: String,
-    dir: String, // base_path
-    generated_at: String,
-    entries: Vec<DirEntry>,
-}
-
-fn git_dir_entries(
-    repo_path: &PathBuf,
-    listing_tree: &git2::Tree,
-    base_path: &str,
-    branch: &str,
-) -> Vec<DirEntry> {
-    // Sizes for blobs; dates left None for now (can be enhanced using revwalk per path)
-    let mut out: Vec<DirEntry> = Vec::new();
-    let head_time = head_commit_time(repo_path, branch).map(|secs| secs.to_string());
-    for entry in listing_tree.iter() {
-        let name = match entry.name() {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        match entry.kind() {
-            Some(git2::ObjectType::Tree) => {
-                out.push(DirEntry {
-                    name,
-                    kind: EntryKind::Dir,
-                    size: None,
-                    date: head_time.clone(),
-                });
-            }
-            Some(git2::ObjectType::Blob) => {
-                let size = Repository::open_bare(repo_path)
-                    .and_then(|r| r.find_blob(entry.id()).map(|b| b.size()))
-                    .ok()
-                    .map(|s| s as u64);
-                out.push(DirEntry {
-                    name,
-                    kind: EntryKind::File,
-                    size,
-                    date: head_time.clone(),
-                });
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-fn head_commit_time(repo_path: &PathBuf, branch: &str) -> Option<i64> {
-    let repo = Repository::open_bare(repo_path).ok()?;
-    let refname = format!("refs/heads/{}", branch);
-    let reference = repo.find_reference(&refname).ok()?;
-    let commit = reference.peel_to_commit().ok()?;
-    Some(commit.time().seconds())
-}
-
-fn sort_entries(entries: &mut Vec<DirEntry>) {
-    entries.sort_by(|a, b| match (&a.kind, &b.kind) {
-        (EntryKind::Dir, EntryKind::File) => std::cmp::Ordering::Less,
-        (EntryKind::File, EntryKind::Dir) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
-}
-
-// IPFS dir caching removed; IPFS directory merging is delegated to repo scripts
-
-fn render_directory_markdown_entries(entries: &Vec<DirEntry>, base_path: &str) -> Vec<u8> {
-    let mut lines: Vec<String> = Vec::new();
-    let title_path = if base_path.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{}", base_path.trim_matches('/'))
-    };
-    lines.push(format!("# Directory listing: {}", title_path));
-    // Breadcrumbs
-    let mut crumb = String::new();
-    crumb.push_str("[/](/)");
-    let trimmed = base_path.trim_matches('/');
-    if !trimmed.is_empty() {
-        let mut acc = String::new();
-        for (i, seg) in trimmed.split('/').enumerate() {
-            if i == 0 {
-                acc.push_str(seg);
-            } else {
-                acc.push('/');
-                acc.push_str(seg);
-            }
-            crumb.push_str(" › ");
-            crumb.push_str(&format!("[{}]({}/)", seg, acc));
-        }
-    }
-    lines.push(crumb);
-    lines.push(String::from(""));
-    // Table header
-    lines.push(String::from("| Name | Size | Date |"));
-    lines.push(String::from("|------|------:|------|"));
-    for e in entries {
-        let href = if base_path.is_empty() {
-            e.name.clone()
-        } else {
-            format!("{}/{}", base_path.trim_matches('/'), e.name)
-        };
-        let disp_name = if e.kind == EntryKind::Dir {
-            format!("{}/", e.name)
-        } else {
-            e.name.clone()
-        };
-        let size_disp = e
-            .size
-            .map(|n| format!("{}", n))
-            .unwrap_or_else(|| "".to_string());
-        let date_disp = e.date.clone().unwrap_or_default();
-        let link = if e.kind == EntryKind::Dir {
-            format!("[{}]({}/)", disp_name, href)
-        } else {
-            format!("[{}]({})", disp_name, href)
-        };
-        lines.push(format!("| {} | {} | {} |", link, size_disp, date_disp));
-    }
-    if entries.is_empty() {
-        lines.push(String::from("(empty directory)"));
-    }
-    lines.join("\n").into_bytes()
-}
-
-fn render_404_markdown(
-    repo_path: &PathBuf,
-    branch: &str,
-    repo: &str,
-    missing_path: &str,
-) -> Response {
-    // Determine parent directory of the missing path for theme.css lookup
-    let parent_dir = {
-        let trimmed = missing_path.trim_matches('/');
-        std::path::Path::new(trimmed)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "".to_string())
-    };
-    // Try to read /site/404.md from the same branch
-    let custom = read_file_from_repo(repo_path, branch, "site/404.md").ok();
-
-    // We'll build the body HTML and the CSS hrefs while keeping repo lifetimes scoped
-    let used_custom = custom.is_some();
-    let mut body_html: String = match custom {
-        Some(ref bytes) => String::from_utf8(md_to_html_bytes(&bytes)).unwrap_or_default(),
-        None => String::from_utf8(md_to_html_bytes(
-            relay_lib::assets::DEFAULT_404_MD.as_bytes(),
-        ))
-        .unwrap_or_default(),
-    };
-
-    if let Ok(repo) = Repository::open_bare(repo_path) {
-        let refname = format!("refs/heads/{}", branch);
-        if let Ok(reference) = repo.find_reference(&refname) {
-            if let Ok(commit) = reference.peel_to_commit() {
-                if let Ok(root) = commit.tree() {
-                    // If we used the default 404 content, append a parent directory listing
-                    if !used_custom {
-                        let tree_to_list = if parent_dir.is_empty() {
-                            Some(root)
-                        } else {
-                            match root.get_path(std::path::Path::new(&parent_dir)) {
-                                Ok(e) if e.kind() == Some(ObjectType::Tree) => {
-                                    repo.find_tree(e.id()).ok()
-                                }
-                                _ => Some(root),
-                            }
-                        };
-                        if let Some(t) = tree_to_list {
-                            let md = render_directory_markdown(&t, &parent_dir);
-                            let dir_html =
-                                String::from_utf8(md_to_html_bytes(&md)).unwrap_or_default();
-                            body_html.push_str("\n\n");
-                            body_html.push_str(&dir_html);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let wrapped = simple_html_page("Not Found", &body_html, branch, repo);
-    (
-        StatusCode::NOT_FOUND,
-        [
-            ("Content-Type", "text/html; charset=utf-8".to_string()),
-            (HEADER_BRANCH, branch.to_string()),
-            (HEADER_REPO, repo.to_string()),
-        ],
-        wrapped,
-    )
-        .into_response()
-}
-
-// Use bundled default 404 markdown from relay-lib assets
 
 fn write_file_to_repo(
     repo_path: &PathBuf,
