@@ -52,4 +52,6 @@ terraform/**/terraform.tfvars
 terraform/**/secrets.auto.tfvars
 terraform/**/*.secrets.tfvars
 
-*kubeconfig.yaml
+*kubeconfig*
+terraform/rackspace-spot/kubeconfig
+
