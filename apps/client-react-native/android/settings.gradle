@@ -5,6 +5,7 @@ pluginManagement {
 		mavenCentral()
 	}
 }
+includeBuild('../node_modules/@react-native/gradle-plugin')
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 
@@ -21,4 +22,3 @@ include ':app'
 include ':ReactAndroid'
 
 project(':ReactAndroid').projectDir = file('../node_modules/react-native/ReactAndroid')
-includeBuild('../node_modules/@react-native/gradle-plugin')
