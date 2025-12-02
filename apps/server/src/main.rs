@@ -74,8 +74,6 @@ struct ServeArgs {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // No IPFS CLI commands; IPFS resolution is delegated to repo script (.relay/get.mjs)
-
     // Set up logging: stdout + rolling file appender
     // Ensure logs directory exists
     let _ = std::fs::create_dir_all("logs");
@@ -113,6 +111,7 @@ async fn main() -> anyhow::Result<()> {
             (rp, Vec::new(), None)
         }
     };
+    info!(repo_path = %repo_path.display(), "Repository path resolved");
     ensure_bare_repo(&repo_path)?;
 
     let state = AppState { repo_path, static_paths };
@@ -2061,7 +2060,12 @@ fn write_file_to_repo(
     path: &str,
     content: &[u8],
 ) -> anyhow::Result<(String, String)> {
-    let repo = Repository::open_bare(repo_path)?;
+    let repo = match Repository::open_bare(repo_path) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(e.into());
+        }
+    };
     let refname = format!("refs/heads/{}", branch);
     let sig = Signature::now("relay", "relay@local")?;
 

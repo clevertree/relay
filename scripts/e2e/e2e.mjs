@@ -97,7 +97,7 @@ async function main() {
   }
   try {
     // 3) Wait for server readiness
-    const status = await waitForServer('http://localhost:8088/status');
+    const status = await waitForServer('http://localhost:8088/');
     if (!status || !status.ok) throw new Error('Status not ok');
 
     // If server does not expose rules (no sources.yaml in repo), inject one from template/sources.yaml
