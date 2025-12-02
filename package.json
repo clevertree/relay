@@ -10,7 +10,6 @@
     "build:client": "cargo build --manifest-path apps/client/Cargo.toml",
     "build:client:valdi": "cargo build --manifest-path apps/client-valdi/Cargo.toml",
     "dev:server": "cargo run --manifest-path apps/server/Cargo.toml -- serve",
-    "dev:pair": "node scripts/e2e/two-local-servers.mjs",
     "build:server": "cargo build --manifest-path apps/server/Cargo.toml",
     "server:ipfs-add": "cargo run --manifest-path apps/server/Cargo.toml -- ipfs-add template-ui",
     "server:host": "cargo run --manifest-path apps/server/Cargo.toml -- serve --repo /data/repo.git --static template-ui",

@@ -35,7 +35,7 @@ const HEADER_BRANCH: &str = "X-Relay-Branch";
 const HEADER_REPO: &str = "X-Relay-Repo";
 const DEFAULT_BRANCH: &str = "main";
 // Disallowed extensions for general access; JavaScript is now allowed to be loaded (GET)
-// but remains blocked for writes via PUT/DELETE (enforced below and by hooks).
+// but remains blocked for writes via PUT/DELETE.
 const DISALLOWED: &[&str] = &[".html", ".htm"];
 
 const DEFAULT_IPFS_CACHE_ROOT: &str = "/srv/relay/ipfs-cache";
@@ -1957,7 +1957,7 @@ async fn put_file(
         Err(e) => {
             error!(?e, "write error");
             let msg = e.to_string();
-            if msg.contains("rejected by hooks") {
+            if msg.contains("rejected by") || msg.contains("validation failed") {
                 (StatusCode::BAD_REQUEST, msg).into_response()
             } else {
                 (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response()

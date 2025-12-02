@@ -48,8 +48,8 @@ fn normalize_socket(socket: &str) -> String {
 
 pub async fn connect_status(socket: &str) -> Result<StatusResponse> {
     let base = normalize_socket(socket);
-    let url = format!("{}/status", base.trim_end_matches('/'));
-    let res = reqwest::Client::new().post(url).send().await?;
+    let url = format!("{}/", base.trim_end_matches('/'));
+    let res = reqwest::Client::new().request(reqwest::Method::OPTIONS, url).send().await?;
     if !res.status().is_success() {
         return Err(anyhow!("status failed: {}", res.status()));
     }

@@ -52,8 +52,6 @@ pub struct OptionsResponse {
     pub repos: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_heads: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub relay_yaml: Option<serde_json::Value>,
 }
 
 /// Helper to create a CString from Rust string and return pointer
@@ -309,7 +307,6 @@ async fn fetch_options(host: &str, timeout_ms: u64) -> Result<OptionsResponse, S
             })
         }),
         branch_heads: data.get("branchHeads").cloned(),
-        relay_yaml: data.get("relayYaml").cloned(),
     })
 }
 

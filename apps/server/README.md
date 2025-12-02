@@ -20,7 +20,7 @@ Endpoints
       auto-linked when present.
 - PUT /{path} — write file and commit to selected branch/repo (branch via header or query `?branch=...`; repo via header
   or query `?repo=...`).
-    - Commits are validated by the hooks runner (`relay-hooks`) via a pre-receive check. Rejected commits return 400/500
+    - Commits are validated by any `.relay/pre-commit.mjs` script present in the repository. Rejected commits return 400/500
       with error text.
 - DELETE /{path} — delete file and commit to selected branch/repo (branch via header or query `?branch=...`).
 - QUERY * — Custom method for YAML-driven query using the local PoloDB index built by hooks (no POST alias).
@@ -33,7 +33,6 @@ Env
 
 - RELAY_REPO_PATH: path to a bare repo (default ./data/repo.git)
 - RELAY_BIND: address (default 0.0.0.0:8088)
-- RELAY_HOOKS_BIN: optional path to the hooks runner binary (default `relay-hooks` on PATH)
 - RELAY_DB_PATH: optional path to the local PoloDB file (default `<gitdir>/relay_index.polodb`)
   // Tracker self-registration (optional)
 - RELAY_TRACKER_URL: tracker base URL (e.g., https://relaynet.online)
@@ -50,27 +49,29 @@ Env
 
 Rules
 
-- The server will read `relay.yaml` from the default branch (main) when serving `/status` and return it as JSON.
-- `rules.db` defines a minimal, engine-agnostic config for PoloDB: collection, unique keys, indexes, field mapping, and
-  queryPolicy (allowed fields/ops, sort, pagination).
-- Rules are enforced for new commits by the Git hooks crate (`crates/hooks`). The hooks also maintain the local PoloDB
-  index by mapping meta.json documents into DB documents per `rules.db.mapping`.
+- Repository rules and validation are defined in `.relay/pre-commit.mjs` and `.relay/pre-receive.mjs` scripts within each repository.
+- `relay_index.json` is maintained by pre-commit/pre-receive scripts to track metadata changes and build queryable indexes.
+- Rules are enforced for new commits by the respective hook scripts. Repositories can customize validation by implementing these scripts.
+
+Repository Scripts
+
+- `.relay/pre-commit.mjs` — executed by the server during PUT operations to validate file changes before committing.
+- `.relay/pre-receive.mjs` — executed during git push operations (if using git-based workflows) to validate commits.
+- `.relay/validation.mjs` — optional custom validation logic that can be invoked by pre-commit/pre-receive scripts in a sandboxed environment.
+- `.relay/lib/*.mjs` — shared utility modules for common validation and index management tasks.
 
 Testing policy
 
-- For tests that require a repository with `relay.yaml`, tests may clone from the canonical template repository:
-  `https://github.com/clevertree/relay-template/`.
-- The hooks runner enforces that `relay.yaml` exists and validates it; writes/commits will be rejected if `relay.yaml`
-  is missing or invalid.
+- Tests may clone from the canonical template repository: `https://github.com/clevertree/relay-template/`.
+- The template repository includes example `.relay/pre-commit.mjs` and `.relay/pre-receive.mjs` scripts for validation.
 
 CLI & Run
 
 1) Build everything
    cargo build --workspace
 
-2) Run server (ensure hooks binary is reachable)
-   # Windows PowerShell
-   $env:RELAY_HOOKS_BIN = "${pwd}\target\debug\relay-hooks.exe"; cargo run --manifest-path apps/server/Cargo.toml -- serve
+2) Run server (ensure .relay/pre-commit.mjs is available in your template repo)
+   cargo run --manifest-path apps/server/Cargo.toml -- serve
 
    Options:
      --repo <PATH>        Path to the bare Git repository (default from RELAY_REPO_PATH or ./data/repo.git)
@@ -84,7 +85,7 @@ CLI & Run
 4) Try requests
     - Root listing with breadcrumbs:
       curl -i "http://localhost:8088/?branch=main"
-    - Put a file (validates via hooks):
+    - Put a file (validates via .relay/pre-commit.mjs if present):
       curl -i -X PUT "http://localhost:8088/README.md?branch=main" \
       -H "Content-Type: application/octet-stream" \
       --data-binary @-
@@ -102,12 +103,10 @@ CLI & Run
 Serving order (GET requests)
 
 1. Static directories: if `--static` paths are provided, the server will first try to serve the file from these directories.
-2. Git repository: if the request is not for `.html`, `.htm`, or `.js`, the server reads from the selected bare repo/branch.
-3. IPFS fallback: if not found in static or Git, the server falls back to IPFS using the CID in `ipfs.rootHash` from `relay.yaml` on the selected branch. A 404 is returned if the file does not exist in IPFS; a 503 is returned on timeout with a reason message.
+2. Git repository: the server reads from the selected bare repo/branch.
 
 Notes:
-- The server never serves `.html`, `.htm`, or `.js` files from the Git repository. HTML/JS must come from static directories during development or from IPFS in production.
-- Directory responses are rendered as Markdown or simple HTML and may merge IPFS directory entries when `ipfs.rootHash` is present.
+- The server never serves `.html`, `.htm`, or `.js` files from the Git repository. HTML/JS must come from static directories during development.
 
 Logs
 
@@ -142,8 +141,3 @@ A. Build/export all HTML/JS/asset files of your UI (e.g., into `template-ui/dist
 B. Test locally: run the server and add your UI folder as an additional static directory, then exercise the app.
    - Example:
      cargo run --manifest-path apps/server/Cargo.toml -- serve --repo ./data/repo.git --static ./template-ui/dist
-C. When QA is complete, create an IPFS hash and seed it via the CLI:
-   - Example:
-     cargo run --manifest-path apps/server/Cargo.toml -- ipfs-add ./template-ui/dist
-     # Copy the printed CID
-D. Update `relay.yaml` on your repo branch to set `ipfs.rootHash` to the new CID and deploy/push. The server will then serve UI assets from IPFS.

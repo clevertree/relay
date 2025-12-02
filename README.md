@@ -6,28 +6,19 @@ This monorepo hosts the Relay Network reference implementation:
 - apps/server — Rust Relay Server that serves and commits files directly from a Git repository via a simple HTTP API.
 - apps/client — Tauri (Rust) + React + TypeScript + Tailwind desktop client.
 - apps/tracker — Next.js tracker that stores peer sockets and the repositories/branches they serve (with branch HEAD commits).
-- crates/relay-lib — Shared Rust library with HTTP client helpers and bundled assets (OpenAPI, rules schema, default HTML template, 404 page).
-- crates/hooks — Rust crate used by Git hooks to validate repository rules and enforce insert constraints.
+- crates/relay-lib — Shared Rust library with HTTP client helpers and bundled assets (OpenAPI, default HTML template, 404 page).
 
 What is the Relay API?
 
 The Relay API describes CRUD operations on any repository path while selecting a Git branch and repository subpath via headers/cookies/query. Discovery and capabilities are provided via the HTTP OPTIONS method (no `/status`). Certain file types (html, js) are blocked for writes.
 
-Repository rules (relay.yaml)
+Repository hooks and validation
 
-- Each repository may contain a `relay.yaml` at its root describing what files are allowed to be inserted, the JSON Schema for `meta.json`, and a declarative database policy.
-- These rules are enforced only for new commits (existing files are not retroactively validated).
-- The JSON Schema for `relay.yaml` is bundled in `crates/relay-lib/assets/rules.schema.yaml` and exposed via the `relay_lib::assets` module for Rust.
-- The Relay server returns discovery data (capabilities, branches, repos, current selections) via `OPTIONS` and honors the optional `indexFile` setting when rendering index documents.
-- The commit hooks crate (`crates/hooks`) validates pushes using `relay.yaml` and rejects violations.
-- The rules `db` section enables fully declarative indexing and querying using SQLite. All SQL features are allowed. The system binds named params like `:branch`, `:path`, `:meta_dir`, `:meta_json`, and `:meta_<field>` for top-level meta fields.
-
-Example (movies) highlights:
-- `allowedPaths` whitelist like `data/**/meta.json`, `data/**/index.md`, `data/**/assets/**`.
-- `meta.json` schema: `title` (no trim), `release_date` (YYYY-MM-DD), and `genre` as an array of strings (multi-genre).
-- `db.constraints: [title, release_date]` defines uniqueness; the branch is implied so uniqueness is `(title, release_date, branch)`.
-- `db.insertPolicy.statements` control what is written to the DB (meta is NOT serialized/stored by default).
-- `db.queryPolicy` provides a SQL statement (and optional count) used by the server `/query` endpoint with pagination.
+- Each repository can define custom validation logic in `.relay/pre-commit.mjs` (executed during PUT operations) and `.relay/pre-receive.mjs` (executed during git push).
+- These hooks are executed in a sandboxed Node.js environment with access to git information (old commit, new commit, changed files).
+- Repositories can optionally define `.relay/validation.mjs` with custom validation functions that can be called by the hook scripts.
+- Index maintenance (e.g., tracking meta.json changes) is handled by the hook scripts and stored in `relay_index.json`.
+- Discovery data (capabilities, branches, repos, current selections) is provided via `OPTIONS` method.
 
 Quick Start
 
@@ -192,13 +183,12 @@ Security
 Bundled assets and templating
 - The server and hooks do not access repo-local files from the source tree at runtime. Instead, shared assets are bundled inside `relay-lib`:
   - `assets/openapi.yaml`
-  - `assets/rules.schema.yaml`
   - `assets/template.html` (placeholders: `{title}`, `{head}`, `{body}`)
   - `assets/404.md`
 
 Notes
 
-- The local index database (SQLite/PoloDB) is created/updated by Git hooks based on `rules.db` policies. Do not store this database inside the Git repo.
+- The local index database (if used) is created/updated by hook scripts and should not be stored inside the Git repo.
 
 Licensing
 

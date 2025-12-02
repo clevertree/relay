@@ -53,12 +53,10 @@ class MovieUpsert extends HTMLElement {
     }
 
     async _loadInsertTemplate() {
+        // Template loading would come from .relay/options.mjs or repository-specific scripts
+        // For now, use defaults
         try {
-            const res = await fetch('/relay.yaml', {headers: {'X-Relay-Branch': this._branch()}});
-            if (!res.ok) return;
-            const txt = await res.text();
-            const m = txt.match(/insertTemplate:\s*"([^"]+)"/);
-            if (m) this._insertTemplate = m[1];
+            // Future: load from OPTIONS endpoint or repository configuration
         } catch {
         }
     }

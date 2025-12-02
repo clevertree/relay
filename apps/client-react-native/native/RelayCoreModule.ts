@@ -32,7 +32,6 @@ export interface OptionsResult {
   branches?: string[];
   repos?: string[];
   branch_heads?: Record<string, unknown>;
-  relay_yaml?: Record<string, unknown>;
 }
 
 // JS fallback implementation for early UI bring-up.
