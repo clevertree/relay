@@ -1,6 +1,6 @@
 /**
  * Plugin discovery from OPTIONS endpoint
- * Parses interface metadata from relay.yaml OPTIONS response
+ * Parses interface metadata from sources.yaml OPTIONS response
  */
 
 import {PluginDescriptor} from '../plugins/registry';

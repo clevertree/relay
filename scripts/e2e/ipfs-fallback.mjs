@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // E2E script: IPFS fallback and caching
 // 1) Request /media/screen.png from relay server. The file is expected to be available via the
-//    IPFS root hash referenced in relay.yaml for the repo, but not in the Git checkout. The relay
+//    IPFS root hash referenced in sources.yaml for the repo, but not in the Git checkout. The relay
 //    server should fetch it via IPFS and serve within the server timeout.
 // 2) Request the same file again to ensure it's served from the relay's local cache.
 

@@ -90,16 +90,16 @@ async function main() {
     const status = await waitForServer('http://localhost:8088/status');
     if (!status || !status.ok) throw new Error('Status not ok');
 
-    // If server does not expose rules (no relay.yaml in repo), inject one from template/relay.yaml
+    // If server does not expose rules (no sources.yaml in repo), inject one from template/sources.yaml
     const hasMetaProps = status.rules && status.rules.metaSchema && status.rules.metaSchema.properties;
     if (!hasMetaProps) {
-      console.log('Server did not return rules.metaSchema.properties — injecting template/relay.yaml into repo');
+      console.log('Server did not return rules.metaSchema.properties — injecting template/sources.yaml into repo');
       const bareRepoPath = path.join(process.cwd(), 'data', 'repo.git');
       const tmpRepo = path.join(process.cwd(), 'tmp', 'e2e', 'rules-push');
       fs.mkdirSync(tmpRepo, { recursive: true });
-      // Copy template rules if available, otherwise create a minimal relay.yaml
-      const templatePath = path.join(process.cwd(), 'template', 'relay.yaml');
-      const destRules = path.join(tmpRepo, 'relay.yaml');
+      // Copy template rules if available, otherwise create a minimal sources.yaml
+      const templatePath = path.join(process.cwd(), 'template', 'sources.yaml');
+      const destRules = path.join(tmpRepo, 'sources.yaml');
       if (fs.existsSync(templatePath)) {
         fs.copyFileSync(templatePath, destRules);
       } else {
@@ -110,7 +110,7 @@ async function main() {
       // Initialize tmp git repo and push to bare
       sync('git', ['init'], { cwd: tmpRepo });
       sync('git', ['checkout', '-b', 'main'], { cwd: tmpRepo });
-      sync('git', ['add', 'relay.yaml'], { cwd: tmpRepo });
+      sync('git', ['add', 'sources.yaml'], { cwd: tmpRepo });
       sync('git', ['-c', 'user.name=E2E', '-c', "user.email=e2e@local", 'commit', '-m', 'add rules'], { cwd: tmpRepo });
       const bareUrl = `file://${bareRepoPath}`;
       try {
@@ -124,9 +124,9 @@ async function main() {
       await delay(1000);
       const status2 = await waitForServer('http://localhost:8088/status');
       if (!status2 || !status2.rules || !status2.rules.metaSchema || !status2.rules.metaSchema.properties) {
-        throw new Error('Injecting relay.yaml did not populate server rules.metaSchema.properties');
+        throw new Error('Injecting sources.yaml did not populate server rules.metaSchema.properties');
       }
-      console.log('relay.yaml injected and server now reports metaSchema.properties');
+      console.log('sources.yaml injected and server now reports metaSchema.properties');
     }
 
     // 4) Build relay-cli
@@ -174,7 +174,7 @@ async function main() {
     const invalidRes = sync(cliPath, [ 'put', 'http://localhost:8088', invalidPath, '--branch', 'main' ], { input: invalidBody, encoding: 'utf-8' });
     if (invalidRes.status === 0) {
       // CLI exited 0 — invalid file was accepted which violates rules
-      throw new Error('Invalid file (html) was accepted; expected rejection by relay.yaml');
+      throw new Error('Invalid file (html) was accepted; expected rejection by sources.yaml');
     } else {
       console.log('Invalid file correctly rejected by server (as expected)');
       if (invalidRes.stdout) console.log('Server response stdout:', invalidRes.stdout);

@@ -33,7 +33,7 @@ async function main() {
     fs.mkdirSync(path.dirname(repoPath), {recursive: true});
     const hooksBin = await buildHooksPath();
 
-    // Seed the bare repo with relay.yaml on default branch if empty
+    // Seed the bare repo with sources.yaml on default branch if empty
     function seedRepoIfNeeded() {
         const headPath = path.join(repoPath, 'HEAD');
         const hasHead = fs.existsSync(headPath);
@@ -45,9 +45,9 @@ async function main() {
             spawnSync('git', ['init'], {cwd: tmp, stdio: 'inherit'});
             spawnSync('git', ['checkout', '-b', 'main'], {cwd: tmp, stdio: 'inherit'});
         }
-        // Copy template/relay.yaml or create minimal rules
-        const templateRules = path.join(process.cwd(), 'template', 'relay.yaml');
-        const destRules = path.join(tmp, 'relay.yaml');
+        // Copy template/sources.yaml or create minimal rules
+        const templateRules = path.join(process.cwd(), 'template', 'sources.yaml');
+        const destRules = path.join(tmp, 'sources.yaml');
         if (fs.existsSync(templateRules)) {
             fs.copyFileSync(templateRules, destRules);
         } else {

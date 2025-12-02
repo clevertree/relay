@@ -11,16 +11,13 @@ use axum::{
 use git2::{ObjectType, Oid, Repository, Signature};
 use percent_encoding::percent_decode_str as url_decode;
 use tokio::net::TcpListener;
-// base64 no longer needed after removing SQLite row mapping
+use base64::{engine::general_purpose, Engine as _};
 use pulldown_cmark::{html, Parser as MdParser};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tokio::{
-    process::Command as TokioCommand,
-    time::{timeout, Duration, Instant},
-};
+use tokio::time::{Duration};
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 use tracing_appender::rolling;
@@ -41,22 +38,9 @@ const DEFAULT_BRANCH: &str = "main";
 // but remains blocked for writes via PUT/DELETE (enforced below and by hooks).
 const DISALLOWED: &[&str] = &[".html", ".htm"];
 
-// IPFS integration defaults (can be overridden via env)
-const DEFAULT_IPFS_API: &str = "http://127.0.0.1:5001";
-const DEFAULT_IPFS_PATH: &str = "/srv/relay/ipfs"; // for CLI fallback
 const DEFAULT_IPFS_CACHE_ROOT: &str = "/srv/relay/ipfs-cache";
-const DEFAULT_IPFS_TIMEOUT_SECS: u64 = 10;
 
-// Deduplicate concurrent fetches of the same cache target
-static mut FETCH_IN_PROGRESS: Option<Arc<Mutex<std::collections::HashSet<String>>>> = None;
-
-fn fetch_map() -> Arc<Mutex<std::collections::HashSet<String>>> {
-    unsafe {
-        FETCH_IN_PROGRESS
-            .get_or_insert_with(|| Arc::new(Mutex::new(std::collections::HashSet::new())))
-            .clone()
-    }
-}
+// IPFS fetch deduplication removed; IPFS resolution is delegated to repo script
 
 #[derive(Parser, Debug)]
 #[command(name = "relay-server", version, about = "Relay Server and CLI utilities", propagate_version = true)]
@@ -69,8 +53,6 @@ struct Cli {
 enum Commands {
     /// Run the HTTP server
     Serve(ServeArgs),
-    /// Add a directory to IPFS (recursively) and print the root CID
-    IpfsAdd(IpfsAddArgs),
 }
 
 #[derive(Args, Debug)]
@@ -86,22 +68,13 @@ struct ServeArgs {
     bind: Option<String>,
 }
 
-#[derive(Args, Debug)]
-struct IpfsAddArgs {
-    /// Directory to add to IPFS
-    dir: PathBuf,
-    /// IPFS repository directory (IPFS_PATH); if omitted, uses env/IPFS defaults
-    #[arg(long)]
-    ipfs_path: Option<PathBuf>,
-}
+// IpfsAdd removed — IPFS logic is delegated to repo scripts
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    if let Some(Commands::IpfsAdd(args)) = cli.command.as_ref() {
-        return ipfs_add_cli(args).await;
-    }
+    // No IPFS CLI commands; IPFS resolution is delegated to repo script (.relay/get.mjs)
 
     // Set up logging: stdout + rolling file appender
     // Ensure logs directory exists
@@ -482,150 +455,88 @@ fn list_branch_heads(repo_path: &PathBuf) -> Vec<(String, String)> {
     out
 }
 
-#[derive(Deserialize)]
-struct QueryRequest {
-    #[serde(default)]
-    page: Option<u32>,
-    #[serde(default, rename = "pageSize")]
-    page_size: Option<u32>,
-    #[serde(default)]
-    filter: Option<serde_json::Value>,
-    #[serde(default)]
-    sort: Option<Vec<relay_lib::db::SortSpec>>, // optional override
-    #[serde(default)]
-    params: Option<serde_json::Value>, // legacy alias for filter
-}
-
-#[derive(Serialize)]
-struct QueryResponse {
-    items: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    total: Option<i64>,
-    page: usize,
-    #[serde(rename = "pageSize")]
-    page_size: usize,
-    branch: String,
-}
+// QueryRequest/Response handled entirely by repo script (.relay/query.mjs)
 
 async fn post_query(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Option<Json<serde_json::Value>>,
 ) -> impl IntoResponse {
-    use relay_lib::db::{Db, DbSpec, QueryParams};
-    // Resolve branch (allow 'all')
+    // Resolve branch
     let branch = headers
         .get(HEADER_BRANCH)
         .and_then(|v| v.to_str().ok())
         .unwrap_or(DEFAULT_BRANCH)
         .to_string();
-    let req: QueryRequest = match body {
-        Some(Json(v)) => serde_json::from_value(v).unwrap_or(QueryRequest {
-            page: Some(0),
-            page_size: Some(25),
-            filter: None,
-            sort: None,
-            params: None,
-        }),
-        None => QueryRequest {
-            page: Some(0),
-            page_size: Some(25),
-            filter: None,
-            sort: None,
-            params: None,
-        },
-    };
+    let input_json = body.map(|Json(v)| v).unwrap_or(serde_json::json!({}));
 
-    // Open repo and read rules (for db spec)
+    // Load .relay/query.mjs from branch
     let repo = match Repository::open_bare(&state.repo_path) {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
-    let rules_bytes = match read_file_from_repo(&state.repo_path, DEFAULT_BRANCH, "relay.yaml") {
-        Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                "relay.yaml not found on default branch",
-            )
-                .into_response()
-        }
-    };
-    let rules_yaml = String::from_utf8_lossy(&rules_bytes);
-    let rules_val: serde_json::Value = match serde_yaml::from_str::<serde_json::Value>(&rules_yaml)
+    let refname = format!("refs/heads/{}", branch);
+    let commit = match repo
+        .find_reference(&refname)
+        .and_then(|r| r.peel_to_commit())
     {
-        Ok(v) => v,
-        Err(e) => {
-            return (StatusCode::BAD_REQUEST, format!("invalid relay.yaml: {e}")).into_response()
-        }
+        Ok(c) => c,
+        Err(_) => return (StatusCode::NOT_FOUND, "branch not found").into_response(),
     };
-    let db_val = match rules_val.get("db") {
-        Some(v) => v.clone(),
-        None => return (StatusCode::BAD_REQUEST, "rules.db not defined").into_response(),
+    let tree = match commit.tree() {
+        Ok(t) => t,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
-    let spec: DbSpec = match serde_json::from_value(db_val) {
-        Ok(s) => s,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                format!("invalid rules.db spec: {e}"),
-            )
-                .into_response()
-        }
+    let entry = match tree.get_path(std::path::Path::new(".relay/query.mjs")) {
+        Ok(e) => e,
+        Err(_) => return (StatusCode::BAD_REQUEST, ".relay/query.mjs not found").into_response(),
     };
-    if spec.engine.to_lowercase() != "polodb" {
-        return (
-            StatusCode::BAD_REQUEST,
-            format!("unsupported db.engine: {}", spec.engine),
-        )
-            .into_response();
+    let blob = match entry.to_object(&repo).and_then(|o| o.peel_to_blob()) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let tmp = std::env::temp_dir().join(format!("relay-query-{}-{}.mjs", branch, commit.id()));
+    if let Err(e) = std::fs::write(&tmp, blob.content()) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
-    // Resolve DB path: env RELAY_DB_PATH or default under repo git dir
-    let db_path = std::env::var("RELAY_DB_PATH").unwrap_or_else(|_| {
-        repo.path()
-            .join("relay_index.polodb")
-            .to_string_lossy()
-            .to_string()
-    });
-    let db = match Db::open(&db_path) {
-        Ok(d) => d,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("DB open failed: {e}"),
-            )
-                .into_response()
+    let node_bin = std::env::var("RELAY_NODE_BIN").unwrap_or_else(|_| "node".to_string());
+    let mut cmd = std::process::Command::new(node_bin);
+    cmd.arg(&tmp)
+        .env("GIT_DIR", repo.path())
+        .env("BRANCH", &branch)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let Ok(mut child) = cmd.spawn() {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = std::io::Write::write_all(&mut stdin, input_json.to_string().as_bytes());
         }
-    };
-    if let Err(e) = db.ensure_indexes(&spec) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("ensure indexes failed: {e}"),
-        )
-            .into_response();
-    }
-    // Build query params
-    let mut qp = QueryParams::default();
-    qp.page = req.page;
-    qp.page_size = req.page_size;
-    qp.sort = req.sort.clone();
-    qp.filter = if let Some(f) = req.filter {
-        Some(f)
+        match child.wait_with_output() {
+            Ok(output) => {
+                let _ = std::fs::remove_file(&tmp);
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return (StatusCode::BAD_REQUEST, stderr.to_string()).into_response();
+                }
+                match serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+                    Ok(v) => (
+                        StatusCode::OK,
+                        [("Content-Type", "application/json".to_string()), (HEADER_BRANCH, branch)],
+                        Json(v),
+                    )
+                        .into_response(),
+                    Err(e) => (
+                        StatusCode::BAD_REQUEST,
+                        format!("query.mjs returned invalid JSON: {}", e),
+                    )
+                        .into_response(),
+                }
+            }
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
     } else {
-        req.params
-    };
-    let qr = match db.query(&spec, Some(&branch), &qp) {
-        Ok(r) => r,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("query failed: {e}")).into_response(),
-    };
-    let resp = QueryResponse {
-        items: serde_json::Value::Array(qr.items),
-        total: Some(qr.total as i64),
-        page: qr.page as usize,
-        page_size: qr.page_size as usize,
-        branch,
-    };
-    (StatusCode::OK, Json(resp)).into_response()
+        (StatusCode::INTERNAL_SERVER_ERROR, "failed to spawn node").into_response()
+    }
 }
 
 // Middleware that rewrites custom HTTP method QUERY to POST /query/*
@@ -1354,9 +1265,123 @@ async fn get_file(
     match git_result {
         GitResolveResult::Respond(resp) => return resp,
         GitResolveResult::NotFound(rel_missing) => {
-            // Git miss: attempt IPFS fallback with timeout and logging
-            return ipfs_fallback_or_404(&state, &branch, &repo_name, &rel_missing, &decoded).await;
+            // Git miss: delegate to repo get script (.relay/get.mjs)
+            return run_get_script_or_404(&state, &branch, &repo_name, &rel_missing).await;
         }
+    }
+}
+
+async fn run_get_script_or_404(
+    state: &AppState,
+    branch: &str,
+    repo_name: &str,
+    rel_missing: &str,
+) -> Response {
+    // Load .relay/get.mjs from branch
+    let repo = match Repository::open_bare(&state.repo_path) {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let refname = format!("refs/heads/{}", branch);
+    let commit = match repo
+        .find_reference(&refname)
+        .and_then(|r| r.peel_to_commit())
+    {
+        Ok(c) => c,
+        Err(_) => return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+    };
+    let tree = match commit.tree() {
+        Ok(t) => t,
+        Err(_) => return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+    };
+    let entry = match tree.get_path(std::path::Path::new(".relay/get.mjs")) {
+        Ok(e) => e,
+        Err(_) => return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+    };
+    let blob = match entry.to_object(&repo).and_then(|o| o.peel_to_blob()) {
+        Ok(b) => b,
+        Err(_) => return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
+    };
+    let tmp = std::env::temp_dir().join(format!("relay-get-{}-{}.mjs", branch, commit.id()));
+    if let Err(e) = std::fs::write(&tmp, blob.content()) {
+        error!(?e, "failed to write get.mjs temp file");
+        return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing);
+    }
+    let node_bin = std::env::var("RELAY_NODE_BIN").unwrap_or_else(|_| "node".to_string());
+    let mut cmd = std::process::Command::new(node_bin);
+    cmd.arg(&tmp)
+        .env("GIT_DIR", repo.path())
+        .env("BRANCH", branch)
+        .env("REL_PATH", rel_missing)
+        .env(
+            "CACHE_ROOT",
+            std::env::var("RELAY_IPFS_CACHE_ROOT")
+                .unwrap_or_else(|_| DEFAULT_IPFS_CACHE_ROOT.to_string()),
+        )
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let output = match cmd.output() {
+        Ok(o) => o,
+        Err(e) => {
+            error!(?e, "failed to execute get.mjs");
+            let _ = std::fs::remove_file(&tmp);
+            return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing);
+        }
+    };
+    let _ = std::fs::remove_file(&tmp);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!(%stderr, "get.mjs non-success status");
+        return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing);
+    }
+    let val: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(?e, "get.mjs returned invalid JSON");
+            return render_404_markdown(&state.repo_path, branch, repo_name, rel_missing);
+        }
+    };
+    let kind = val.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+    match kind {
+        "file" => {
+            let ct = val
+                .get("contentType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("application/octet-stream");
+            let b64 = val
+                .get("bodyBase64")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match general_purpose::STANDARD.decode(b64.as_bytes()) {
+                Ok(bytes) => (
+                    StatusCode::OK,
+                    [
+                        ("Content-Type", ct.to_string()),
+                        (HEADER_BRANCH, branch.to_string()),
+                        (HEADER_REPO, repo_name.to_string()),
+                    ],
+                    bytes,
+                )
+                    .into_response(),
+                Err(e) => {
+                    warn!(?e, "failed to decode get.mjs bodyBase64");
+                    render_404_markdown(&state.repo_path, branch, repo_name, rel_missing)
+                }
+            }
+        }
+        "dir" => {
+            (
+                StatusCode::OK,
+                [
+                    ("Content-Type", "application/json".to_string()),
+                    (HEADER_BRANCH, branch.to_string()),
+                    (HEADER_REPO, repo_name.to_string()),
+                ],
+                Json(val),
+            )
+                .into_response()
+        }
+        _ => render_404_markdown(&state.repo_path, branch, repo_name, rel_missing),
     }
 }
 
@@ -1564,33 +1589,8 @@ fn git_resolve_and_respond(
             }
         },
         Some(ObjectType::Tree) => {
-            let sub_tree = match repo.find_tree(entry.id()) {
-                Ok(t) => t,
-                Err(e) => {
-                    error!(?e, "subtree error");
-                    return GitResolveResult::Respond(
-                        StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-                    );
-                }
-            };
-            let accept_hdr = headers
-                .get("accept")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            let (ct, body) = directory_response(
-                repo_path, &tree, &sub_tree, rel, accept_hdr, branch, repo_name,
-            );
-            let resp = (
-                StatusCode::OK,
-                [
-                    ("Content-Type", ct),
-                    (HEADER_BRANCH, branch.to_string()),
-                    (HEADER_REPO, repo_name.to_string()),
-                ],
-                body,
-            )
-                .into_response();
-            GitResolveResult::Respond(resp)
+            // Defer directory listing logic to repo script (.relay/get.mjs)
+            GitResolveResult::NotFound(rel.to_string())
         }
         _ => GitResolveResult::Respond(render_404_markdown(repo_path, branch, repo_name, rel)),
     }
@@ -1893,57 +1893,8 @@ async fn get_root(
         }
     };
     info!(%branch, "get_root resolved branch");
-    let repo = match Repository::open_bare(&state.repo_path) {
-        Ok(r) => r,
-        Err(e) => {
-            error!(?e, "open repo error");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    let refname = format!("refs/heads/{}", branch);
-    let reference = match repo.find_reference(&refname) {
-        Ok(r) => r,
-        Err(_) => {
-            return render_404_markdown(&state.repo_path, &branch, &repo_name, "");
-        }
-    };
-    let commit = match reference.peel_to_commit() {
-        Ok(c) => c,
-        Err(e) => {
-            error!(?e, "peel to commit error");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    let tree = match commit.tree() {
-        Ok(t) => t,
-        Err(e) => {
-            error!(?e, "tree error");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    let accept_hdr = headers
-        .get("accept")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let (ct, body) = directory_response(
-        &state.repo_path,
-        &tree,
-        &tree,
-        if repo_name.is_empty() { "" } else { &repo_name },
-        accept_hdr,
-        &branch,
-        &repo_name,
-    );
-    (
-        StatusCode::OK,
-        [
-            ("Content-Type", ct),
-            (HEADER_BRANCH, branch.clone()),
-            (HEADER_REPO, repo_name.clone()),
-        ],
-        body,
-    )
-        .into_response()
+    // Defer directory listing logic to .relay/get.mjs
+    run_get_script_or_404(&state, &branch, &repo_name, "").await
 }
 
 async fn put_file(
@@ -2641,40 +2592,7 @@ fn write_file_to_repo(
     // Write blob
     let blob_oid = repo.blob(content)?;
 
-    // If this is a meta.json being written, validate against rules.metaSchema from default branch relay.yaml
-    if path.ends_with("meta.json") {
-        // Attempt to read relay.yaml from default branch
-        if let Ok(bytes) = read_file_from_repo(repo_path, DEFAULT_BRANCH, "relay.yaml") {
-            if let Ok(rules_yaml) = String::from_utf8(bytes) {
-                if let Ok(rules_val) = serde_yaml::from_str::<serde_json::Value>(&rules_yaml) {
-                    if let Some(meta_schema) = rules_val.get("metaSchema") {
-                        // Compile schema and validate
-                        // Leak to satisfy jsonschema static lifetime requirement
-                        let leaked_schema: &'static serde_json::Value =
-                            Box::leak(Box::new(meta_schema.clone()));
-                        let compiled =
-                            jsonschema::JSONSchema::compile(leaked_schema).map_err(|e| {
-                                anyhow::anyhow!("invalid metaSchema in relay.yaml: {}", e)
-                            })?;
-                        let meta_json: serde_json::Value = serde_json::from_slice(content)
-                            .map_err(|e| anyhow::anyhow!("meta.json is not valid JSON: {}", e))?;
-                        if !compiled.is_valid(&meta_json) {
-                            let mut msgs: Vec<String> = Vec::new();
-                            if let Err(errors) = compiled.validate(&meta_json) {
-                                for e in errors {
-                                    msgs.push(format!("{} at {}", e, e.instance_path));
-                                }
-                            }
-                            return Err(anyhow::anyhow!(
-                                "meta.json failed schema validation: {}",
-                                msgs.join("; ")
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Server no longer validates meta files; validation is delegated to repo pre-commit script
 
     // Update tree recursively for the path
     let mut components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
@@ -2726,35 +2644,44 @@ fn write_file_to_repo(
 
     debug!(%commit_oid, %branch, path = %path, "created commit candidate");
 
-    // Run pre-receive hook via relay-hooks binary
-    // Provide stdin: "<old> <new> <ref>\n"
-    let old_oid = parent_commit
-        .as_ref()
-        .map(|c| c.id())
-        .unwrap_or_else(|| Oid::zero());
-    let hook_input = format!("{} {} {}\n", old_oid, commit_oid, &refname);
-    let hook_bin = std::env::var("RELAY_HOOKS_BIN").unwrap_or_else(|_| "relay-hooks".to_string());
-    let mut cmd = std::process::Command::new(hook_bin);
-    cmd.arg("--hook")
-        .arg("pre-receive")
-        .env("GIT_DIR", repo.path())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to spawn relay-hooks: {}", e))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write;
-        let _ = stdin.write_all(hook_input.as_bytes());
-    }
-    let output = child
-        .wait_with_output()
-        .map_err(|e| anyhow::anyhow!("failed waiting for relay-hooks: {}", e))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        error!(%stderr, status = ?output.status, "pre-receive hook rejected commit");
-        anyhow::bail!("commit rejected by hooks: {}", stderr.trim());
+    // Run repo pre-commit script (.relay/pre-commit.mjs) if present in the new commit
+    {
+        let node_bin = std::env::var("RELAY_NODE_BIN").unwrap_or_else(|_| "node".to_string());
+        if let Ok(new_commit_obj) = repo.find_commit(commit_oid) {
+            if let Ok(tree) = new_commit_obj.tree() {
+                use std::io::Write as _;
+                if let Ok(entry) = tree.get_path(std::path::Path::new(".relay/pre-commit.mjs")) {
+                    if let Ok(blob) = entry.to_object(&repo).and_then(|o| o.peel_to_blob()) {
+                        let tmp_path = std::env::temp_dir()
+                            .join(format!("relay-pre-commit-{}-{}.mjs", branch, commit_oid));
+                        if let Ok(_) = std::fs::write(&tmp_path, blob.content()) {
+                            let mut cmd = std::process::Command::new(node_bin);
+                            cmd.arg(&tmp_path)
+                                .env("GIT_DIR", repo.path())
+                                .env("OLD_COMMIT", parent_commit.as_ref().map(|c| c.id().to_string()).unwrap_or_else(|| String::from("0000000000000000000000000000000000000000")))
+                                .env("NEW_COMMIT", commit_oid.to_string())
+                                .env("REFNAME", &refname)
+                                .env("BRANCH", branch)
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped());
+                            match cmd.output() {
+                                Ok(output) => {
+                                    if !output.status.success() {
+                                        let stderr = String::from_utf8_lossy(&output.stderr);
+                                        error!(%stderr, "pre-commit.mjs rejected commit");
+                                        anyhow::bail!("commit rejected by pre-commit.mjs: {}", stderr.trim());
+                                    }
+                                }
+                                Err(e) => {
+                                    anyhow::bail!("failed to execute pre-commit.mjs: {}", e);
+                                }
+                            }
+                            let _ = std::fs::remove_file(&tmp_path);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Update ref to new commit
@@ -2767,16 +2694,7 @@ fn write_file_to_repo(
         }
     }
 
-    // Optional: run update hook (best-effort)
-    let _ = std::process::Command::new(
-        std::env::var("RELAY_HOOKS_BIN").unwrap_or_else(|_| "relay-hooks".to_string()),
-    )
-    .arg("--hook")
-    .arg("update")
-    .env("GIT_DIR", repo.path())
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null())
-    .status();
+    // No update hook; all DB/indexing logic is delegated to repo scripts
 
     Ok((commit_oid.to_string(), branch.to_string()))
 }
