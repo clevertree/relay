@@ -1,0 +1,62 @@
+name: android-build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assemble:
+    name: Build Android Release
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: /usr/lib/android-sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: 17
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Cache Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/client-react-native/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Install npm dependencies
+        working-directory: apps/client-react-native
+        run: npm install
+
+      - name: Run typecheck
+        working-directory: apps/client-react-native
+        run: npm run typecheck
+
+      - name: Assemble release APK
+        run: |
+          cd apps/client-react-native/android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-android-release-apk
+          path: apps/client-react-native/android/app/build/outputs/apk/release/app-release.apk
