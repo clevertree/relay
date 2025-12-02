@@ -19,6 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import MarkdownView from '../components/MarkdownView';
 
 const DEFAULT_PAGE_SIZE = 50;
 const CACHE_TTL_MS = 300000; // 5 minutes
@@ -410,12 +411,14 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Current path indicator */}
-      <View style={styles.pathIndicator}>
-        <Text style={styles.pathText} numberOfLines={1}>
-          {mode === 'visit' ? 'Viewing:' : `Results (${results.length})`} {path}
-        </Text>
-      </View>
+      {/* Current path indicator (only shown for search results) */}
+      {mode === 'search' && (
+        <View style={styles.pathIndicator}>
+          <Text style={styles.pathText} numberOfLines={1}>
+            {`Results (${results.length})`} {path}
+          </Text>
+        </View>
+      )}
 
       {/* Content area */}
       {loading && displayedResults.length === 0 ? (
@@ -433,27 +436,75 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
           </TouchableOpacity>
         </View>
       ) : (
-        <FlatList
-          data={displayedResults}
-          keyExtractor={(item, index) => item.path || `${index}`}
-          renderItem={renderResultItem}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
+        // If visiting a path and the first result contains file content render
+        // it using the MarkdownView. Otherwise show the search/list view.
+        (mode === 'visit' && displayedResults.length > 0 && (displayedResults[0] as any).content) ? (
+          <View style={styles.markdownContainer}>
+            <MarkdownView
+              content={(displayedResults[0] as any).content as string}
+              baseUrl={getBaseUrl()}
+              branch={branch}
+              onLinkPress={(url) => {
+                // Navigate to external links in browser
+                // If internal path, set as new input and visit
+                try {
+                  const parsed = new URL(url);
+                  // If host matches base host, convert to relative path
+                  if (parsed.host === new URL(getBaseUrl()).host) {
+                    const relPath = parsed.pathname.replace(/^\//, '');
+                    setInputValue(relPath);
+                    setPath(relPath);
+                    onNavigate?.(relPath);
+                  } else {
+                    // External
+                    // eslint-disable-next-line @typescript-eslint/no-var-requires
+                    const {Linking} = require('react-native');
+                    Linking.openURL(url);
+                  }
+                } catch (e) {
+                  // Not a full URL - treat as internal path
+                  const rel = url.replace(/^\//, '');
+                  setInputValue(rel);
+                  setPath(rel);
+                  onNavigate?.(rel);
+                }
+              }}
             />
-          }
-          ListFooterComponent={renderFooter}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>
-                {mode === 'search' ? 'No results found' : 'Enter a path and tap Visit'}
-              </Text>
-            </View>
-          }
-          contentContainerStyle={displayedResults.length === 0 ? styles.emptyList : undefined}
-        />
+          </View>
+        ) : (
+          <FlatList
+            data={displayedResults}
+            keyExtractor={(item, index) => item.path || `${index}`}
+            renderItem={renderResultItem}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+              />
+            }
+            ListFooterComponent={renderFooter}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>
+                  {mode === 'search' ? 'No results found' : 'Enter a path and tap Visit'}
+                </Text>
+              </View>
+            }
+            contentContainerStyle={displayedResults.length === 0 ? styles.emptyList : undefined}
+          />
+        )
       )}
+
+      {/* Bottom status bar */}
+      <View style={styles.statusBar}>
+        {loading ? (
+          <Text style={styles.statusText}>{mode === 'visit' ? 'Fetching...' : 'Searching...'}</Text>
+        ) : error ? (
+          <Text style={[styles.statusText, styles.statusError]} numberOfLines={1}>{error}</Text>
+        ) : (
+          <Text style={styles.statusText}>Ready</Text>
+        )}
+      </View>
     </View>
   );
 };
@@ -606,6 +657,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#007AFF',
+  },
+  markdownContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  statusBar: {
+    height: 40,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  statusText: {
+    fontSize: 13,
+    color: '#444',
+  },
+  statusError: {
+    color: '#dc3545',
   },
 });
 
