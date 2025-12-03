@@ -101,21 +101,22 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   }
 
   return (
-    <div className="repo-browser">
-      <div className="repo-header">
-        <form className="repo-path-input" onSubmit={handlePathSubmit}>
+    <div className="flex flex-col h-full bg-white">
+      <div className="flex flex-col gap-3 p-0 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+        <form className="flex gap-2 p-2" onSubmit={handlePathSubmit}>
           <input
             type="text"
             value={pathInput}
             onChange={(e) => setPathInput(e.target.value)}
             placeholder="Enter path..."
+            className="flex-1 px-2 py-2 border border-gray-300 rounded font-mono text-sm"
           />
-          <button type="submit">Go</button>
+          <button type="submit" className="px-4 py-2 bg-blue-500 text-white border-none rounded cursor-pointer text-sm font-medium hover:bg-blue-600">Go</button>
         </form>
 
-        <div className="repo-branches">
+        <div className="flex gap-4 p-2">
           {optionsInfo.branches && optionsInfo.branches.length > 0 && (
-            <label>
+            <label className="flex items-center gap-2 text-sm">
               <span>Branch:</span>
               <select
                 value={tab.currentBranch ?? optionsInfo.branches[0] ?? ''}
@@ -125,6 +126,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
                     currentBranch: e.target.value,
                   }))
                 }}
+                className="px-2 py-1 border border-gray-300 rounded text-sm bg-white cursor-pointer"
               >
                 {optionsInfo.branches.map((branch) => (
                   <option key={branch} value={branch}>
@@ -137,14 +139,14 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         </div>
       </div>
 
-      <div className="repo-content">
-        {loading && <div className="loading">Loading...</div>}
+      <div className="flex-1 overflow-y-auto p-8">
+        {loading && <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>}
 
         {error && (
-          <div className="error">
-            <h3>Error</h3>
+          <div className="p-8 bg-red-100/50 border border-red-300/50 rounded-lg text-red-600">
+            <h3 className="mt-0">Error</h3>
             <p>{error}</p>
-            <button onClick={loadContent}>Try Again</button>
+            <button onClick={loadContent} className="px-4 py-2 bg-red-600 text-white border-none rounded cursor-pointer mt-4 hover:bg-red-700">Try Again</button>
           </div>
         )}
 

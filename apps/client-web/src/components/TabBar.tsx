@@ -23,20 +23,24 @@ export function TabBar({ onTabChange }: TabBarProps) {
   }
 
   return (
-    <div className="tab-bar">
-      <div className="tabs-container">
+    <div className="bg-gray-50 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
+      <div className="flex gap-1 p-0 min-h-11 items-center">
         {tabs.map((tab) => (
           <div
             key={tab.id}
-            className={`tab ${activeTabId === tab.id ? 'active' : ''}`}
+            className={`flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 border-b-2 rounded-t-lg cursor-pointer transition-all flex-shrink-0 min-w-32 max-w-60 ${
+              activeTabId === tab.id
+                ? 'border-b-blue-500 font-semibold'
+                : 'border-b-transparent hover:bg-gray-50 hover:border-gray-400'
+            }`}
             onClick={() => handleTabClick(tab.id)}
           >
-            <span className="tab-title" title={tab.title}>
+            <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-gray-900" title={tab.title}>
               {tab.title}
             </span>
             {!tab.isHome && (
               <button
-                className="tab-close"
+                className="bg-none border-none text-xl cursor-pointer text-gray-500 p-0 w-6 h-6 flex items-center justify-center rounded transition-all flex-shrink-0 hover:bg-gray-200 hover:text-gray-700"
                 onClick={(e) => handleCloseTab(e, tab.id)}
                 aria-label="Close tab"
               >
