@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "npm --prefix apps/client run dev",
     "dev:client": "cargo run --manifest-path apps/client/Cargo.toml",
-    "dev:client:valdi": "cargo run --manifest-path apps/client-valdi/Cargo.toml",
     "build:client": "cargo build --manifest-path apps/client/Cargo.toml",
-    "build:client:valdi": "cargo build --manifest-path apps/client-valdi/Cargo.toml",
     "dev:server": "cargo run --manifest-path apps/server/Cargo.toml -- serve",
     "build:server": "cargo build --manifest-path apps/server/Cargo.toml",
     "server:ipfs-add": "cargo run --manifest-path apps/server/Cargo.toml -- ipfs-add template-ui",
@@ -25,6 +23,7 @@
     "test:e2e": "playwright test",
     "rn:start": "npm --prefix apps/client-react-native run start",
     "rn:android": "npm --prefix apps/client-react-native run android",
+    "rn:android:release": "npm --prefix apps/client-react-native run android:release",
     "rn:ios": "npm --prefix apps/client-react-native run ios",
     "rn:typecheck": "npm --prefix apps/client-react-native run typecheck"
   },
