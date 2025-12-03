@@ -40,10 +40,11 @@ reports/
 # lockfiles (pnpm uses pnpm-lock.yaml, but ignore package-lock if present)
 package-lock.json
 
-# environment files
+# environment files (but allow in client-web for build configuration)
 .env
 .env.local
 .env.*.local
+!apps/client-web/.env
 
 # Terraform secrets (do not commit)
 terraform/**/.terraform/
