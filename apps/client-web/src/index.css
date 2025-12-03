@@ -1,65 +1,67 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-    line-height: 1.5;
-    font-weight: 400;
+* {
+  box-sizing: border-box;
+}
 
-    color: #213547;
-    background-color: #ffffff;
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
 
-    font-synthesis: none;
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
+  color: #213547;
+  background-color: #ffffff;
 
-  html, body {
-    width: 100%;
-    height: 100%;
-  }
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
-  body {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
+html, body {
+  width: 100%;
+  height: 100%;
+}
 
-  #root {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  }
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
 
-  a {
-    @apply font-medium text-[#646cff] hover:text-[#535bf2] no-underline;
-  }
+#root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
 
-  button {
-    @apply rounded-lg border border-transparent px-5 py-2.5 text-base font-medium font-inherit cursor-pointer transition-colors;
-  }
+a {
+  @apply font-medium text-[#646cff] hover:text-[#535bf2] no-underline;
+}
 
-  h1, h2, h3, h4, h5, h6 {
-    line-height: 1.2;
-  }
+button {
+  @apply rounded-lg border border-transparent px-5 py-2.5 text-base font-medium font-inherit cursor-pointer transition-colors;
+}
 
-  code {
-    @apply font-mono bg-black/20 px-1 py-0.5 rounded text-sm;
-  }
+h1, h2, h3, h4, h5, h6 {
+  line-height: 1.2;
+}
 
-  pre {
-    @apply bg-black/30 p-4 rounded-lg overflow-x-auto;
-  }
+code {
+  @apply font-mono bg-black/20 px-1 py-0.5 rounded text-sm;
+}
 
-  pre code {
-    @apply bg-transparent p-0;
-  }
+pre {
+  @apply bg-black/30 p-4 rounded-lg overflow-x-auto;
+}
 
-  *::selection {
-    @apply bg-[#646cff]/20;
-  }
+pre code {
+  @apply bg-transparent p-0;
+}
+
+*::selection {
+  @apply bg-[#646cff]/20;
 }
 
 @layer components {
