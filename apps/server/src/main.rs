@@ -1064,7 +1064,7 @@ fn repo_from(
     query: &Option<HashMap<String, String>>,
     branch: &str,
 ) -> Option<String> {
-    // Precedence: query ?repo= -> header X-Relay-Repo -> cookie relay-repo -> env RELAY_DEFAULT_REPO -> first in list_repos -> default empty repo
+    // Precedence: query ?repo= -> header X-Relay-Repo -> cookie relay-repo -> env RELAY_DEFAULT_REPO -> "" (root) -> first in list_repos
     if let Some(q) = query {
         if let Some(r) = q.get("repo").and_then(|s| sanitize_repo_name(s)) {
             return Some(r);
@@ -1094,10 +1094,7 @@ fn repo_from(
             return Some(s);
         }
     }
-    if let Ok(list) = list_repos(repo_path, branch) {
-        return list.into_iter().next();
-    }
-    // If no subdirectories found, serve the root as the default repository
+    // Prefer root repository ("") as the default, then fall back to first subdirectory
     Some("".to_string())
 }
 
@@ -1430,8 +1427,40 @@ fn git_resolve_and_respond(
             }
         },
         Some(ObjectType::Tree) => {
-            // Defer directory listing logic to repo script (.relay/get.mjs)
-            GitResolveResult::NotFound(rel.to_string())
+            // List directory contents as JSON
+            match repo.find_tree(entry.id()) {
+                Ok(dir_tree) => {
+                    let mut entries = serde_json::json!({});
+                    for item in dir_tree.iter() {
+                        if let Some(name) = item.name() {
+                            let kind = match item.kind() {
+                                Some(ObjectType::Blob) => "file",
+                                Some(ObjectType::Tree) => "dir",
+                                _ => "unknown",
+                            };
+                            entries[name] = serde_json::json!({
+                                "type": kind,
+                                "path": format!("{}/{}", rel, name)
+                            });
+                        }
+                    }
+                    let resp = (
+                        StatusCode::OK,
+                        [
+                            ("Content-Type", "application/json".to_string()),
+                            (HEADER_BRANCH, branch.to_string()),
+                            (HEADER_REPO, repo_name.to_string()),
+                        ],
+                        serde_json::to_string(&entries).unwrap_or_else(|_| "{}".to_string()),
+                    )
+                        .into_response();
+                    GitResolveResult::Respond(resp)
+                }
+                Err(e) => {
+                    error!(?e, "tree read error");
+                    GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response())
+                }
+            }
         }
         _ => GitResolveResult::NotFound(rel.to_string()),
     }
