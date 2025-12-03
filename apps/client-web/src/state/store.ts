@@ -76,7 +76,7 @@ export const useAppState = create<AppState>((set, get) => ({
   // Tabs state
   tabs: [],
   activeTabId: null,
-  openTab: (host, path = '/') => {
+  openTab: (host, path = '/README.md') => {
     const existingTab = get().tabs.find((t) => t.host === host && t.path === path)
     if (existingTab) {
       set({ activeTabId: existingTab.id })

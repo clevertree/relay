@@ -21,10 +21,11 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   const [error, setError] = useState<string | null>(null)
   const [content, setContent] = useState<string | null>(null)
   const [optionsInfo, setOptionsInfo] = useState<OptionsInfo>({})
-  const [pathInput, setPathInput] = useState(tab?.path ?? '/')
+  const [pathInput, setPathInput] = useState(tab?.path ?? '/README.md')
 
   useEffect(() => {
     if (!tab) return
+    setPathInput(tab.path)
     loadOptions()
     loadContent()
   }, [tab?.host, tab?.path])
