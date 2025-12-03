@@ -1,0 +1,255 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useAppState, type PeerInfo } from '../state/store'
+import { fullProbePeer } from '../services/probing'
+import './PeersView.css'
+
+const AUTO_REFRESH_INTERVAL_MS = 10000 // 10 seconds
+
+interface PeersViewProps {
+  onPeerPress?: (host: string) => void
+}
+
+export function PeersView({ onPeerPress }: PeersViewProps) {
+  const peers = useAppState((s) => s.peers)
+  const setPeers = useAppState((s) => s.setPeers)
+  const updatePeer = useAppState((s) => s.updatePeer)
+  const setPeerProbing = useAppState((s) => s.setPeerProbing)
+  const autoRefreshEnabled = useAppState((s) => s.autoRefreshEnabled)
+  const setAutoRefresh = useAppState((s) => s.setAutoRefresh)
+  const setLastRefreshTs = useAppState((s) => s.setLastRefreshTs)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Probe a single peer
+  const probePeer = useCallback(
+    async (host: string) => {
+      setPeerProbing(host, true)
+      try {
+        const result = await fullProbePeer(host)
+        updatePeer(host, (p) => ({
+          ...p,
+          probes: result.probes,
+          lastUpdateTs: result.lastUpdateTs,
+          branches: result.branches,
+          repos: result.repos,
+          isProbing: false,
+        }))
+      } catch (e) {
+        updatePeer(host, (p) => ({
+          ...p,
+          isProbing: false,
+        }))
+      }
+    },
+    [setPeerProbing, updatePeer],
+  )
+
+  // Probe all peers
+  const probeAllPeers = useCallback(async () => {
+    const currentPeers = useAppState.getState().peers
+    await Promise.all(currentPeers.map((p) => probePeer(p.host)))
+    setLastRefreshTs(Date.now())
+  }, [probePeer, setLastRefreshTs])
+
+  // Load peers from environment (simulate fetching from tracker)
+  const loadAndProbePeers = useCallback(async () => {
+    console.log('[loadAndProbePeers] Starting...')
+    setIsRefreshing(true)
+    try {
+      // Parse peers from environment variable or URL params
+      const envPeers = await getPeersFromEnvironment()
+      console.log('[loadAndProbePeers] Got peers:', envPeers)
+      console.log('[loadAndProbePeers] Calling setPeers with:', envPeers)
+      setPeers(envPeers)
+      console.log('[loadAndProbePeers] setPeers called, current state:', useAppState.getState().peers)
+      // Probe all peers after setting them
+      await Promise.all(envPeers.map((host: string) => probePeer(host)))
+      setLastRefreshTs(Date.now())
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [setPeers, probePeer, setLastRefreshTs])
+
+  // Setup auto-refresh interval
+  useEffect(() => {
+    if (autoRefreshEnabled) {
+      intervalRef.current = setInterval(() => {
+        probeAllPeers()
+      }, AUTO_REFRESH_INTERVAL_MS)
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+  }, [autoRefreshEnabled, probeAllPeers])
+
+  // Initial load
+  useEffect(() => {
+    console.log('[PeersView] Initial load useEffect triggered')
+    loadAndProbePeers().catch((e) => console.error('[PeersView] Load error:', e))
+    // Run only once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Get status and probe info
+  const renderProbeStatus = (peer: PeerInfo) => {
+    if (!peer.probes || peer.probes.length === 0) {
+      return <span className="probe-status">Not probed</span>
+    }
+
+    const okProbes = peer.probes.filter((p) => p.ok)
+    if (okProbes.length === 0) {
+      return <span className="probe-status offline">Offline</span>
+    }
+
+    const latency = okProbes[0].latencyMs
+    return (
+      <span className="probe-status online">
+        Online {latency ? `(${latency.toFixed(0)}ms)` : ''}
+      </span>
+    )
+  }
+
+  const handleRefresh = () => {
+    probeAllPeers()
+  }
+
+  const handlePeerPress = (host: string) => {
+    onPeerPress?.(host)
+  }
+
+  return (
+    <div className="peers-container">
+      <div className="peers-header">
+        <h2>Peers</h2>
+        <div className="peers-controls">
+          <button
+            className="btn-primary"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <label className="auto-refresh-toggle">
+            <input
+              type="checkbox"
+              checked={autoRefreshEnabled}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+            />
+            <span>Auto refresh</span>
+          </label>
+        </div>
+      </div>
+
+      <div className="peers-list">
+        {peers.length === 0 ? (
+          <div className="peers-empty">
+            <p>No peers configured. Set RELAY_PEERS environment variable.</p>
+          </div>
+        ) : (
+          peers.map((peer) => (
+            <div
+              key={peer.host}
+              className="peer-item"
+              onClick={() => handlePeerPress(peer.host)}
+            >
+              <div className="peer-header">
+                <div className="peer-host">
+                  <span className="peer-name">{peer.host}</span>
+                  {peer.isProbing && <span className="peer-loading">⟳</span>}
+                </div>
+                <div className="peer-status">
+                  {renderProbeStatus(peer)}
+                </div>
+              </div>
+
+              {peer.branches && peer.branches.length > 0 && (
+                <div className="peer-info">
+                  <span className="info-label">Branches:</span>
+                  <span className="info-value">{peer.branches.join(', ')}</span>
+                </div>
+              )}
+
+              {peer.repos && peer.repos.length > 0 && (
+                <div className="peer-info">
+                  <span className="info-label">Repos:</span>
+                  <span className="info-value">{peer.repos.join(', ')}</span>
+                </div>
+              )}
+
+              <button
+                className="btn-open"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handlePeerPress(peer.host)
+                }}
+              >
+                Open →
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Get peers from environment or URL params
+ */
+async function getPeersFromEnvironment(): Promise<string[]> {
+  console.log('[getPeersFromEnvironment] Starting peer resolution...')
+  
+  // Check URL params first
+  const params = new URLSearchParams(window.location.search)
+  const urlPeers = params.get('peers')
+  if (urlPeers) {
+    console.log('[getPeersFromEnvironment] Loaded from URL params:', urlPeers)
+    return urlPeers.split(';').map((p: string) => p.trim()).filter((p: string) => p.length > 0)
+  }
+
+  // Check Vite environment variables (only available after full rebuild)
+  const envPeers = import.meta.env.VITE_RELAY_MASTER_PEER_LIST
+  console.log('[getPeersFromEnvironment] VITE_RELAY_MASTER_PEER_LIST:', envPeers)
+  if (envPeers) {
+    const peers = envPeers.split(';').map((p: string) => p.trim()).filter((p: string) => p.length > 0)
+    console.log('[getPeersFromEnvironment] Loaded from env:', peers)
+    return peers
+  }
+
+  // Try to fetch config from Relay server
+  try {
+    console.log('[getPeersFromEnvironment] Trying to fetch /api/config...')
+    const response = await fetch('/api/config', { signal: AbortSignal.timeout(3000) })
+    if (response.ok) {
+      const config = await response.json()
+      if (config.peers && Array.isArray(config.peers)) {
+        console.log('[getPeersFromEnvironment] Loaded from server config:', config.peers)
+        return config.peers
+      }
+    }
+  } catch (error) {
+    console.log('[getPeersFromEnvironment] Failed to fetch server config:', error)
+  }
+
+  // Check for default local server
+  const hostname = window.location.hostname
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    // Running locally, assume server on same host
+    const port = window.location.port || '8088'
+    console.log('[getPeersFromEnvironment] Using local server:', `${hostname}:${port}`)
+    return [`${hostname}:${port}`]
+  }
+
+  // Try to get from global config (would be set by server)
+  if ((window as any).RELAY_PEERS) {
+    console.log('[getPeersFromEnvironment] Loaded from window.RELAY_PEERS:', (window as any).RELAY_PEERS)
+    return (window as any).RELAY_PEERS.split(',').map((p: string) => p.trim())
+  }
+
+  // Fallback: try localhost
+  console.log('[getPeersFromEnvironment] Fallback to localhost:8088')
+  return ['localhost:8088']
+}

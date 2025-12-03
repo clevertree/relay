@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::time::{Duration};
 use tower_http::trace::TraceLayer;
+use tower_http::cors::{CorsLayer, Any};
 use tracing::{debug, error, info, warn};
 use tracing_appender::rolling;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -117,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState { repo_path, static_paths };
 
     // Build router (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
+    let cors = CorsLayer::permissive();
     let app = Router::new()
         .route("/openapi.yaml", get(get_openapi_yaml))
         .route("/swagger-ui", get(get_swagger_ui))
@@ -129,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
                 .delete(delete_file)
                 .options(options_capabilities),
         )
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
