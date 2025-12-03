@@ -1,220 +1,132 @@
-:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  color: #213547;
-  background-color: #ffffff;
+@layer base {
+  :root {
+    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    color: #213547;
+    background-color: #ffffff;
+
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #root {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  a {
+    @apply font-medium text-primary hover:text-primary-dark no-underline;
+  }
+
+  button {
+    @apply rounded-lg border border-transparent px-5 py-2.5 text-base font-medium font-inherit cursor-pointer transition-colors;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    line-height: 1.2;
+  }
+
+  code {
+    @apply font-mono bg-black/20 px-1 py-0.5 rounded text-sm;
+  }
+
+  pre {
+    @apply bg-black/30 p-4 rounded-lg overflow-x-auto;
+  }
+
+  pre code {
+    @apply bg-transparent p-0;
+  }
+
+  *::selection {
+    @apply bg-primary/20;
+  }
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+@layer components {
+  /* Markdown content styling */
+  .markdown-content {
+    @apply leading-relaxed;
+  }
 
-*::selection {
-  background: rgba(100, 108, 255, 0.2);
-  color: inherit;
-}
-
-html, body {
-  width: 100%;
-  height: 100%;
-}
-
-body {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-#root {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-
-button:hover {
-  border-color: #646cff;
-}
-
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-h1, h2, h3, h4, h5, h6 {
-  line-height: 1.2;
-}
-
-code {
-  font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;
-  background: rgba(0, 0, 0, 0.2);
-  padding: 0.1em 0.3em;
-  border-radius: 4px;
-}
-
-pre {
-  background: rgba(0, 0, 0, 0.3);
-  padding: 1rem;
-  border-radius: 8px;
-  overflow-x: auto;
-}
-
-pre code {
-  background: none;
-  padding: 0;
-}
-
-/* Markdown content styling */
-.markdown-content {
-  line-height: 1.7;
-}
-
-.markdown-content h1 {
-  font-size: 2rem;
-  margin: 1.5rem 0 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-.markdown-content h2 {
-  font-size: 1.5rem;
-  margin: 1.5rem 0 0.75rem;
-  color: rgba(0, 0, 0, 0.87);
-}
-
-.markdown-content h3 {
-  font-size: 1.25rem;
-  margin: 1.25rem 0 0.5rem;
-  color: rgba(0, 0, 0, 0.87);
-}
-
-.markdown-content p {
-  margin: 1rem 0;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.markdown-content ul, .markdown-content ol {
-  margin: 1rem 0;
-  padding-left: 2rem;
-}
-
-.markdown-content li {
-  margin: 0.25rem 0;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.markdown-content blockquote {
-  margin: 1rem 0;
-  padding: 0.5rem 1rem;
-  border-left: 4px solid rgba(0, 0, 0, 0.2);
-  background: rgba(0, 0, 0, 0.03);
-  border-radius: 0 4px 4px 0;
-  color: rgba(0, 0, 0, 0.6);
-}
-
-.markdown-content img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 8px;
-  margin: 1rem 0;
-}
-
-.markdown-content table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1rem 0;
-}
-
-.markdown-content th, .markdown-content td {
-  padding: 0.5rem 1rem;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  text-align: left;
-}
-
-.markdown-content th {
-  background: rgba(0, 0, 0, 0.05);
-  font-weight: 600;
-}
-
-.markdown-content a {
-  color: #0366d6;
-  text-decoration: none;
-  border-bottom: 1px solid rgba(3, 102, 214, 0.3);
-}
-
-.markdown-content a:hover {
-  color: #0256c7;
-  border-bottom-color: rgba(3, 102, 214, 0.6);
-}
-
-.markdown-content code {
-  background: rgba(0, 0, 0, 0.06);
-  color: #d7298f;
-  border-radius: 3px;
-  padding: 0.15em 0.4em;
-  font-size: 0.9em;
-}
-
-.markdown-content pre {
-  background: rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  padding: 1rem;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 1rem 0;
-}
-
-.markdown-content pre code {
-  background: none;
-  color: rgba(0, 0, 0, 0.8);
-  padding: 0;
-}
-
-@media (prefers-color-scheme: light) {
   .markdown-content h1 {
-    border-bottom-color: rgba(0, 0, 0, 0.1);
+    @apply text-4xl mb-4 mt-6 pb-2 border-b border-black/10;
   }
-  
+
+  .markdown-content h2 {
+    @apply text-3xl mb-3 mt-6 text-black/87;
+  }
+
+  .markdown-content h3 {
+    @apply text-2xl mb-2 mt-5 text-black/87;
+  }
+
+  .markdown-content p {
+    @apply my-4 text-black/70;
+  }
+
+  .markdown-content ul, .markdown-content ol {
+    @apply my-4 ml-8;
+  }
+
+  .markdown-content li {
+    @apply my-1 text-black/70;
+  }
+
   .markdown-content blockquote {
-    background: rgba(0, 0, 0, 0.03);
+    @apply my-4 pl-4 border-l-4 border-black/20 bg-black/3 rounded-r text-black/60;
   }
-  
+
+  .markdown-content img {
+    @apply max-w-full h-auto rounded-lg my-4;
+  }
+
+  .markdown-content table {
+    @apply w-full border-collapse my-4;
+  }
+
   .markdown-content th, .markdown-content td {
-    border-color: rgba(0, 0, 0, 0.1);
+    @apply px-4 py-2 border border-black/10 text-left;
   }
-  
+
   .markdown-content th {
-    background: rgba(0, 0, 0, 0.05);
+    @apply bg-black/5 font-semibold;
+  }
+
+  .markdown-content a {
+    @apply text-blue-600 no-underline border-b border-blue-300/50 hover:text-blue-700 hover:border-blue-400;
+  }
+
+  .markdown-content code {
+    @apply bg-black/6 text-pink-600 rounded px-1 py-0.5 text-sm;
+  }
+
+  .markdown-content pre {
+    @apply bg-black/8 border border-black/10 p-4 rounded-md my-4 overflow-x-auto;
+  }
+
+  .markdown-content pre code {
+    @apply bg-transparent text-black/80 p-0;
   }
 }

@@ -1,88 +1,41 @@
 .app-container {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  background: white;
+  @apply flex flex-col w-full h-full bg-white;
 }
 
 .app-layout {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
+  @apply flex flex-1 overflow-hidden;
 }
 
 .app-sidebar {
-  width: 280px;
-  min-width: 280px;
-  border-right: 1px solid rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  @apply w-64 min-w-64 border-r border-black/10 overflow-hidden flex flex-col;
 }
 
 .app-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: white;
+  @apply flex-1 flex flex-col overflow-hidden bg-white;
 }
 
 .empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  width: 100%;
+  @apply flex items-center justify-center h-full w-full;
 }
 
 .empty-message {
-  text-align: center;
-  color: rgba(0, 0, 0, 0.8);
+  @apply text-center text-black/80;
 }
 
 .empty-message h2 {
-  margin-bottom: 0.5rem;
-  font-size: 1.5rem;
+  @apply mb-2 text-2xl;
 }
 
 .empty-message p {
-  margin: 0;
-  font-size: 1rem;
+  @apply m-0 text-base;
 }
 
-@media (prefers-color-scheme: light) {
-  .app-container {
-    background: white;
-  }
-
-  .app-header {
-    background: rgba(0, 0, 0, 0.02);
-    border-bottom-color: rgba(0, 0, 0, 0.08);
-  }
-
-  .app-sidebar {
-    border-right-color: rgba(0, 0, 0, 0.08);
-  }
-
-  .empty-message {
-    color: rgba(0, 0, 0, 0.8);
-  }
-}
-
-/* Responsive design */
 @media (max-width: 768px) {
   .app-layout {
-    flex-direction: column;
+    @apply flex-col;
   }
 
   .app-sidebar {
-    width: 100%;
-    min-width: 0;
-    border-right: none;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-    height: 200px;
-    min-height: 200px;
+    @apply w-full min-w-0 border-r-0 border-b border-black/10 h-52 min-h-52;
   }
 }
