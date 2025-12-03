@@ -29,15 +29,6 @@ function App() {
   return (
     <PluginProvider plugin={webPlugin}>
       <div className="app-container">
-        <header className="app-header">
-          <div className="header-content">
-            <a href="/">
-              <img src="/relay.svg" alt="Relay" width="32" height="32" />
-              <h1>Relay</h1>
-            </a>
-          </div>
-        </header>
-
         <TabBar />
 
         <div className="app-layout">

@@ -113,7 +113,10 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
   return (
     <div className="peers-container">
       <div className="peers-header">
-        <h2>Peers</h2>
+        <div className="peers-header-content">
+          <img src="/relay.svg" alt="Relay" width="24" height="24" className="peers-icon" />
+          <h2>Relay</h2>
+        </div>
       </div>
 
       <div className="peers-list">
