@@ -5,7 +5,6 @@ import { TabBar } from './components/TabBar'
 import { RepoBrowser } from './components/RepoBrowser'
 import { PluginProvider } from './plugins/PluginContext'
 import { webPlugin } from './plugins/web'
-import './App.css'
 
 function App() {
   const activeTabId = useAppState((s) => s.activeTabId)

@@ -1,5 +1,4 @@
 import { useAppState } from '../state/store'
-import './TabBar.css'
 
 interface TabBarProps {
   onTabChange?: (tabId: string) => void

@@ -10,6 +10,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // CSS configuration
+  css: {
+    postcss: './postcss.config.cjs',
+  },
   // Load environment variables from .env file
   envPrefix: 'VITE_',
   build: {

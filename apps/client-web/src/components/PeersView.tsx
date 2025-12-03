@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useAppState, type PeerInfo } from '../state/store'
 import { fullProbePeer } from '../services/probing'
-import './PeersView.css'
 
 const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 

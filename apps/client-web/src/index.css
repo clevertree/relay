@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 @layer base {
   :root {
@@ -36,7 +34,7 @@
   }
 
   a {
-    @apply font-medium text-primary hover:text-primary-dark no-underline;
+    @apply font-medium text-[#646cff] hover:text-[#535bf2] no-underline;
   }
 
   button {
@@ -60,11 +58,288 @@
   }
 
   *::selection {
-    @apply bg-primary/20;
+    @apply bg-[#646cff]/20;
   }
 }
 
 @layer components {
+  /* App Layout */
+  .app-container {
+    @apply flex flex-col w-full h-full bg-white;
+  }
+
+  .app-layout {
+    @apply flex flex-1 overflow-hidden;
+  }
+
+  .app-sidebar {
+    @apply w-64 min-w-64 border-r border-black/10 overflow-hidden flex flex-col;
+  }
+
+  .app-main {
+    @apply flex-1 flex flex-col overflow-hidden bg-white;
+  }
+
+  .empty-state {
+    @apply flex items-center justify-center h-full w-full;
+  }
+
+  .empty-message {
+    @apply text-center text-black/80;
+  }
+
+  .empty-message h2 {
+    @apply mb-2 text-2xl;
+  }
+
+  .empty-message p {
+    @apply m-0 text-base;
+  }
+
+  /* Tab Bar */
+  .tab-bar {
+    @apply bg-black/5 border-b border-black/10 overflow-x-auto overflow-y-hidden;
+  }
+
+  .tabs-container {
+    @apply flex gap-1 p-0 min-h-11 items-center;
+  }
+
+  .tab {
+    @apply flex items-center gap-2 px-4 py-2 bg-white border border-black/10 border-b-2 border-b-transparent rounded-t-lg cursor-pointer transition-all flex-shrink-0 min-w-32 max-w-60;
+  }
+
+  .tab:hover {
+    @apply bg-gray-100 border-black/15;
+  }
+
+  .tab.active {
+    @apply bg-white border-primary border-b-primary font-semibold;
+  }
+
+  .tab-title {
+    @apply flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-black/85;
+  }
+
+  .tab-close {
+    @apply bg-none border-none text-xl cursor-pointer text-black/50 p-0 w-6 h-6 flex items-center justify-center rounded transition-all flex-shrink-0;
+  }
+
+  .tab-close:hover {
+    @apply bg-black/10 text-black/80;
+  }
+
+  .tab-bar::-webkit-scrollbar {
+    @apply h-1.5;
+  }
+
+  .tab-bar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .tab-bar::-webkit-scrollbar-thumb {
+    @apply bg-black/20 rounded;
+  }
+
+  .tab-bar::-webkit-scrollbar-thumb:hover {
+    @apply bg-black/30;
+  }
+
+  /* Repository Browser */
+  .repo-browser {
+    @apply flex flex-col h-full bg-white;
+  }
+
+  .repo-header {
+    @apply flex flex-col gap-3 p-0 bg-black/2 border-b border-black/10 flex-shrink-0;
+  }
+
+  .repo-info {
+    @apply flex flex-col gap-1;
+  }
+
+  .repo-info h3 {
+    @apply m-0 text-lg font-semibold;
+  }
+
+  .repo-path {
+    @apply font-mono text-sm text-black/60;
+  }
+
+  .repo-path-input {
+    @apply flex gap-2 p-2;
+  }
+
+  .repo-path-input input {
+    @apply flex-1 px-2 py-2 border border-black/20 rounded font-mono text-sm;
+  }
+
+  .repo-path-input button {
+    @apply px-4 py-2 bg-primary text-white border-none rounded cursor-pointer text-sm font-medium hover:bg-primary-dark;
+  }
+
+  .repo-branches {
+    @apply flex gap-4 p-2;
+  }
+
+  .repo-branches label {
+    @apply flex items-center gap-2 text-sm;
+  }
+
+  .repo-branches select {
+    @apply px-2 py-1 border border-black/20 rounded text-sm bg-white cursor-pointer;
+  }
+
+  .repo-content {
+    @apply flex-1 overflow-y-auto p-8;
+  }
+
+  .repo-content .loading {
+    @apply flex items-center justify-center h-full text-black/50;
+  }
+
+  .repo-content .error {
+    @apply p-8 bg-red-100/50 border border-red-300/50 rounded-lg text-red-600;
+  }
+
+  .repo-content .error h3 {
+    @apply mt-0;
+  }
+
+  .repo-content .error button {
+    @apply px-4 py-2 bg-red-600 text-white border-none rounded cursor-pointer mt-4 hover:bg-red-700;
+  }
+
+  .repo-content::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  .repo-content::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .repo-content::-webkit-scrollbar-thumb {
+    @apply bg-black/20 rounded;
+  }
+
+  .repo-content::-webkit-scrollbar-thumb:hover {
+    @apply bg-black/30;
+  }
+
+  /* Peers View */
+  .peers-container {
+    @apply flex flex-col h-full bg-black/5 border-r border-black/10;
+  }
+
+  .peers-header {
+    @apply p-4 border-b border-black/10;
+  }
+
+  .peers-header-content {
+    @apply flex items-center gap-3;
+  }
+
+  .peers-icon {
+    @apply flex-shrink-0;
+  }
+
+  .peers-header h2 {
+    @apply m-0 text-xl;
+  }
+
+  .peers-controls {
+    @apply flex gap-2 items-center;
+  }
+
+  .peers-controls .btn-primary {
+    @apply px-4 py-2 bg-primary text-white border-none rounded cursor-pointer text-sm font-medium hover:bg-primary-dark disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .auto-refresh-toggle {
+    @apply flex items-center gap-2 cursor-pointer text-sm;
+  }
+
+  .auto-refresh-toggle input[type="checkbox"] {
+    @apply cursor-pointer;
+  }
+
+  .peers-list {
+    @apply flex-1 overflow-y-auto flex flex-col gap-1 p-2;
+  }
+
+  .peers-empty {
+    @apply flex items-center justify-center h-full p-8 text-center text-black/80;
+  }
+
+  .peers-empty p {
+    @apply m-0;
+  }
+
+  .peer-item {
+    @apply p-4 bg-white border border-black/10 rounded-lg cursor-pointer transition-all hover:bg-gray-100 hover:border-primary hover:shadow-lg;
+  }
+
+  .peer-header {
+    @apply flex justify-between items-center gap-4 mb-2;
+  }
+
+  .peer-host {
+    @apply flex items-center gap-2 flex-1;
+  }
+
+  .peer-name {
+    @apply font-semibold text-base text-black/85;
+  }
+
+  .peer-loading {
+    @apply inline-block text-sm;
+    animation: spin 1s linear infinite;
+  }
+
+  .peer-status {
+    @apply flex items-center gap-2;
+  }
+
+  .probe-status {
+    @apply text-xs px-2 py-1 rounded whitespace-nowrap;
+  }
+
+  .probe-status.online {
+    @apply bg-green-100/50 text-green-700 font-semibold;
+  }
+
+  .probe-status.offline {
+    @apply bg-red-100/50 text-red-600 font-semibold;
+  }
+
+  .peer-info {
+    @apply flex gap-2 mb-1 text-sm;
+  }
+
+  .info-label {
+    @apply font-semibold text-black/60;
+  }
+
+  .info-value {
+    @apply text-black/50;
+  }
+
+  .btn-open {
+    @apply w-full px-2 py-2 mt-2 bg-primary text-white border-none rounded cursor-pointer text-sm font-medium hover:bg-primary-dark transition-colors;
+  }
+
+  .peers-list::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+
+  .peers-list::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .peers-list::-webkit-scrollbar-thumb {
+    @apply bg-black/20 rounded hover:bg-black/30;
+  }
+
   /* Markdown content styling */
   .markdown-content {
     @apply leading-relaxed;
@@ -129,4 +404,8 @@
   .markdown-content pre code {
     @apply bg-transparent text-black/80 p-0;
   }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }

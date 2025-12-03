@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { useAppState } from '../state/store'
 import { fetchPeerOptions } from '../services/probing'
 import { MarkdownRenderer } from './MarkdownRenderer'
-import './RepoBrowser.css'
 
 interface RepoBrowserProps {
   tabId: string
