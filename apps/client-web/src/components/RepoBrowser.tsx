@@ -104,11 +104,6 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   return (
     <div className="repo-browser">
       <div className="repo-header">
-        <div className="repo-info">
-          <h3>{tab.host}</h3>
-          <span className="repo-path">{tab.path}</span>
-        </div>
-
         <form className="repo-path-input" onSubmit={handlePathSubmit}>
           <input
             type="text"
@@ -141,10 +136,6 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
             </label>
           )}
         </div>
-
-        <button className="btn-refresh" onClick={loadContent}>
-          ↻ Refresh
-        </button>
       </div>
 
       <div className="repo-content">

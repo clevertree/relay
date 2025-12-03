@@ -9,7 +9,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  padding: 1rem;
+  padding: 0;
   background: rgba(0, 0, 0, 0.02);
   border-bottom: 1px solid rgba(0, 0, 0, 0.1);
   flex-shrink: 0;
@@ -36,6 +36,7 @@
 .repo-path-input {
   display: flex;
   gap: 0.5rem;
+  padding: 0.5rem;
 }
 
 .repo-path-input input {
@@ -65,6 +66,7 @@
 .repo-branches {
   display: flex;
   gap: 1rem;
+  padding: 0.5rem;
 }
 
 .repo-branches label {
@@ -81,22 +83,6 @@
   font-size: 0.875rem;
   background: white;
   cursor: pointer;
-}
-
-.btn-refresh {
-  padding: 0.5rem 1rem;
-  background: #646cff;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  font-weight: 500;
-  align-self: flex-start;
-}
-
-.btn-refresh:hover {
-  background: #535bf2;
 }
 
 .repo-content {
