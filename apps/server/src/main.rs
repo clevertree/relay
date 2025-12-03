@@ -122,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/openapi.yaml", get(get_openapi_yaml))
         .route("/swagger-ui", get(get_swagger_ui))
+        .route("/api/config", get(get_api_config))
         .route("/env", axum::routing::post(post_env))
         .route("/", get(get_root).options(options_capabilities))
         .route(
@@ -194,6 +195,24 @@ async fn get_swagger_ui() -> impl IntoResponse {
 </body>
 </html>"#;
     (StatusCode::OK, [("Content-Type", "text/html")], html)
+}
+
+/// GET /api/config — returns configuration including peer list from RELAY_MASTER_PEER_LIST
+async fn get_api_config() -> impl IntoResponse {
+    #[derive(Serialize)]
+    struct Config {
+        peers: Vec<String>,
+    }
+
+    let peer_list = std::env::var("RELAY_MASTER_PEER_LIST")
+        .unwrap_or_default()
+        .split(';')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>();
+
+    let config = Config { peers: peer_list };
+    (StatusCode::OK, Json(config))
 }
 
 /// Parse simple KEY=VALUE lines from a .env-like string. Ignores comments and blank lines.
