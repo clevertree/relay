@@ -35,13 +35,15 @@ export function TabBar({ onTabChange }: TabBarProps) {
             <span className="tab-title" title={tab.title}>
               {tab.title}
             </span>
-            <button
-              className="tab-close"
-              onClick={(e) => handleCloseTab(e, tab.id)}
-              aria-label="Close tab"
-            >
-              ×
-            </button>
+            {!tab.isHome && (
+              <button
+                className="tab-close"
+                onClick={(e) => handleCloseTab(e, tab.id)}
+                aria-label="Close tab"
+              >
+                ×
+              </button>
+            )}
           </div>
         ))}
       </div>

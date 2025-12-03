@@ -8,7 +8,6 @@ import { webPlugin } from './plugins/web'
 import './App.css'
 
 function App() {
-  const tabs = useAppState((s) => s.tabs)
   const activeTabId = useAppState((s) => s.activeTabId)
   const openTab = useAppState((s) => s.openTab)
 
@@ -42,21 +41,19 @@ function App() {
         <TabBar />
 
         <div className="app-layout">
-          <aside className="app-sidebar">
-            <PeersView onPeerPress={handlePeerPress} />
-          </aside>
-
           <main className="app-main">
-            {tabs.length === 0 ? (
+            {activeTabId === 'home' ? (
+              <PeersView onPeerPress={handlePeerPress} />
+            ) : activeTabId ? (
+              <RepoBrowser tabId={activeTabId} />
+            ) : (
               <div className="empty-state">
                 <div className="empty-message">
                   <h2>No repositories open</h2>
-                  <p>Select a peer from the left panel to browse its repositories.</p>
+                  <p>Select a peer from the home tab to browse its repositories.</p>
                 </div>
               </div>
-            ) : activeTabId ? (
-              <RepoBrowser tabId={activeTabId} />
-            ) : null}
+            )}
           </main>
         </div>
       </div>

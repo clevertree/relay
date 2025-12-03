@@ -21,13 +21,14 @@ export interface PeerInfo {
 
 export interface TabInfo {
   id: string
-  host: string
+  host?: string
   repo?: string
-  path: string
+  path?: string
   title: string
   branches?: string[]
   currentBranch?: string
   reposList?: string[]
+  isHome?: boolean
 }
 
 export interface AppState {
@@ -41,9 +42,10 @@ export interface AppState {
   tabs: TabInfo[]
   activeTabId: string | null
   openTab: (host: string, path?: string) => string // Returns tab ID
-  closeTab: (tabId: string) => void
+  closeTab: (tabId: string) => void // Won't close home tab
   setActiveTab: (tabId: string) => void
   updateTab: (tabId: string, updater: (t: TabInfo) => TabInfo) => void
+  homeTabId: string
 
   // Auto-refresh state
   autoRefreshEnabled: boolean
@@ -74,8 +76,15 @@ export const useAppState = create<AppState>((set, get) => ({
     })),
 
   // Tabs state
-  tabs: [],
-  activeTabId: null,
+  tabs: [
+    {
+      id: 'home',
+      title: 'Home',
+      isHome: true,
+    } as TabInfo,
+  ],
+  activeTabId: 'home',
+  homeTabId: 'home',
   openTab: (host, path = '/README.md') => {
     const existingTab = get().tabs.find((t) => t.host === host && t.path === path)
     if (existingTab) {
@@ -98,8 +107,10 @@ export const useAppState = create<AppState>((set, get) => ({
   },
   closeTab: (tabId) =>
     set((s) => {
+      // Don't close home tab
+      if (tabId === 'home') return s
       const tabs = s.tabs.filter((t) => t.id !== tabId)
-      const activeTabId = s.activeTabId === tabId ? tabs[0]?.id ?? null : s.activeTabId
+      const activeTabId = s.activeTabId === tabId ? (tabs.find((t) => t.id === 'home') ?? tabs[0])?.id ?? null : s.activeTabId
       return { tabs, activeTabId }
     }),
   setActiveTab: (tabId) =>

@@ -24,14 +24,14 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   const [pathInput, setPathInput] = useState(tab?.path ?? '/README.md')
 
   useEffect(() => {
-    if (!tab) return
-    setPathInput(tab.path)
+    if (!tab || !tab.host) return
+    setPathInput(tab.path ?? '/README.md')
     loadOptions()
     loadContent()
   }, [tab?.host, tab?.path])
 
   const loadOptions = async () => {
-    if (!tab) return
+    if (!tab || !tab.host) return
     try {
       const options = await fetchPeerOptions(tab.host)
       setOptionsInfo(options)
@@ -46,14 +46,14 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   }
 
   const loadContent = async () => {
-    if (!tab) return
+    if (!tab || !tab.host) return
 
     setLoading(true)
     setError(null)
 
     try {
       // Build URL with repo and branch headers
-      const url = buildPeerUrl(tab.host, tab.path)
+      const url = buildPeerUrl(tab.host, tab.path ?? '/README.md')
 
       const response = await fetch(url)
 

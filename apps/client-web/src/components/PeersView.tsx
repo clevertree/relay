@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useAppState, type PeerInfo } from '../state/store'
 import { fullProbePeer } from '../services/probing'
 import './PeersView.css'
 
-const AUTO_REFRESH_INTERVAL_MS = 10000 // 10 seconds
+const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 interface PeersViewProps {
   onPeerPress?: (host: string) => void
@@ -14,10 +14,7 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
   const setPeers = useAppState((s) => s.setPeers)
   const updatePeer = useAppState((s) => s.updatePeer)
   const setPeerProbing = useAppState((s) => s.setPeerProbing)
-  const autoRefreshEnabled = useAppState((s) => s.autoRefreshEnabled)
-  const setAutoRefresh = useAppState((s) => s.setAutoRefresh)
   const setLastRefreshTs = useAppState((s) => s.setLastRefreshTs)
-  const [isRefreshing, setIsRefreshing] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Probe a single peer
@@ -54,7 +51,6 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
   // Load peers from environment (simulate fetching from tracker)
   const loadAndProbePeers = useCallback(async () => {
     console.log('[loadAndProbePeers] Starting...')
-    setIsRefreshing(true)
     try {
       // Parse peers from environment variable or URL params
       const envPeers = await getPeersFromEnvironment()
@@ -65,25 +61,23 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
       // Probe all peers after setting them
       await Promise.all(envPeers.map((host: string) => probePeer(host)))
       setLastRefreshTs(Date.now())
-    } finally {
-      setIsRefreshing(false)
+    } catch (e) {
+      console.error('[loadAndProbePeers] Error:', e)
     }
   }, [setPeers, probePeer, setLastRefreshTs])
 
-  // Setup auto-refresh interval
+  // Setup auto-refresh interval (always enabled, 5 minutes)
   useEffect(() => {
-    if (autoRefreshEnabled) {
-      intervalRef.current = setInterval(() => {
-        probeAllPeers()
-      }, AUTO_REFRESH_INTERVAL_MS)
-    }
+    intervalRef.current = setInterval(() => {
+      probeAllPeers()
+    }, AUTO_REFRESH_INTERVAL_MS)
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
         intervalRef.current = null
       }
     }
-  }, [autoRefreshEnabled, probeAllPeers])
+  }, [probeAllPeers])
 
   // Initial load
   useEffect(() => {
@@ -112,10 +106,6 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
     )
   }
 
-  const handleRefresh = () => {
-    probeAllPeers()
-  }
-
   const handlePeerPress = (host: string) => {
     onPeerPress?.(host)
   }
@@ -124,23 +114,6 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
     <div className="peers-container">
       <div className="peers-header">
         <h2>Peers</h2>
-        <div className="peers-controls">
-          <button
-            className="btn-primary"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-          >
-            {isRefreshing ? 'Refreshing...' : 'Refresh'}
-          </button>
-          <label className="auto-refresh-toggle">
-            <input
-              type="checkbox"
-              checked={autoRefreshEnabled}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            <span>Auto refresh</span>
-          </label>
-        </div>
       </div>
 
       <div className="peers-list">
