@@ -9,6 +9,14 @@ COPY . /work
 WORKDIR /work/apps/server
 RUN cargo build --release
 
+FROM node:20-slim as client-builder
+WORKDIR /work
+# Copy only the client-web directory and root files needed for npm
+COPY apps/client-web /work/apps/client-web
+COPY package.json package-lock.json /work/
+WORKDIR /work/apps/client-web
+RUN npm ci && npm run build
+
 FROM ubuntu:24.04
 LABEL org.opencontainers.image.source="https://github.com/your-org/relay"
 WORKDIR /srv/relay
@@ -32,6 +40,9 @@ RUN curl -L https://dist.ipfs.tech/kubo/${IPFS_VERSION}/kubo_${IPFS_VERSION}_lin
 
 # Copy server binary
 COPY --from=builder /work/target/release/relay-server /usr/local/bin/relay-server
+
+# Copy client-web build
+COPY --from=client-builder /work/apps/client-web/dist /srv/relay/www
 
 # Create dirs
 RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay

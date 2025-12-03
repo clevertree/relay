@@ -93,7 +93,7 @@ PY
 
   # Start the relay server in background so we can perform post-start tasks (peer upsert)
   echo "Starting relay-server with RELAY_BIND=${RELAY_BIND}"
-  /usr/local/bin/relay-server &
+  /usr/local/bin/relay-server serve --repo "$RELAY_REPO_PATH" --static /srv/relay/www --bind "$RELAY_BIND" &
   RELAY_PID=$!
 
   # Determine socket URL (was previously advertised to tracker; tracker removed)
