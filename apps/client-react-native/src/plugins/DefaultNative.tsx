@@ -404,10 +404,21 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
   };
 
+  // Determine if search input starts with '/'
+  const isPathInput = inputValue.trim().startsWith('/');
+
   return (
     <View style={styles.container}>
-      {/* Path input bar */}
+      {/* Path input bar with branch label and buttons on same row */}
       <View style={styles.inputBar}>
+        {/* Branch label badge */}
+        {branch && (
+          <View style={styles.branchBadge}>
+            <Text style={styles.branchText}>{branch}</Text>
+          </View>
+        )}
+        
+        {/* Search input - flex to take available space */}
         <TextInput
           style={styles.input}
           value={inputValue}
@@ -416,20 +427,28 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
           selectTextOnFocus
           autoCapitalize="none"
           autoCorrect={false}
-          onSubmitEditing={mode === 'visit' ? handleVisit : handleSearch}
+          onSubmitEditing={isPathInput ? handleSearch : handleVisit}
         />
-        <TouchableOpacity
-          style={[styles.actionButton, styles.visitButton]}
-          onPress={handleVisit}
-          disabled={loading || !inputValue.trim()}>
-          <Text style={styles.actionButtonText}>Visit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.searchButton]}
-          onPress={handleSearch}
-          disabled={loading || !inputValue.trim()}>
-          <Text style={styles.actionButtonText}>Search</Text>
-        </TouchableOpacity>
+        
+        {/* Visit button - only show when input doesn't start with '/' */}
+        {!isPathInput && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.visitButton]}
+            onPress={handleVisit}
+            disabled={loading || !inputValue.trim()}>
+            <Text style={styles.actionButtonText}>Visit</Text>
+          </TouchableOpacity>
+        )}
+        
+        {/* Search button - only show when input starts with '/' */}
+        {isPathInput && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.searchButton]}
+            onPress={handleSearch}
+            disabled={loading || !inputValue.trim()}>
+            <Text style={styles.actionButtonText}>Search</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Current path indicator (only shown for search results) */}
@@ -541,6 +560,18 @@ const styles = StyleSheet.create({
     gap: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
+    alignItems: 'center',
+  },
+  branchBadge: {
+    backgroundColor: '#E8E8E8',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  branchText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
   },
   input: {
     flex: 1,
