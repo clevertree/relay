@@ -136,6 +136,8 @@ export async function fetchPeerOptions(
   branchHeads?: Record<string, string>
   lastUpdateTs?: number
 }> {
+  const isSecureContext = window.location.protocol === 'https:'
+
   try {
     const response = await fetchWithTimeout(`https://${host}/`, {
       method: 'OPTIONS',
@@ -152,24 +154,27 @@ export async function fetchPeerOptions(
       }
     }
   } catch {
-    // Try HTTP fallback
-    try {
-      const response = await fetchWithTimeout(`http://${host}/`, {
-        method: 'OPTIONS',
-        timeout: PROBE_TIMEOUT_MS,
-      })
+    // Try HTTP fallback only if we're in an insecure context (HTTP page)
+    // In HTTPS context, mixed content requests are blocked by browser
+    if (!isSecureContext) {
+      try {
+        const response = await fetchWithTimeout(`http://${host}/`, {
+          method: 'OPTIONS',
+          timeout: PROBE_TIMEOUT_MS,
+        })
 
-      if (response.ok) {
-        const data = await response.json()
-        return {
-          branches: data.branches,
-          repos: data.repos,
-          branchHeads: data.branchHeads,
-          lastUpdateTs: Date.now(),
+        if (response.ok) {
+          const data = await response.json()
+          return {
+            branches: data.branches,
+            repos: data.repos,
+            branchHeads: data.branchHeads,
+            lastUpdateTs: Date.now(),
+          }
         }
+      } catch {
+        // Both failed
       }
-    } catch {
-      // Both failed
     }
   }
 
@@ -188,13 +193,15 @@ export async function fullProbePeer(
   lastUpdateTs?: number
 }> {
   const probes: PeerProbe[] = []
+  const isSecureContext = window.location.protocol === 'https:'
 
   // Probe HTTPS
   const httpsProbe = await probeHttps(host)
   probes.push(httpsProbe)
 
-  // If HTTPS not OK, probe HTTP
-  if (!httpsProbe.ok) {
+  // If HTTPS not OK and we're not in a secure context, probe HTTP
+  // (avoid mixed content warnings in HTTPS pages)
+  if (!httpsProbe.ok && !isSecureContext) {
     const httpProbe = await probeHttp(host)
     probes.push(httpProbe)
   }
