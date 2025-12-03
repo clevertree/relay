@@ -1,5 +1,4 @@
-# Environment variables (keep .env.example instead)
-.env
+# Environment variables (keep .env for deployment, .env.local for local overrides)
 .env.local
 .env.*.local
 

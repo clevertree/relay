@@ -210,28 +210,43 @@ async function getPeersFromEnvironment(): Promise<string[]> {
     return urlPeers.split(';').map((p: string) => p.trim()).filter((p: string) => p.length > 0)
   }
 
-  // Check Vite environment variables (only available after full rebuild)
-  const envPeers = import.meta.env.VITE_RELAY_MASTER_PEER_LIST
-  console.log('[getPeersFromEnvironment] VITE_RELAY_MASTER_PEER_LIST:', envPeers)
-  if (envPeers) {
-    const peers = envPeers.split(';').map((p: string) => p.trim()).filter((p: string) => p.length > 0)
-    console.log('[getPeersFromEnvironment] Loaded from env:', peers)
-    return peers
-  }
-
-  // Try to fetch config from Relay server
+  // Try to fetch config from Relay server first (runtime configuration)
+  // This will use the RELAY_MASTER_PEER_LIST environment variable from the server
   try {
-    console.log('[getPeersFromEnvironment] Trying to fetch /api/config...')
-    const response = await fetch('/api/config', { signal: AbortSignal.timeout(3000) })
-    if (response.ok) {
+    console.log('[getPeersFromEnvironment] Trying to fetch /api/config from server...')
+    // Try both HTTP and HTTPS to handle different deployment scenarios
+    let response: Response | null = null
+    const baseUrl = window.location.origin
+    
+    try {
+      response = await fetch(`${baseUrl}/api/config`, { signal: AbortSignal.timeout(3000) })
+    } catch (e) {
+      console.log('[getPeersFromEnvironment] Failed to fetch from', `${baseUrl}/api/config`, e)
+      // If we're on HTTPS, try HTTP fallback
+      if (baseUrl.startsWith('https')) {
+        const httpUrl = baseUrl.replace('https://', 'http://')
+        response = await fetch(`${httpUrl}/api/config`, { signal: AbortSignal.timeout(3000) })
+      }
+    }
+    
+    if (response && response.ok) {
       const config = await response.json()
-      if (config.peers && Array.isArray(config.peers)) {
+      if (config.peers && Array.isArray(config.peers) && config.peers.length > 0) {
         console.log('[getPeersFromEnvironment] Loaded from server config:', config.peers)
         return config.peers
       }
     }
   } catch (error) {
     console.log('[getPeersFromEnvironment] Failed to fetch server config:', error)
+  }
+
+  // Check Vite environment variables (only available after full rebuild with .env)
+  const envPeers = import.meta.env.VITE_RELAY_MASTER_PEER_LIST
+  console.log('[getPeersFromEnvironment] VITE_RELAY_MASTER_PEER_LIST:', envPeers)
+  if (envPeers) {
+    const peers = envPeers.split(';').map((p: string) => p.trim()).filter((p: string) => p.length > 0)
+    console.log('[getPeersFromEnvironment] Loaded from build-time env:', peers)
+    return peers
   }
 
   // Check for default local server
