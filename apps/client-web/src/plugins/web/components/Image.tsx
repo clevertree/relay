@@ -1,4 +1,4 @@
-import { ImageProps } from '../../types'
+import type { ImageProps } from '../../types'
 
 /**
  * Web Image Component

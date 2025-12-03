@@ -1,4 +1,4 @@
-import { CodeBlockProps } from '../../types'
+import type { CodeBlockProps } from '../../types'
 import './CodeBlock.css'
 
 /**

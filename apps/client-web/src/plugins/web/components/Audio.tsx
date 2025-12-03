@@ -1,4 +1,4 @@
-import { AudioProps } from '../../types'
+import type { AudioProps } from '../../types'
 
 /**
  * Web Audio Component

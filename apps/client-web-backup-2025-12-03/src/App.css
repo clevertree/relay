@@ -1,0 +1,41 @@
+.app-container {
+  @apply flex flex-col w-full h-full bg-white;
+}
+
+.app-layout {
+  @apply flex flex-1 overflow-hidden;
+}
+
+.app-sidebar {
+  @apply w-64 min-w-64 border-r border-black/10 overflow-hidden flex flex-col;
+}
+
+.app-main {
+  @apply flex-1 flex flex-col overflow-hidden bg-white;
+}
+
+.empty-state {
+  @apply flex items-center justify-center h-full w-full;
+}
+
+.empty-message {
+  @apply text-center text-black/80;
+}
+
+.empty-message h2 {
+  @apply mb-2 text-2xl;
+}
+
+.empty-message p {
+  @apply m-0 text-base;
+}
+
+@media (max-width: 768px) {
+  .app-layout {
+    @apply flex-col;
+  }
+
+  .app-sidebar {
+    @apply w-full min-w-0 border-r-0 border-b border-black/10 h-52 min-h-52;
+  }
+}

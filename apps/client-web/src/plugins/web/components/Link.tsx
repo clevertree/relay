@@ -1,4 +1,4 @@
-import { LinkProps } from '../../types'
+import type { LinkProps } from '../../types'
 import { usePlugin } from '../../PluginContext'
 
 /**

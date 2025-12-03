@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { VideoProps } from '../../types'
+import type { VideoProps } from '../../types'
 import './Video.css'
 
 /**

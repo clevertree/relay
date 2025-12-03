@@ -1,41 +1,42 @@
-.app-container {
-  @apply flex flex-col w-full h-full bg-white;
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
 }
 
-.app-layout {
-  @apply flex flex-1 overflow-hidden;
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
 }
 
-.app-sidebar {
-  @apply w-64 min-w-64 border-r border-black/10 overflow-hidden flex flex-col;
-}
-
-.app-main {
-  @apply flex-1 flex flex-col overflow-hidden bg-white;
-}
-
-.empty-state {
-  @apply flex items-center justify-center h-full w-full;
-}
-
-.empty-message {
-  @apply text-center text-black/80;
-}
-
-.empty-message h2 {
-  @apply mb-2 text-2xl;
-}
-
-.empty-message p {
-  @apply m-0 text-base;
-}
-
-@media (max-width: 768px) {
-  .app-layout {
-    @apply flex-col;
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
   }
-
-  .app-sidebar {
-    @apply w-full min-w-0 border-r-0 border-b border-black/10 h-52 min-h-52;
+  to {
+    transform: rotate(360deg);
   }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
 }

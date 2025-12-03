@@ -1,5 +1,6 @@
-import { createContext, useContext, ReactNode } from 'react'
-import { Plugin, PluginComponents } from './types'
+import { createContext, useContext } from 'react'
+import type { ReactNode } from 'react'
+import type { Plugin, PluginComponents } from './types'
 
 interface PluginContextValue {
   plugin: Plugin

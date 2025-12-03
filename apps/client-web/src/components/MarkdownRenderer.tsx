@@ -22,7 +22,7 @@ export function MarkdownRenderer({ content, navigate }: MarkdownRendererProps) {
   // Only map allowed components
   const markdownComponents: Components = {
     // Override link handling for internal navigation
-    a: ({ href, children, ...props }) => {
+    a: ({ href, children, ...props }: any) => {
       if (!href) return <span {...props}>{children}</span>
       
       const isInternal = href.startsWith('/') || href.startsWith('.') ||
@@ -60,14 +60,14 @@ export function MarkdownRenderer({ content, navigate }: MarkdownRendererProps) {
     },
 
     // Override img for plugin Image component
-    img: ({ src, alt, ...props }) => {
+    img: ({ src, alt, ...props }: any) => {
       if (!src) return null
       const ImageComponent = components.Image
       return <ImageComponent src={src} alt={alt || ''} {...props} />
     },
 
     // Override code blocks for plugin CodeBlock component
-    code: ({ className, children, ...props }) => {
+    code: ({ className, children, ...props }: any) => {
       // Check if this is a code block (has language class) or inline code
       const match = /language-(\w+)/.exec(className || '')
       

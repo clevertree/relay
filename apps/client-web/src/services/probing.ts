@@ -2,7 +2,7 @@
  * Peer probing service for checking endpoint health and measuring latency.
  */
 
-import { PeerProbe, PeerProtocol } from '../state/store'
+import type { PeerProbe, PeerProtocol } from '../state/store'
 
 const PROBE_TIMEOUT_MS = 5000
 const PROBE_SAMPLES = 3

@@ -1,4 +1,4 @@
-import { Plugin, PluginConfig } from '../types'
+import type { Plugin, PluginConfig } from '../types'
 import { Video } from './components/Video'
 import { Image } from './components/Image'
 import { Audio } from './components/Audio'
