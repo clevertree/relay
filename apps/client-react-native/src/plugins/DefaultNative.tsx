@@ -151,57 +151,78 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
       const baseUrl = getBaseUrl();
       let targetPath = inputValue.trim();
 
-      // Imply index.md for directory paths
+      // If a directory path is requested, try common index files in order.
+      const candidates: string[] = [];
       if (targetPath.endsWith('/')) {
-        targetPath += 'index.md';
+        candidates.push(`${targetPath}index.md`);
+        candidates.push(`${targetPath}README.md`);
+      } else {
+        candidates.push(targetPath);
       }
 
-      const url = `${baseUrl}/${targetPath.replace(/^\//, '')}`;
-      const cacheKey = `visit:${branch}:${url}`;
+      let lastErrorStatus: number | null = null;
 
-      // Check cache first
-      const cached = getCachedResults(cacheKey);
-      if (cached) {
-        const {pageResults, hasMorePages} = paginateResults(cached.results, 1);
-        setResults(cached.results);
-        setDisplayedResults(pageResults);
-        setHasMore(hasMorePages);
-        setPath(targetPath);
-        onNavigate?.(targetPath);
-        setLoading(false);
-        return;
+      // Try each candidate path (and check cache per-URL) until one succeeds.
+      for (const candidate of candidates) {
+        const urlTry = `${baseUrl}/${candidate.replace(/^\//, '')}`;
+        const cacheKey = `visit:${branch}:${urlTry}`;
+
+        const cached = getCachedResults(cacheKey);
+        if (cached) {
+          const {pageResults, hasMorePages} = paginateResults(cached.results, 1);
+          setResults(cached.results);
+          setDisplayedResults(pageResults);
+          setHasMore(hasMorePages);
+          setPath(candidate);
+          onNavigate?.(candidate);
+          setLoading(false);
+          return;
+        }
+
+        try {
+          const res = await fetch(urlTry, {
+            headers: {
+              'X-Relay-Branch': branch,
+            },
+          });
+
+          if (!res.ok) {
+            lastErrorStatus = res.status;
+            // try next candidate
+            continue;
+          }
+
+          const contentType = res.headers.get('Content-Type') || '';
+          const text = await res.text();
+          const eTag = res.headers.get('ETag') || undefined;
+          const lastModified = res.headers.get('Last-Modified') || undefined;
+
+          const visitResult = {
+            path: candidate,
+            name: candidate.split('/').pop() || candidate,
+            type: 'file' as const,
+            content: text,
+            contentType,
+          };
+
+          setResults([visitResult]);
+          setDisplayedResults([visitResult]);
+          setHasMore(false);
+          cacheResults(cacheKey, [visitResult], eTag, lastModified);
+
+          setPath(candidate);
+          onNavigate?.(candidate);
+          setLoading(false);
+          return;
+        } catch (e) {
+          // network or other error - record and try next
+          lastErrorStatus = null;
+          continue;
+        }
       }
 
-      const res = await fetch(url, {
-        headers: {
-          'X-Relay-Branch': branch,
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error(`GET failed: ${res.status}`);
-      }
-
-      const contentType = res.headers.get('Content-Type') || '';
-      const text = await res.text();
-      const eTag = res.headers.get('ETag') || undefined;
-      const lastModified = res.headers.get('Last-Modified') || undefined;
-
-      const visitResult = {
-        path: targetPath,
-        name: targetPath.split('/').pop() || targetPath,
-        type: 'file' as const,
-        content: text,
-        contentType,
-      };
-
-      setResults([visitResult]);
-      setDisplayedResults([visitResult]);
-      setHasMore(false);
-      cacheResults(cacheKey, [visitResult], eTag, lastModified);
-
-      setPath(targetPath);
-      onNavigate?.(targetPath);
+      // If none succeeded, surface an error (use last status if available)
+      throw new Error(`GET failed: ${lastErrorStatus ?? 'unknown'}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch');
     } finally {
