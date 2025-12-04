@@ -14,7 +14,7 @@ WORKDIR /work
 # Copy only the client-web directory and root files needed for npm
 COPY apps/client-web /work/apps/client-web
 WORKDIR /work/apps/client-web
-RUN npm ci && npm run build
+RUN npm install && npm run build
 
 FROM ubuntu:24.04
 LABEL org.opencontainers.image.source="https://github.com/your-org/relay"
