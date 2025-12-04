@@ -73,6 +73,7 @@ const templateServer = http.createServer((req, res) => {
       '.png': 'image/png',
       '.jpg': 'image/jpeg',
       '.gif': 'image/gif',
+      '.vtt': 'text/vtt',
       '.woff': 'font/woff',
       '.woff2': 'font/woff2',
     };
@@ -113,12 +114,7 @@ setTimeout(() => {
     const parsedUrl = url.parse(req.url, true);
     const pathname = parsedUrl.pathname;
 
-      // Proxy MDN example media so VTT/MP4 can be served same-origin (avoid CORS/mixed-protocol issues)
-      if (pathname && pathname.startsWith('/media/cc0-videos/')) {
-        const targetUrl = `https://interactive-examples.mdn.mozilla.net${pathname}`;
-        forwardRequest(req, res, targetUrl);
-        return;
-      }
+      // No special proxies - serve local files from template as-is
 
     // Check if file exists in template folder first (serve template at root)
     const templateFilePath = path.join(templateDir, pathname === '/' ? 'index.html' : pathname);
