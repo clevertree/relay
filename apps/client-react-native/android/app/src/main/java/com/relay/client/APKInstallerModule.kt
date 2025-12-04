@@ -48,11 +48,16 @@ class APKInstallerModule(reactContext: ReactApplicationContext) :
 
       Log.d(TAG, "Installing APK from: ${apkFile.absolutePath}")
 
-      val context = currentActivity ?: reactApplicationContext
+      val currentActivityRef = currentActivity
+      if (currentActivityRef == null) {
+        promise.reject("NO_ACTIVITY", "No activity available for installation")
+        return
+      }
+
       val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         FileProvider.getUriForFile(
-          context,
-          "${context.packageName}.fileprovider",
+          currentActivityRef,
+          "${currentActivityRef.packageName}.fileprovider",
           apkFile
         )
       } else {
@@ -65,7 +70,7 @@ class APKInstallerModule(reactContext: ReactApplicationContext) :
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
       }
 
-      context.startActivity(intent)
+      currentActivityRef.startActivity(intent)
 
       promise.resolve(
         mapOf(
@@ -111,11 +116,12 @@ class APKInstallerModule(reactContext: ReactApplicationContext) :
       
       promise.resolve(
         mapOf(
-          "version" to packageInfo.versionName,
+          "version" to (packageInfo.versionName ?: "unknown"),
           "buildNumber" to packageInfo.versionCode
         )
       )
     } catch (e: Exception) {
+      Log.e(TAG, "Error getting app version", e)
       promise.reject("VERSION_ERROR", e.message ?: "Unknown error")
     }
   }
