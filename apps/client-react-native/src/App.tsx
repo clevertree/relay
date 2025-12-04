@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   SafeAreaView,
   StatusBar,
@@ -15,6 +15,8 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import PeersView from './components/PeersView';
 import RepoTab from './components/RepoTab';
 import {useAppState} from './state/store';
+import { useAppUpdate } from './hooks/useAppUpdate';
+import { UpdateModal } from './components/UpdateModal';
 
 type RootStackParamList = {
   Home: undefined;
@@ -72,6 +74,12 @@ const HomeScreen: React.FC<{navigation: any}> = ({navigation}) => {
   const openTab = useAppState((s) => s.openTab);
   const {width} = useWindowDimensions();
   const isTablet = width >= 768;
+  const { showUpdateModal, setShowUpdateModal, checkForUpdate } = useAppUpdate();
+
+  // Check for updates on component mount
+  useEffect(() => {
+    checkForUpdate();
+  }, [checkForUpdate]);
 
   const handlePeerPress = (host: string) => {
     const tabId = openTab(host);
@@ -83,6 +91,12 @@ const HomeScreen: React.FC<{navigation: any}> = ({navigation}) => {
       <StatusBar barStyle="dark-content" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Relay Client</Text>
+        <TouchableOpacity 
+          style={styles.updateButton}
+          onPress={checkForUpdate}
+        >
+          <Text style={styles.updateButtonText}>🔄</Text>
+        </TouchableOpacity>
       </View>
       <TabBar navigation={navigation} />
       <View style={isTablet ? styles.splitContainer : styles.fullContainer}>
@@ -90,6 +104,10 @@ const HomeScreen: React.FC<{navigation: any}> = ({navigation}) => {
           <PeersView onPeerPress={handlePeerPress} />
         </View>
       </View>
+      <UpdateModal
+        visible={showUpdateModal}
+        onDismiss={() => setShowUpdateModal(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -206,12 +224,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
     backgroundColor: '#fff',
+    justifyContent: 'space-between',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     flex: 1,
     textAlign: 'center',
+  },
+  updateButton: {
+    padding: 8,
+    marginLeft: 12,
+  },
+  updateButtonText: {
+    fontSize: 18,
   },
   backButton: {
     padding: 4,

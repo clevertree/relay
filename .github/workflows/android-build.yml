@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_SDK_ROOT: /usr/lib/android-sdk
+      GRADLE_OPTS: "-Xmx4096m -XX:MaxMetaspaceSize=512m"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,15 +52,37 @@ jobs:
       - name: Generate debug keystore for CI/CD
         working-directory: apps/client-react-native/android/app
         run: |
-          keytool -genkey -v -keystore debug.keystore -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias androiddebugkey -keypass android -storepass android \
-            -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f debug.keystore ]; then
+            keytool -genkey -v -keystore debug.keystore -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias androiddebugkey -keypass android -storepass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Clean gradle cache
+        working-directory: apps/client-react-native/android
+        run: |
+          chmod +x gradlew
+          ./gradlew clean --no-daemon
 
       - name: Assemble release APK
         working-directory: apps/client-react-native/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease -x bundleReleaseResources --no-daemon -v
+
+      - name: Verify APK
+        working-directory: apps/client-react-native/android
+        run: |
+          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          if [ -f "$APK_PATH" ]; then
+            echo "✓ APK found: $APK_PATH"
+            ls -lh "$APK_PATH"
+            unzip -t "$APK_PATH" | head -20
+          else
+            echo "✗ APK not found at $APK_PATH"
+            ls -la app/build/outputs/apk/ 2>/dev/null || echo "APK output directory not found"
+            exit 1
+          fi
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
@@ -67,3 +90,14 @@ jobs:
           name: relay-android-release-apk
           path: apps/client-react-native/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      - name: Show build errors if any
+        if: failure()
+        working-directory: apps/client-react-native/android
+        run: |
+          echo "=== Build Failure Diagnostics ==="
+          echo "Checking for build logs..."
+          find . -name "*.log" -type f -exec tail -100 {} \; 2>/dev/null || true
+          echo ""
+          echo "=== Gradle output (last 50 lines) ==="
+          ls -la app/build/outputs 2>/dev/null || echo "No build outputs found"

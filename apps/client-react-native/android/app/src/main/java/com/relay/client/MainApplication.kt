@@ -19,6 +19,8 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               // Add our custom RelayCorePackage
               add(RelayCorePackage())
+              // Add APKInstallerPackage for OTA updates
+              add(APKInstallerPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"
