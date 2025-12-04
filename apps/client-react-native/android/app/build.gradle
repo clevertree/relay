@@ -93,17 +93,20 @@ android {
             keyPassword 'android'
         }
         release {
-            // Use environment variables for production signing (set by CI/CD)
-            // Falls back to debug keystore if env vars not set
-            def keystorePath = System.getenv("KEYSTORE_PATH") != null ? System.getenv("KEYSTORE_PATH") : 'debug.keystore'
-            def keystoreAlias = System.getenv("ANDROID_KEYSTORE_ALIAS") != null ? System.getenv("ANDROID_KEYSTORE_ALIAS") : 'androiddebugkey'
-            def keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") != null ? System.getenv("ANDROID_KEYSTORE_PASSWORD") : 'android'
-            def keyPassword = System.getenv("ANDROID_KEY_PASSWORD") != null ? System.getenv("ANDROID_KEY_PASSWORD") : 'android'
-            
-            storeFile file(keystorePath)
-            storePassword keystorePassword
-            keyAlias keystoreAlias
-            keyPassword keyPassword
+            // Signing config is passed from Gradle command-line properties
+            // See workflow for details on how KEYSTORE_PATH, etc. are set
+            if (project.hasProperty("KEYSTORE_PATH")) {
+                storeFile file(project.property("KEYSTORE_PATH"))
+                storePassword project.property("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias project.property("ANDROID_KEYSTORE_ALIAS")
+                keyPassword project.property("ANDROID_KEY_PASSWORD")
+            } else {
+                // Fallback to debug keystore
+                storeFile file('debug.keystore')
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
         }
     }
     buildTypes {
