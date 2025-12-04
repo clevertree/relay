@@ -196,7 +196,9 @@ export const useAppState = create<AppState>((set, get) => ({
       } catch (e) {
         console.error('Failed to save tabs:', e)
       }
-      updateUrlPath(newTabs, s.activeTabId)
+      if (s.activeTabId) {
+        updateUrlPath(newTabs, s.activeTabId)
+      }
       return {
         tabs: newTabs,
       }
