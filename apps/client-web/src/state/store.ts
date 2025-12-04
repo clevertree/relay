@@ -167,7 +167,7 @@ export const useAppState = create<AppState>((set, get) => ({
       // Don't close home tab
       if (tabId === 'home') return s
       const tabs = s.tabs.filter((t) => t.id !== tabId)
-      const activeTabId = s.activeTabId === tabId ? (tabs.find((t) => t.id === 'home') ?? tabs[0])?.id ?? null : s.activeTabId
+      const activeTabId = s.activeTabId === tabId ? (tabs.find((t) => t.id === 'home') ?? tabs[0])?.id || 'home' : s.activeTabId
       try {
         localStorage.setItem(STORAGE_KEY_TABS, JSON.stringify(tabs))
         if (activeTabId) {

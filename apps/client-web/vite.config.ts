@@ -8,7 +8,6 @@ export default defineConfig({
   server: {
     // Serve /template folder as static assets
     middlewareMode: false,
-    middlewares: [],
   },
   // Configure server to serve template folder
   resolve: {
