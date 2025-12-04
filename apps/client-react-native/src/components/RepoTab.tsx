@@ -1,17 +1,14 @@
 import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {useAppState, TabInfo} from '../state/store';
+import {useAppState} from '../state/store';
 import {fetchPeerOptions} from '../services/probing';
-import * as Plugins from '../plugins';
-import PluginSwitcher from '../plugins/PluginSwitcher';
+import RepoBrowser from './RepoBrowser';
 
 interface RepoTabProps {
   tabId: string;
@@ -23,23 +20,15 @@ interface OptionsInfo {
   branchHeads?: Record<string, string>;
   relayYaml?: unknown;
   lastUpdateTs?: number;
-  interface?: Record<string, {plugin_manifest?: string}>;
 }
 
 const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
   const tab = useAppState((s) => s.tabs.find((t) => t.id === tabId));
   const updateTab = useAppState((s) => s.updateTab);
-  // Diagnostic: log available plugin exports to help find undefined components
-  // eslint-disable-next-line no-console
-  console.log('Available plugin exports:', Object.keys(Plugins));
-  // eslint-disable-next-line no-console
-  console.log('PluginSwitcher type:', typeof PluginSwitcher);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [optionsInfo, setOptionsInfo] = useState<OptionsInfo>({});
+  const [_optionsInfo, setOptionsInfo] = useState<OptionsInfo>({});
   const [pathInput, setPathInput] = useState(tab?.path ?? '/');
-  const [pluginSwitcherVisible, setPluginSwitcherVisible] = useState(false);
-  const [discoveredPlugins, setDiscoveredPlugins] = useState<any[]>([]);
 
   useEffect(() => {
     if (!tab) return;
@@ -54,17 +43,6 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
     try {
       const options = await fetchPeerOptions(tab.host);
       setOptionsInfo(options);
-      
-      // Discover repo-provided plugins
-      if (options.interface) {
-        const plugins = Object.entries(options.interface).map(([os, config]) => ({
-          id: `repo-${os}`,
-          type: 'repo-provided',
-          name: `Repo Plugin (${os})`,
-          manifestUrl: config.plugin_manifest,
-        }));
-        setDiscoveredPlugins(plugins);
-      }
 
       if (options.branches && options.branches.length > 0 && !tab.currentBranch) {
         updateTab(tabId, (t) => ({
@@ -88,56 +66,9 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
     );
   }
 
-  // Render the selected plugin with defensive checks
-  const renderPluginContent = () => {
-    // Map plugin IDs to component factories
-    const mapping: Record<string, any> = {
-      'builtin-webview': (Plugins as any).WebViewPlugin,
-      'native-repo-browser': (Plugins as any).DefaultNativePlugin,
-      'builtin-declarative': (Plugins as any).DeclarativePlugin,
-    };
-
-    const Component = mapping[tab.pluginId] ?? mapping['native-repo-browser'];
-
-    if (!Component) {
-      return (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Plugin not available: {tab.pluginId}</Text>
-        </View>
-      );
-    }
-
-    // If Component is an object with a default property (common when interop wrappers happen), unwrap it
-    const ResolvedComponent = (Component as any).default ? (Component as any).default : Component;
-
-    // Validate ResolvedComponent is renderable
-    if (typeof ResolvedComponent !== 'function' && typeof ResolvedComponent !== 'object') {
-      return (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Invalid plugin component for: {tab.pluginId}</Text>
-        </View>
-      );
-    }
-
-    return (
-      <ResolvedComponent
-        host={tab.host}
-        branch={tab.currentBranch}
-        initialPath={pathInput}
-        onNavigate={(path: string) => {
-          setPathInput(path);
-          updateTab(tabId, (t) => ({...t, path}));
-        }}
-        // Additional props for declarative plugins
-        manifestUrl={tab.pluginManifestUrl}
-        expectedHash={tab.pluginHash}
-      />
-    );
-  };
-
   return (
     <View style={styles.container}>
-      {/* Header with host info and plugin selector */}
+      {/* Header with host info */}
       <View style={styles.header}>
         <Text style={styles.hostText}>{tab.host}</Text>
         {tab.currentBranch && (
@@ -145,22 +76,9 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
             <Text style={styles.branchText}>{tab.currentBranch}</Text>
           </View>
         )}
-        <TouchableOpacity
-          style={styles.pluginButton}
-          onPress={() => setPluginSwitcherVisible(true)}>
-          <Text style={styles.pluginButtonText}>⚙</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* Plugin switcher modal */}
-      <PluginSwitcher
-        tabId={tabId}
-        visible={pluginSwitcherVisible}
-        onClose={() => setPluginSwitcherVisible(false)}
-        availablePlugins={discoveredPlugins}
-      />
-
-      {/* Plugin content area */}
+      {/* Content area */}
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -174,7 +92,15 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
           </TouchableOpacity>
         </View>
       ) : (
-        renderPluginContent()
+        <RepoBrowser
+          host={tab.host}
+          branch={tab.currentBranch}
+          initialPath={pathInput}
+          onNavigate={(path: string) => {
+            setPathInput(path);
+            updateTab(tabId, (t) => ({...t, path}));
+          }}
+        />
       )}
     </View>
   );
@@ -209,12 +135,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '500',
-  },
-  pluginButton: {
-    padding: 8,
-  },
-  pluginButtonText: {
-    fontSize: 18,
   },
   loadingContainer: {
     flex: 1,

@@ -26,13 +26,7 @@ export type TabInfo = {
   title: string;
   branches?: string[];
   currentBranch?: string;
-  pluginId?: string; // Selected plugin for this tab
-  // For declarative plugins
-  pluginManifestUrl?: string;
-  pluginHash?: string;
 };
-
-export type PluginType = 'repo-provided' | 'native-default' | 'webview';
 
 export type AppState = {
   // Peers state

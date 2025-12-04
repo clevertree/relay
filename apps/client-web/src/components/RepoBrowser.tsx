@@ -123,21 +123,6 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     handleNavigate(normalizedPath)
   }
 
-  const handleCreate = async () => {
-    setError(null)
-    setLoading(true)
-    try {
-      const used = await tryRenderWithHook('put')
-      if (!used) {
-        setError('Create UI not available: /hooks/put.mjs hook not found in repo')
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load create UI')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const performSearch = async (query: string) => {
     if (!query.trim()) return
     
@@ -435,7 +420,6 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
             className="flex-1 px-2 py-2 border border-gray-300 rounded font-mono text-sm"
           />
           <button type="submit" className="px-4 py-2 bg-blue-500 text-white border-none rounded cursor-pointer text-sm font-medium hover:bg-blue-600">Go</button>
-          <button type="button" onClick={handleCreate} className="px-4 py-2 bg-emerald-600 text-white border-none rounded cursor-pointer text-sm font-medium hover:bg-emerald-700">Create</button>
         </form>
 
         <div className="flex gap-4 p-2">

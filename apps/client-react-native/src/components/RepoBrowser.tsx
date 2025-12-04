@@ -1,5 +1,5 @@
 /**
- * Enhanced Default Native Repo Browser Plugin
+ * Native Repo Browser Component
  * Provides Visit/Search functionality with:
  * - Pagination support for large result sets
  * - Result caching with ETag/Last-Modified headers
@@ -7,7 +7,7 @@
  * - Improved UX with load more functionality
  */
 
-import React, {useState, useCallback, useMemo, useRef} from 'react';
+import React, {useState, useCallback, useRef} from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -19,7 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import MarkdownView from '../components/MarkdownView';
+import MarkdownView from './MarkdownView';
 
 const DEFAULT_PAGE_SIZE = 50;
 const CACHE_TTL_MS = 300000; // 5 minutes
@@ -30,6 +30,8 @@ interface QueryResult {
   type: 'file' | 'directory';
   size?: number;
   modified?: string;
+  content?: string;
+  contentType?: string;
   [key: string]: unknown;
 }
 
@@ -40,14 +42,14 @@ interface CacheEntry {
   timestamp: number;
 }
 
-interface DefaultNativePluginProps {
+interface RepoBrowserProps {
   host: string;
   branch?: string;
   initialPath?: string;
   onNavigate?: (path: string) => void;
 }
 
-const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
+const RepoBrowser: React.FC<RepoBrowserProps> = ({
   host,
   branch = 'main',
   initialPath = '/',
@@ -97,9 +99,9 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
    * Cache query results
    */
   const cacheResults = useCallback(
-    (cacheKey: string, results: QueryResult[], eTag?: string, lastModified?: string) => {
+    (cacheKey: string, newResults: QueryResult[], eTag?: string, lastModified?: string) => {
       cacheRef.current.set(cacheKey, {
-        results,
+        results: newResults,
         eTag,
         lastModified,
         timestamp: Date.now(),
@@ -197,10 +199,10 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
           const eTag = res.headers.get('ETag') || undefined;
           const lastModified = res.headers.get('Last-Modified') || undefined;
 
-          const visitResult = {
+          const visitResult: QueryResult = {
             path: candidate,
             name: candidate.split('/').pop() || candidate,
-            type: 'file' as const,
+            type: 'file',
             content: text,
             contentType,
           };
@@ -214,7 +216,7 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
           onNavigate?.(candidate);
           setLoading(false);
           return;
-        } catch (e) {
+        } catch (_e) {
           // network or other error - record and try next
           lastErrorStatus = null;
           continue;
@@ -287,7 +289,7 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
             ...(typeof value === 'object' ? value : {}),
           }));
 
-      const processedResults = items.map((item: unknown) => {
+      const processedResults: QueryResult[] = items.map((item: unknown) => {
         const obj = item as Record<string, unknown>;
         return {
           path: (obj.path as string) || (obj.name as string) || '',
@@ -336,6 +338,17 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
     },
     [onNavigate],
   );
+
+  /**
+   * Format file size for display
+   */
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  };
 
   /**
    * Render a single result item
@@ -392,17 +405,6 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
       </View>
     );
   }, [hasMore, loadingMore, displayedResults.length, results.length, handleLoadMore]);
-
-  /**
-   * Format file size for display
-   */
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-  };
 
   // Determine if search input starts with '/'
   const isPathInput = inputValue.trim().startsWith('/');
@@ -478,10 +480,10 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
       ) : (
         // If visiting a path and the first result contains file content render
         // it using the MarkdownView. Otherwise show the search/list view.
-        (mode === 'visit' && displayedResults.length > 0 && (displayedResults[0] as any).content) ? (
+        (mode === 'visit' && displayedResults.length > 0 && displayedResults[0].content) ? (
           <View style={styles.markdownContainer}>
             <MarkdownView
-              content={(displayedResults[0] as any).content as string}
+              content={displayedResults[0].content as string}
               baseUrl={getBaseUrl()}
               branch={branch}
               onLinkPress={(url) => {
@@ -501,7 +503,7 @@ const DefaultNativePluginComponent: React.FC<DefaultNativePluginProps> = ({
                     const {Linking} = require('react-native');
                     Linking.openURL(url);
                   }
-                } catch (e) {
+                } catch (_e) {
                   // Not a full URL - treat as internal path
                   const rel = url.replace(/^\//, '');
                   setInputValue(rel);
@@ -731,5 +733,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export const DefaultNativePlugin = DefaultNativePluginComponent;
-export default DefaultNativePluginComponent;
+export default RepoBrowser;
