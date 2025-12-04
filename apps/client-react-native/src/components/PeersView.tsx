@@ -64,11 +64,19 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
   const loadAndProbePeers = useCallback(async () => {
     setIsRefreshing(true);
     try {
+      console.log('[PeersView] Loading peers from RelayCore');
       const envPeers = await RelayCore.getMasterPeerList();
+      console.log('[PeersView] Got peers:', envPeers);
       setPeers(envPeers);
       // Probe all peers after setting them
-      await Promise.all(envPeers.map((host) => probePeer(host)));
+      if (envPeers.length > 0) {
+        console.log('[PeersView] Probing all peers');
+        await Promise.all(envPeers.map((host) => probePeer(host)));
+      }
       setLastRefreshTs(Date.now());
+      console.log('[PeersView] Load complete');
+    } catch (err) {
+      console.error('[PeersView] Error loading peers:', err);
     } finally {
       setIsRefreshing(false);
     }
