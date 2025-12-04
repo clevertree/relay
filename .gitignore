@@ -48,6 +48,11 @@ package-lock.json
 
 # Terraform secrets (do not commit)
 terraform/**/.terraform/
+
+# Android signing keystores (must not be committed)
+*.keystore
+*.keystore.b64
+*-release.keystore
 terraform/**/terraform.tfstate*
 terraform/**/terraform.tfvars
 terraform/**/secrets.auto.tfvars
