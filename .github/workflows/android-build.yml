@@ -68,13 +68,12 @@ jobs:
         working-directory: apps/client-react-native/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease -x bundleReleaseResources --no-daemon -v
+          ./gradlew assembleRelease -x bundleReleaseResources --no-daemon
 
       - name: Debug build outputs
-        working-directory: apps/client-react-native/android
         run: |
           echo "Listing APK output files..."
-          find app/build -maxdepth 5 -type f
+          find apps/client-react-native/android/app/build -maxdepth 5 -type f
 
       - name: Verify APK
         run: |
