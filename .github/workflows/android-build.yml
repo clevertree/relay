@@ -85,7 +85,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease \
             -x bundleReleaseResources \
-            -PKEYSTORE_PATH=./app/relay-release.keystore \
+            -PKEYSTORE_PATH=app/relay-release.keystore \
             -PANDROID_KEYSTORE_ALIAS=${{ secrets.ANDROID_KEYSTORE_ALIAS || 'androiddebugkey' }} \
             -PANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }} \
             -PANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'android' }} \
