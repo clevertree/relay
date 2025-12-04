@@ -95,10 +95,10 @@ android {
         release {
             // Use environment variables for production signing (set by CI/CD)
             // Falls back to debug keystore if env vars not set
-            def keystorePath = System.getenv("KEYSTORE_PATH") ?: 'debug.keystore'
-            def keystoreAlias = System.getenv("ANDROID_KEYSTORE_ALIAS") ?: 'androiddebugkey'
-            def keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: 'android'
-            def keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: 'android'
+            def keystorePath = System.getenv("KEYSTORE_PATH") != null ? System.getenv("KEYSTORE_PATH") : 'debug.keystore'
+            def keystoreAlias = System.getenv("ANDROID_KEYSTORE_ALIAS") != null ? System.getenv("ANDROID_KEYSTORE_ALIAS") : 'androiddebugkey'
+            def keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") != null ? System.getenv("ANDROID_KEYSTORE_PASSWORD") : 'android'
+            def keyPassword = System.getenv("ANDROID_KEY_PASSWORD") != null ? System.getenv("ANDROID_KEY_PASSWORD") : 'android'
             
             storeFile file(keystorePath)
             storePassword keystorePassword
