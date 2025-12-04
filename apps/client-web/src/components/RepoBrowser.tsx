@@ -325,6 +325,56 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
       kind,
       ...extraParams,
     }
+    
+    /**
+     * Load a module from the same repo/host
+     * @param modulePath - Relative path like './lib/utils.mjs' or absolute like '/hooks/lib/utils.mjs'
+     * @returns Promise that resolves to the module's exports
+     */
+    const loadModule = async (modulePath: string): Promise<any> => {
+      if (!tab?.host) {
+        throw new Error('[loadModule] No host available')
+      }
+      
+      // Normalize path - handle both relative and absolute
+      let normalizedPath = modulePath
+      if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
+        // Relative to current hook path
+        const currentDir = (tab.path ?? '/hooks/router.mjs').split('/').slice(0, -1).join('/')
+        normalizedPath = `${currentDir}/${modulePath}`.replace(/\/\.\//g, '/').replace(/\/[^/]+\/\.\.\//g, '/')
+      } else if (!modulePath.startsWith('/')) {
+        // Assume it's relative to /hooks/
+        normalizedPath = `/hooks/${modulePath}`
+      }
+      
+      const protocol = tab.host.includes(':') ? 'http' : 'https'
+      const moduleUrl = `${protocol}://${tab.host}${normalizedPath}`
+      console.debug('[loadModule] Loading:', { modulePath, normalizedPath, moduleUrl })
+      
+      try {
+        const response = await fetch(moduleUrl)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch module: ${response.status} ${response.statusText}`)
+        }
+        
+        const code = await response.text()
+        const blob = new Blob([code], { type: 'text/javascript' })
+        const blobUrl = URL.createObjectURL(blob)
+        
+        try {
+          // @vite-ignore - Dynamic import of remote blob module (intentional pattern)
+          const mod: any = await import(/* @vite-ignore */ blobUrl)
+          console.debug('[loadModule] Successfully loaded:', modulePath)
+          return mod
+        } finally {
+          URL.revokeObjectURL(blobUrl)
+        }
+      } catch (err) {
+        console.error('[loadModule] Failed to load module:', modulePath, err)
+        throw err
+      }
+    }
+    
     return {
       React,
       createElement: React.createElement,
@@ -335,6 +385,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         buildRepoHeaders,
         buildPeerUrl: (p: string) => buildPeerUrl(tab!.host!, p),
         navigate: handleNavigate,
+        loadModule,
       },
     }
   }
@@ -435,20 +486,18 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
 
         {searchResults && searchResults.length > 0 && (
           <div className="space-y-4">
-            {previousPage && (
-              <button
-                onClick={() => {
-                  setSearchResults(null)
-                  setContent(null)
-                  setContentType(null)
-                  setQueryInput('')
-                  handleNavigate(previousPage.path)
-                }}
-                className="px-4 py-2 bg-gray-600 text-white rounded text-sm font-medium hover:bg-gray-700"
-              >
-                ← Back to previous page
-              </button>
-            )}
+            <button
+              onClick={() => {
+                setSearchResults(null)
+                setContent(null)
+                setContentType(null)
+                setQueryInput('')
+                handleNavigate(previousPage?.path ?? '/')
+              }}
+              className="px-4 py-2 bg-gray-600 text-white rounded text-sm font-medium hover:bg-gray-700"
+            >
+              ← Back
+            </button>
             <div className="space-y-3">
               <h2 className="text-xl font-bold">Search Results ({searchTotal} total)</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -514,7 +563,28 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           </div>
         )}
 
-        {!loading && hookElement}
+        {searchResults && searchResults.length === 0 && (
+          <div className="space-y-4">
+            <button
+              onClick={() => {
+                setSearchResults(null)
+                setContent(null)
+                setContentType(null)
+                setQueryInput('')
+                handleNavigate(previousPage?.path ?? '/')
+              }}
+              className="px-4 py-2 bg-gray-600 text-white rounded text-sm font-medium hover:bg-gray-700"
+            >
+              ← Back
+            </button>
+            <div className="p-8 bg-gray-100 dark:bg-gray-800 rounded-lg text-center text-gray-600 dark:text-gray-400">
+              <p>No results found for "{queryInput}"</p>
+              <p className="text-sm mt-2">Try a different search term</p>
+            </div>
+          </div>
+        )}
+
+        {!loading && !searchResults && hookElement}
 
         {content && !loading && !hookElement && !searchResults && (
           contentType && contentType.includes('markdown') ? (
