@@ -1,4 +1,4 @@
-// Fetch TMDB movie details by id (browser). Uses public env from POST /env.
+// Fetch TMDB movie details by id (browser). Uses public env from GET /hooks/env.json.
 import { loadEnvOnce, tmdbAuth } from './query_tmdb.js';
 
 export async function getTmdbById(id) {

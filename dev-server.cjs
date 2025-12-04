@@ -66,6 +66,7 @@ const templateServer = http.createServer((req, res) => {
     const contentTypeMap = {
       '.html': 'text/html',
       '.js': 'application/javascript',
+      '.mjs': 'application/javascript',
       '.css': 'text/css',
       '.json': 'application/json',
       '.md': 'text/markdown',
@@ -106,25 +107,50 @@ setTimeout(() => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
-      res.writeHead(200);
-      res.end();
+      // Return a mock OPTIONS response similar to the real Relay server
+      const optionsResponse = {
+        ok: true,
+        repoInitialized: true,
+        capabilities: ['git', 'torrent', 'ipfs', 'http'],
+        branches: ['main'],
+        repos: ['template'],
+        currentBranch: 'main',
+        currentRepo: 'template',
+        branchHeads: [{ branch: 'main', commit: '0000000000000000000000000000000000000000' }],
+        samplePaths: { index: 'index.md' },
+      };
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Allow': 'GET, PUT, DELETE, OPTIONS, QUERY',
+        'X-Relay-Branch': 'main',
+        'X-Relay-Repo': 'template',
+      });
+      res.end(JSON.stringify(optionsResponse, null, 2));
       return;
     }
 
-    const parsedUrl = url.parse(req.url, true);
+    const parsedUrl = new URL(req.url, 'http://localhost');
     const pathname = parsedUrl.pathname;
 
       // No special proxies - serve local files from template as-is
 
+    // Handle /template/* paths by stripping /template prefix
+    let resolvedPath = pathname;
+    if (pathname.startsWith('/template/')) {
+      resolvedPath = pathname.slice('/template'.length); // Remove /template prefix
+    } else if (pathname === '/template') {
+      resolvedPath = '/';
+    }
+
     // Check if file exists in template folder first (serve template at root)
-    const templateFilePath = path.join(templateDir, pathname === '/' ? 'index.html' : pathname);
+    const templateFilePath = path.join(templateDir, resolvedPath === '/' ? 'index.html' : resolvedPath);
     
     try {
       const stat = fs.statSync(templateFilePath);
       // File exists in template and is not trying to escape template dir
       if (templateFilePath.startsWith(templateDir) && stat.isFile()) {
         // Serve from template server without query params in path
-        const targetUrl = `http://localhost:${TEMPLATE_PORT}${pathname}`;
+        const targetUrl = `http://localhost:${TEMPLATE_PORT}${resolvedPath}`;
         forwardRequest(req, res, targetUrl);
         return;
       }
@@ -144,11 +170,16 @@ setTimeout(() => {
 
   // Forward function for proxying
   function forwardRequest(req, res, targetUrl) {
-    const isHttps = targetUrl.startsWith('https');
+    const parsedUrl = new URL(targetUrl);
+    const isHttps = parsedUrl.protocol === 'https:';
     const client = isHttps ? require('https') : http;
-    const options = url.parse(targetUrl);
-    options.method = req.method;
-    options.headers = req.headers;
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: req.method,
+      headers: req.headers,
+    };
 
     const proxyReq = client.request(options, (proxyRes) => {
       res.writeHead(proxyRes.statusCode, proxyRes.headers);

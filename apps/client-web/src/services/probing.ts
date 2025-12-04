@@ -137,44 +137,27 @@ export async function fetchPeerOptions(
   lastUpdateTs?: number
 }> {
   const isSecureContext = window.location.protocol === 'https:'
+  const protocols = isSecureContext ? ['https', 'http'] : ['http', 'https']
 
-  try {
-    const response = await fetchWithTimeout(`https://${host}/`, {
-      method: 'OPTIONS',
-      timeout: PROBE_TIMEOUT_MS,
-    })
+  for (const protocol of protocols) {
+    try {
+      const response = await fetchWithTimeout(`${protocol}://${host}/`, {
+        method: 'OPTIONS',
+        timeout: PROBE_TIMEOUT_MS,
+      })
 
-    if (response.ok) {
-      const data = await response.json()
-      return {
-        branches: data.branches,
-        repos: data.repos,
-        branchHeads: data.branchHeads,
-        lastUpdateTs: Date.now(),
-      }
-    }
-  } catch {
-    // Try HTTP fallback only if we're in an insecure context (HTTP page)
-    // In HTTPS context, mixed content requests are blocked by browser
-    if (!isSecureContext) {
-      try {
-        const response = await fetchWithTimeout(`http://${host}/`, {
-          method: 'OPTIONS',
-          timeout: PROBE_TIMEOUT_MS,
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          return {
-            branches: data.branches,
-            repos: data.repos,
-            branchHeads: data.branchHeads,
-            lastUpdateTs: Date.now(),
-          }
+      if (response.ok) {
+        const data = await response.json()
+        return {
+          branches: data.branches,
+          repos: data.repos,
+          branchHeads: data.branchHeads,
+          lastUpdateTs: Date.now(),
         }
-      } catch {
-        // Both failed
       }
+    } catch (err) {
+      // Continue to next protocol
+      continue
     }
   }
 

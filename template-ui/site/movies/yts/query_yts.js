@@ -2,7 +2,7 @@
 // Use case: When opening a movie with no stored torrent hashes, call this
 // to discover possible torrents on YTS and surface them to the user.
 //
-// Environment: relies on public env returned by POST /env, particularly
+// Environment: relies on public env from GET /hooks/env.json, particularly
 // RELAY_PUBLIC_YTS_DOMAIN (e.g., yts.lt)
 
 import { loadEnvOnce } from '../tmdb/query_tmdb.js';

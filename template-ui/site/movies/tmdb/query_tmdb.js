@@ -1,5 +1,5 @@
 // Browser-friendly TMDB query utilities (no Node deps)
-// - Gets public env via POST /env (whitelisted RELAY_PUBLIC_*)
+// - Gets public env via GET /hooks/env.json
 // - Exposes: fetchTmdbGenres, queryTmdb, queryLocalViaServer, queryAllHybrid
 
 let __envCache = null;
@@ -12,7 +12,7 @@ export async function loadEnvOnce() {
     const meta = document.querySelector('meta[name="relay-branch"]');
     const branch = meta?.getAttribute('content') || 'main';
     headers['X-Relay-Branch'] = branch;
-    const res = await fetch('/env', { method: 'POST', headers });
+    const res = await fetch('/hooks/env.json');
     __envCache = res.ok ? await res.json() : {};
   } catch { __envCache = {}; }
   return __envCache;

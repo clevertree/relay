@@ -202,26 +202,28 @@ Overview
 
 The web client (apps/client-web) now supports repository-defined UI via optional hook scripts and a layout component stored inside the served repository. When present, these scripts let each repository control how files are rendered, how search results are displayed, and how creation forms look — without requiring extra build steps or dependencies in the web client.
 
+**Important Principle:** The Relay client never defines or enforces repository data schemas. Only the repositories themselves define fields, file formats, and data structures within their hook scripts. The client only knows how to invoke hooks and render generic responses.
+
 Key concepts
 
 - Hook scripts (optional, inside the repo):
-  - `/template/hooks/get.mjs` — handles reading and rendering a file path.
-  - `/template/hooks/query.mjs` — handles search/QUERY and renders results.
-  - `/template/hooks/put.mjs` — renders a Create form and performs PUT requests.
+  - `/hooks/get.mjs` — handles reading and rendering a file path.
+  - `/hooks/query.mjs` — handles search/QUERY and renders results.
+  - `/hooks/put.mjs` — renders a Create form and performs PUT requests.
 - Layout (optional, inside the repo):
-  - `/template/ui/layout.mjs` or `/template/ui/layout.js` — a React component used to wrap hook-rendered content. If not present, the client falls back to its built-in `TemplateLayout`.
+  - `/ui/layout.mjs` or `/ui/layout.js` — a React component used to wrap hook-rendered content. If not present, the client falls back to its built-in `TemplateLayout`.
 - FileRenderer (built-in, client-web):
   - A simple component that renders response bodies by MIME-type (markdown, images, text, json, etc.). Repos can use it from hooks.
 
 How it works
 
-1) The Repo Browser attempts to load `/template/hooks/get.mjs` from the target socket before doing a direct fetch. If found, the script is fetched and dynamically imported in the browser, and its `default` export is called with a context object. If not found, the browser falls back to a regular GET of the requested path.
+1) The Repo Browser attempts to load `/hooks/get.mjs` from the target socket before doing a direct fetch. If found, the script is fetched and dynamically imported in the browser, and its `default` export is called with a context object. If not found, the browser falls back to a regular GET of the requested path.
 
 2) The same mechanism is used for search and creation:
-   - Search: a new Search box routes through `/template/hooks/query.mjs` if present.
-   - Create: a new Create button routes through `/template/hooks/put.mjs` if present.
+   - Search: a new Search box routes through `/hooks/query.mjs` if present.
+   - Create: a new Create button routes through `/hooks/put.mjs` if present.
 
-3) Layout selection: before invoking a hook, the client tries to load `/template/ui/layout.mjs` (or `.js`). If available, it is used as the `Layout` component. Otherwise, `apps/client-web/src/components/TemplateLayout.tsx` is used.
+3) Layout selection: before invoking a hook, the client tries to load `/ui/layout.mjs` (or `.js`). If available, it is used as the `Layout` component. Otherwise, `apps/client-web/src/components/TemplateLayout.tsx` is used.
 
 Hook execution context
 
@@ -252,9 +254,9 @@ Return value: The hook must return a React element (JSX or non-JSX via `createEl
 
 Default examples in this repo
 
-- `/template/hooks/get.mjs` — Performs a GET for the current `path` (scoped by branch/repo headers) and renders with `FileRenderer` wrapped by `Layout`.
-- `/template/hooks/query.mjs` — Issues a `QUERY` request with the user’s `q` string and renders each result row.
-- `/template/hooks/put.mjs` — Renders a basic form to create/update a file at the current directory, submitting via `PUT`.
+- `/hooks/get.mjs` — Performs a GET for the current `path` (scoped by branch/repo headers) and renders with `FileRenderer` wrapped by `Layout`.
+- `/hooks/query.mjs` — Issues a `QUERY` request with the user’s `q` string and renders each result row.
+- `/hooks/put.mjs` — Renders a basic form to create/update a file at the current directory, submitting via `PUT`.
 - `/template/ui/layout.tsx` — A simple React layout component repos may copy and customize. If a JS module `/template/ui/layout.mjs` is also provided alongside or instead, the web client will prefer loading that at runtime.
 
 Authoring hooks
@@ -266,9 +268,9 @@ Authoring hooks
 Client changes (summary)
 
 - `apps/client-web/src/components/RepoBrowser.tsx` now:
-  - Probes and loads `/template/hooks/get.mjs` before doing a direct fetch.
-  - Adds a Create button wired to `/template/hooks/put.mjs` if available.
-  - Adds a Search box wired to `/template/hooks/query.mjs` if available.
+  - Probes and loads `/hooks/get.mjs` before doing a direct fetch.
+  - Adds a Create button wired to `/hooks/put.mjs` if available.
+  - Adds a Search box wired to `/hooks/query.mjs` if available.
   - Tries to load `/template/ui/layout.mjs` or `.js` as the `Layout` wrapper before running a hook.
   - Falls back to direct GET fetch and the built-in `MarkdownRenderer`/`FileRenderer` when hooks are missing.
 
@@ -278,7 +280,7 @@ Client changes (summary)
 Usage flow
 
 1. Open a peer in the web client and navigate to a path.
-2. If the peer’s repo has `/template/hooks/get.mjs`, it controls rendering. Otherwise the file is fetched and rendered as markdown/text/image/etc.
+2. If the peer’s repo has `/hooks/get.mjs`, it controls rendering. Otherwise the file is fetched and rendered as markdown/text/image/etc.
 3. Use the Create button to open the PUT hook UI (if present) to add a new file in the current directory.
 4. Use the Search box to run queries via the repo’s `query.mjs` (if present).
 

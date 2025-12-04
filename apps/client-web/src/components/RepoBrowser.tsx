@@ -26,11 +26,27 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   const [pathInput, setPathInput] = useState(tab?.path ?? '/README.md')
   const [hookElement, setHookElement] = useState<React.ReactNode | null>(null)
   const [queryInput, setQueryInput] = useState('')
+  const [searchResults, setSearchResults] = useState<Record<string, any>[] | null>(null)
+  const [searchTotal, setSearchTotal] = useState(0)
+  const [previousPage, setPreviousPage] = useState<{ path: string; content: string | null; contentType: string | null } | null>(null)
 
   useEffect(() => {
     if (!tab || !tab.host) return
     setPathInput(tab.path ?? '/README.md')
     loadOptions()
+    
+    // Parse query from path if it's a search path (/search/[query])
+    const path = tab.path ?? ''
+    const searchMatch = path.match(/^\/search\/(.+)$/)
+    if (searchMatch) {
+      const searchQuery = decodeURIComponent(searchMatch[1])
+      console.debug('[RepoBrowser] Search path detected:', searchQuery)
+      setQueryInput(searchQuery)
+    } else {
+      // Clear search state when navigating away from search
+      setSearchResults(null)
+    }
+    
     loadContent()
   }, [tab?.host, tab?.path])
 
@@ -57,7 +73,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     setHookElement(null)
 
     try {
-      // Try hook first: /template/hooks/get.mjs on the target host
+      // Try hook first: /hooks/router.mjs on the target host
       const hookUsed = await tryRenderWithHook('get')
       if (!hookUsed) {
         // Fallback: direct fetch
@@ -113,7 +129,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     try {
       const used = await tryRenderWithHook('put')
       if (!used) {
-        setError('Create UI not available: /template/hooks/put.mjs hook not found in repo')
+        setError('Create UI not available: /hooks/put.mjs hook not found in repo')
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load create UI')
@@ -122,54 +138,177 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     }
   }
 
+  const performSearch = async (query: string) => {
+    if (!query.trim()) return
+    
+    console.debug(`[Search] Starting search for: "${query}"`)
+    console.debug(`[Search] Current tab:`, { host: tab?.host, path: tab?.path, branch: tab?.currentBranch })
+    
+    // Save current page state for back button
+    if (!previousPage && tab?.path && !tab.path.startsWith('/search') && !tab.path.startsWith('/view')) {
+      setPreviousPage({ path: tab.path, content, contentType })
+    }
+    
+    // Navigate to /search/[query] path - router.mjs handles the rest
+    handleNavigate(`/search/${encodeURIComponent(query)}`)
+  }
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!queryInput.trim()) return
-    setError(null)
-    setLoading(true)
-    try {
-      const used = await tryRenderWithHook('query', { q: queryInput })
-      if (!used) {
-        setError('Search UI not available: /template/hooks/query.mjs hook not found in repo')
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to run search')
-    } finally {
-      setLoading(false)
-    }
+    await performSearch(queryInput)
   }
 
   const tryRenderWithHook = async (
     kind: 'get' | 'query' | 'put',
     extraParams?: Record<string, unknown>,
   ): Promise<boolean> => {
-    if (!tab?.host) return false
+    if (!tab?.host) {
+      console.debug(`[Hook ${kind}] No host available`)
+      return false
+    }
+    
     const protocol = tab.host.includes(':') ? 'http' : 'https'
-    const hookUrl = `${protocol}://${tab.host}/template/hooks/${kind}.mjs`
+    // Router handles both get and search routes
+    const hookName = kind === 'get' ? 'router' : kind === 'query' ? 'query-client' : kind
+    const hookUrl = `${protocol}://${tab.host}/hooks/${hookName}.mjs`
+    console.debug(`[Hook ${kind}] Probing: ${hookUrl}`)
 
-    // Probe availability
-    const probe = await fetch(hookUrl, { method: 'HEAD' }).catch(() => null)
-    if (!probe || !probe.ok) return false
+    // Probe availability with detailed logging
+    try {
+      const probe = await fetch(hookUrl, { method: 'HEAD' })
+      console.debug(`[Hook ${kind}] Probe response:`, { 
+        status: probe.status, 
+        ok: probe.ok,
+        contentType: probe.headers.get('content-type')
+      })
+      
+      if (!probe.ok) {
+        console.debug(`[Hook ${kind}] Probe failed with status ${probe.status}`)
+        return false
+      }
+    } catch (probeErr) {
+      console.debug(`[Hook ${kind}] Probe error:`, probeErr instanceof Error ? probeErr.message : probeErr)
+      return false
+    }
 
     // Fetch hook source and dynamic import
-    const srcResp = await fetch(hookUrl)
-    if (!srcResp.ok) return false
-    const code = await srcResp.text()
-    const blob = new Blob([code], { type: 'text/javascript' })
-    const blobUrl = URL.createObjectURL(blob)
     try {
-      // @ts-ignore webpackIgnore for remote blob
-      const mod: any = await import(/* webpackIgnore: true */ blobUrl)
-      if (!mod || typeof mod.default !== 'function') return false
-      const remoteLayout = await tryLoadRemoteLayout()
-      const ctx = buildHookContext(kind, extraParams, remoteLayout ?? undefined)
-      const element: React.ReactNode = await mod.default(ctx)
-      setHookElement(element)
-      setContent(null)
-      setContentType(null)
-      return true
-    } finally {
-      URL.revokeObjectURL(blobUrl)
+      console.debug(`[Hook ${kind}] Fetching source: ${hookUrl}`)
+      const srcResp = await fetch(hookUrl)
+      
+      console.debug(`[Hook ${kind}] Fetch response:`, { 
+        status: srcResp.status, 
+        ok: srcResp.ok,
+        contentType: srcResp.headers.get('content-type')
+      })
+      
+      if (!srcResp.ok) {
+        console.debug(`[Hook ${kind}] Fetch failed with status ${srcResp.status}`)
+        return false
+      }
+      
+      const code = await srcResp.text()
+      console.debug(`[Hook ${kind}] Received code (${code.length} chars)`)
+      
+      const blob = new Blob([code], { type: 'text/javascript' })
+      const blobUrl = URL.createObjectURL(blob)
+      console.debug(`[Hook ${kind}] Created blob URL: ${blobUrl}`)
+      
+      try {
+        // @vite-ignore - Dynamic import of remote blob module (intentional pattern)
+        console.debug(`[Hook ${kind}] Attempting dynamic import...`)
+        const mod: any = await import(/* @vite-ignore */ blobUrl)
+        console.debug(`[Hook ${kind}] Import successful, module:`, mod)
+        
+        if (!mod || typeof mod.default !== 'function') {
+          console.debug(`[Hook ${kind}] Module missing or default is not a function:`, { has: !!mod, typeOfDefault: typeof mod?.default })
+          return false
+        }
+        
+        // Handle query hook specially - capture results and render table
+        if (kind === 'query') {
+          console.debug(`[Hook ${kind}] Processing query results...`)
+          const remoteLayout = await tryLoadRemoteLayout()
+          const ctx = buildHookContext(kind, extraParams, remoteLayout ?? undefined)
+          const queryResponse = await mod.default(ctx)
+          console.debug(`[Hook ${kind}] Query response:`, queryResponse)
+          
+          // If response contains items/results, render as table
+          if (queryResponse && typeof queryResponse === 'object') {
+            const items = queryResponse.items || queryResponse.results || []
+            const total = queryResponse.total || 0
+            console.debug(`[Hook ${kind}] Setting search results: ${items.length} items, total ${total}`)
+            setSearchResults(items)
+            setSearchTotal(total)
+            setContent(null)
+            setContentType(null)
+            setHookElement(null)
+            return true
+          }
+          
+          console.debug(`[Hook ${kind}] Setting hook element`)
+          setHookElement(queryResponse)
+          setSearchResults(null)
+          setContent(null)
+          setContentType(null)
+          return true
+        }
+        
+        // Handle get hook with search-ui type response
+        if (kind === 'get') {
+          const remoteLayout = await tryLoadRemoteLayout()
+          const ctx = buildHookContext(kind, extraParams, remoteLayout ?? undefined)
+          const response = await mod.default(ctx)
+          console.debug(`[Hook ${kind}] Response:`, response)
+          
+          // Check if response is a search-ui type (from get-client.mjs /search route)
+          if (response && typeof response === 'object' && response.type === 'search-ui') {
+            const items = response.items || []
+            const total = response.total || 0
+            console.debug(`[Hook ${kind}] Search UI response: ${items.length} items, total ${total}`)
+            setSearchResults(items)
+            setSearchTotal(total)
+            setContent(null)
+            setContentType(null)
+            setHookElement(null)
+            if (response.error) {
+              setError(response.error)
+            }
+            return true
+          }
+          
+          // Regular React element response
+          if (response) {
+            setHookElement(response)
+            setSearchResults(null)
+            setContent(null)
+            setContentType(null)
+            return true
+          }
+          return false
+        }
+        
+        const remoteLayout = await tryLoadRemoteLayout()
+        const ctx = buildHookContext(kind, extraParams, remoteLayout ?? undefined)
+        const element: React.ReactNode = await mod.default(ctx)
+        console.debug(`[Hook ${kind}] Hook executed successfully`)
+        setHookElement(element)
+        setSearchResults(null)
+        setContent(null)
+        setContentType(null)
+        return true
+      } catch (err) {
+        // Hook failed to load or execute - fall back to direct fetch
+        console.debug(`[Hook ${kind}] Execution failed:`, err instanceof Error ? err.message : err)
+        console.error(`[Hook ${kind}] Full error:`, err)
+        return false
+      } finally {
+        URL.revokeObjectURL(blobUrl)
+      }
+    } catch (fetchErr) {
+      console.debug(`[Hook ${kind}] Fetch error:`, fetchErr instanceof Error ? fetchErr.message : fetchErr)
+      return false
     }
   }
 
@@ -195,6 +334,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
       helpers: {
         buildRepoHeaders,
         buildPeerUrl: (p: string) => buildPeerUrl(tab!.host!, p),
+        navigate: handleNavigate,
       },
     }
   }
@@ -215,8 +355,8 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
       const blob = new Blob([code], { type: 'text/javascript' })
       const blobUrl = URL.createObjectURL(blob)
       try {
-        // @ts-ignore webpackIgnore
-        const mod: any = await import(/* webpackIgnore: true */ blobUrl)
+        // @vite-ignore - Dynamic import of remote blob module (intentional pattern)
+        const mod: any = await import(/* @vite-ignore */ blobUrl)
         const LayoutComp = mod.default || mod.Layout || null
         if (LayoutComp) return LayoutComp as React.ComponentType<any>
       } catch {
@@ -233,8 +373,8 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="flex flex-col gap-3 p-0 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+    <div className="flex flex-col h-full">
+      <div className="flex flex-col gap-3 p-0 border-b border-gray-300 dark:border-gray-700 flex-shrink-0">
         <form className="flex gap-2 p-2" onSubmit={handlePathSubmit}>
           <input
             type="text"
@@ -259,7 +399,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
                     currentBranch: e.target.value,
                   }))
                 }}
-                className="px-2 py-1 border border-gray-300 rounded text-sm bg-white cursor-pointer"
+                className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800 dark:text-white cursor-pointer"
               >
                 {optionsInfo.branches.map((branch) => (
                   <option key={branch} value={branch}>
@@ -286,16 +426,97 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         {loading && <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>}
 
         {error && (
-          <div className="p-8 bg-red-100/50 border border-red-300/50 rounded-lg text-red-600">
+          <div className="p-8 bg-red-500/20 dark:bg-red-900/30 border border-red-400 dark:border-red-700 rounded-lg text-red-700 dark:text-red-300">
             <h3 className="mt-0">Error</h3>
             <p>{error}</p>
             <button onClick={loadContent} className="px-4 py-2 bg-red-600 text-white border-none rounded cursor-pointer mt-4 hover:bg-red-700">Try Again</button>
           </div>
         )}
 
+        {searchResults && searchResults.length > 0 && (
+          <div className="space-y-4">
+            {previousPage && (
+              <button
+                onClick={() => {
+                  setSearchResults(null)
+                  setContent(null)
+                  setContentType(null)
+                  setQueryInput('')
+                  handleNavigate(previousPage.path)
+                }}
+                className="px-4 py-2 bg-gray-600 text-white rounded text-sm font-medium hover:bg-gray-700"
+              >
+                ← Back to previous page
+              </button>
+            )}
+            <div className="space-y-3">
+              <h2 className="text-xl font-bold">Search Results ({searchTotal} total)</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {searchResults.map((result, idx) => {
+                  const source = result.source || 'tmdb'
+                  const itemId = result.id
+                  const viewPath = `/view/${source}/${itemId}`
+                  
+                  return (
+                    <div
+                      key={result.id || idx}
+                      className="p-4 border border-gray-300 dark:border-gray-600 rounded-lg hover:shadow-md transition-shadow"
+                    >
+                      {result.poster_url ? (
+                        <button
+                          onClick={() => handleNavigate(viewPath)}
+                          className="w-full border-0 bg-transparent p-0 cursor-pointer"
+                        >
+                          <img
+                            src={result.poster_url}
+                            alt={result.title || `Item ${idx + 1}`}
+                            className="rounded mb-3 w-full h-48 object-cover hover:opacity-90 transition-opacity"
+                          />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleNavigate(viewPath)}
+                          className="w-full border-0 p-0 cursor-pointer"
+                        >
+                          <div className="bg-gray-200 dark:bg-gray-700 rounded mb-3 w-full h-48 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
+                            <span className="text-sm">{result.title || `Item ${idx + 1}`}</span>
+                          </div>
+                        </button>
+                      )}
+                      <div className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+                        {result.title && (
+                          <h3 className="font-semibold text-base text-gray-900 dark:text-white">{result.title}</h3>
+                        )}
+                        {result.release_date && (
+                          <p className="text-gray-600 dark:text-gray-400">📅 {result.release_date}</p>
+                        )}
+                        {result.vote_average && (
+                          <p className="text-gray-600 dark:text-gray-400">⭐ {Number(result.vote_average).toFixed(1)}/10</p>
+                        )}
+                        {result.genre_names && result.genre_names.length > 0 && (
+                          <p className="text-gray-600 dark:text-gray-400">🎬 {result.genre_names.join(', ')}</p>
+                        )}
+                        {result.overview && (
+                          <p className="text-gray-600 dark:text-gray-400 line-clamp-2">{result.overview}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleNavigate(viewPath)}
+                        className="mt-3 w-full px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 transition-colors"
+                      >
+                        View Details
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {!loading && hookElement}
 
-        {content && !loading && !hookElement && (
+        {content && !loading && !hookElement && !searchResults && (
           contentType && contentType.includes('markdown') ? (
             <MarkdownRenderer content={content} navigate={handleNavigate} />
           ) : (

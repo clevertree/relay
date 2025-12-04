@@ -91,7 +91,7 @@ const preview = {
     try {
       const url = typeof input === 'string' ? input : (input?.url || '');
       const method = (init.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
-      if (url.endsWith('/env') && method === 'POST') {
+      if (url.endsWith('/hooks/env.json') && method === 'GET') {
         return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (method === 'QUERY' || (url.includes('/query') && method === 'POST')) {

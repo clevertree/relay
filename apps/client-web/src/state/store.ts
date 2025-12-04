@@ -94,6 +94,18 @@ function loadPersistedActiveTab() {
   return 'home'
 }
 
+// Update URL path to reflect current active tab
+function updateUrlPath(tabs: TabInfo[], activeTabId: string) {
+  const activeTab = tabs.find((t) => t.id === activeTabId)
+  if (activeTab?.host) {
+    const path = `/?open=${encodeURIComponent(activeTab.host)}${activeTab.path || ''}`
+    window.history.pushState({ tabId: activeTabId }, '', path)
+  } else {
+    // Home tab
+    window.history.pushState({ tabId: 'home' }, '', '/')
+  }
+}
+
 export const useAppState = create<AppState>((set, get) => ({
   // Peers state
   peers: [],
@@ -123,6 +135,7 @@ export const useAppState = create<AppState>((set, get) => ({
       } catch (e) {
         console.error('Failed to save active tab:', e)
       }
+      updateUrlPath(get().tabs, existingTab.id)
       return existingTab.id
     }
 
@@ -141,6 +154,7 @@ export const useAppState = create<AppState>((set, get) => ({
       } catch (e) {
         console.error('Failed to save tabs:', e)
       }
+      updateUrlPath(newTabs, id)
       return {
         tabs: newTabs,
         activeTabId: id,
@@ -162,6 +176,7 @@ export const useAppState = create<AppState>((set, get) => ({
       } catch (e) {
         console.error('Failed to save tabs:', e)
       }
+      updateUrlPath(tabs, activeTabId || 'home')
       return { tabs, activeTabId }
     }),
   setActiveTab: (tabId) => {
@@ -171,6 +186,7 @@ export const useAppState = create<AppState>((set, get) => ({
     } catch (e) {
       console.error('Failed to save active tab:', e)
     }
+    updateUrlPath(get().tabs, tabId)
   },
   updateTab: (tabId, updater) =>
     set((s) => {
@@ -180,6 +196,7 @@ export const useAppState = create<AppState>((set, get) => ({
       } catch (e) {
         console.error('Failed to save tabs:', e)
       }
+      updateUrlPath(newTabs, s.activeTabId)
       return {
         tabs: newTabs,
       }

@@ -53,7 +53,7 @@ class MovieUpsert extends HTMLElement {
     }
 
     async _loadInsertTemplate() {
-        // Template loading would come from .relay/options.mjs or repository-specific scripts
+        // Template loading would come from hooks/options.mjs or repository-specific scripts
         // For now, use defaults
         try {
             // Future: load from OPTIONS endpoint or repository configuration

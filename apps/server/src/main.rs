@@ -123,7 +123,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/openapi.yaml", get(get_openapi_yaml))
         .route("/swagger-ui", get(get_swagger_ui))
         .route("/api/config", get(get_api_config))
-        .route("/env", axum::routing::post(post_env))
         .route("/", get(get_root).options(options_capabilities))
         .route(
             "/*path",
@@ -242,43 +241,7 @@ fn parse_dotenv(s: &str) -> std::collections::HashMap<String, String> {
     map
 }
 
-/// POST /env — returns a JSON object of environment variables whitelisted by prefix
-/// Whitelist: keys starting with "RELAY_PUBLIC_" only.
-/// Merge order (lowest to highest precedence): .env -> .env.local -> OS env
-async fn post_env(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    query: Option<Query<HashMap<String, String>>>,
-) -> impl IntoResponse {
-    let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
-    // Read .env and .env.local from the repo at this branch
-    let mut merged: HashMap<String, String> = HashMap::new();
-    let from_repo = |name: &str| -> Option<String> {
-        read_file_from_repo(&state.repo_path, &branch, name)
-            .ok()
-            .and_then(|b| String::from_utf8(b).ok())
-    };
-    if let Some(env_txt) = from_repo(".env") {
-        for (k, v) in parse_dotenv(&env_txt) {
-            merged.entry(k).or_insert(v);
-        }
-    }
-    if let Some(env_local_txt) = from_repo(".env.local") {
-        for (k, v) in parse_dotenv(&env_local_txt) {
-            merged.insert(k, v);
-        }
-    }
-    // Overlay OS env
-    for (k, v) in std::env::vars() {
-        merged.insert(k, v);
-    }
-    // Whitelist: only RELAY_PUBLIC_*
-    let filtered: HashMap<String, String> = merged
-        .into_iter()
-        .filter(|(k, _)| k.starts_with("RELAY_PUBLIC_"))
-        .collect();
-    (StatusCode::OK, Json(filtered))
-}
+
 
 fn ensure_bare_repo(path: &PathBuf) -> anyhow::Result<()> {
     if path.exists() {
@@ -431,7 +394,7 @@ fn list_branch_heads(repo_path: &PathBuf) -> Vec<(String, String)> {
     out
 }
 
-// QueryRequest/Response handled entirely by repo script (.relay/query.mjs)
+// QueryRequest/Response handled entirely by repo script (hooks/query.mjs)
 
 async fn post_query(
     State(state): State<AppState>,
@@ -446,7 +409,7 @@ async fn post_query(
         .to_string();
     let input_json = body.map(|Json(v)| v).unwrap_or(serde_json::json!({}));
 
-    // Load .relay/query.mjs from branch
+    // Load hooks/query.mjs from branch
     let repo = match Repository::open_bare(&state.repo_path) {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -463,9 +426,9 @@ async fn post_query(
         Ok(t) => t,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
-    let entry = match tree.get_path(std::path::Path::new(".relay/query.mjs")) {
+    let entry = match tree.get_path(std::path::Path::new("hooks/query.mjs")) {
         Ok(e) => e,
-        Err(_) => return (StatusCode::BAD_REQUEST, ".relay/query.mjs not found").into_response(),
+        Err(_) => return (StatusCode::BAD_REQUEST, "hooks/query.mjs not found").into_response(),
     };
     let blob = match entry.to_object(&repo).and_then(|o| o.peel_to_blob()) {
         Ok(b) => b,
@@ -1187,7 +1150,7 @@ async fn get_file(
     match git_result {
         GitResolveResult::Respond(resp) => return resp,
         GitResolveResult::NotFound(rel_missing) => {
-            // Git miss: delegate to repo get script (.relay/get.mjs)
+            // Git miss: delegate to repo get script (hooks/get.mjs)
             return run_get_script_or_404(&state, &branch, &repo_name, &rel_missing).await;
         }
     }
@@ -1199,7 +1162,7 @@ async fn run_get_script_or_404(
     repo_name: &str,
     rel_missing: &str,
 ) -> Response {
-    // Load .relay/get.mjs from branch
+    // Load hooks/get.mjs from branch
     let repo = match Repository::open_bare(&state.repo_path) {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -1216,7 +1179,7 @@ async fn run_get_script_or_404(
         Ok(t) => t,
         Err(_) => return (StatusCode::NOT_FOUND, "Not Found").into_response(),
     };
-    let entry = match tree.get_path(std::path::Path::new(".relay/get.mjs")) {
+    let entry = match tree.get_path(std::path::Path::new("hooks/get.mjs")) {
         Ok(e) => e,
         Err(_) => return (StatusCode::NOT_FOUND, "Not Found").into_response(),
     };
@@ -1412,7 +1375,7 @@ fn git_resolve_and_respond(
     };
     let rel = path_scoped.trim_matches('/');
 
-    // Empty path -> delegate to repo script (.relay/get.mjs)
+    // Empty path -> delegate to repo script (hooks/get.mjs)
     if rel.is_empty() {
         return GitResolveResult::NotFound(rel.to_string());
     }
@@ -1488,7 +1451,7 @@ fn git_resolve_and_respond(
     }
 }
 
-// IPFS fallback removed; IPFS logic is delegated to repo scripts (.relay/get.mjs)
+// IPFS fallback removed; IPFS logic is delegated to repo scripts (hooks/get.mjs)
 
 async fn get_root(
     State(state): State<AppState>,
@@ -1518,7 +1481,7 @@ async fn get_root(
         }
     };
     info!(%branch, "get_root resolved branch");
-    // Defer directory listing logic to .relay/get.mjs
+    // Defer directory listing logic to hooks/get.mjs
     run_get_script_or_404(&state, &branch, &repo_name, "").await
 }
 
@@ -1836,12 +1799,12 @@ fn write_file_to_repo(
 
     debug!(%commit_oid, %branch, path = %path, "created commit candidate");
 
-    // Run repo pre-commit script (.relay/pre-commit.mjs) if present in the new commit
+    // Run repo pre-commit script (hooks/pre-commit.mjs) if present in the new commit
     {
         if let Ok(new_commit_obj) = repo.find_commit(commit_oid) {
             if let Ok(tree) = new_commit_obj.tree() {
                 use std::io::Write as _;
-                if let Ok(entry) = tree.get_path(std::path::Path::new(".relay/pre-commit.mjs")) {
+                if let Ok(entry) = tree.get_path(std::path::Path::new("hooks/pre-commit.mjs")) {
                     if let Ok(blob) = entry.to_object(&repo).and_then(|o| o.peel_to_blob()) {
                         let tmp_path = std::env::temp_dir()
                             .join(format!("relay-pre-commit-{}-{}.mjs", branch, commit_oid));

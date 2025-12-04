@@ -4,102 +4,121 @@
 
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+  line-height: 1.6;
   font-weight: 400;
-
-  color: #213547;
-  background-color: #ffffff;
-
+  --color-bg: #ffffff;
+  --color-surface: #f5f6fb;
+  --color-border: #d9dee7;
+  --color-text: #111b26;
+  --color-muted: #5f6b7a;
+  --color-primary: #1f73ff;
+  --color-primary-strong: #0f59d2;
+  --color-danger: #e75b64;
+  --transition: background-color 0.25s ease, color 0.25s ease;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-html, body {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0a0e27;
+    --color-surface: #161b22;
+    --color-border: #30363d;
+    --color-text: #e8eef7;
+    --color-muted: #adb5c7;
+    --color-primary: #58a6ff;
+    --color-primary-strong: #2187ff;
+    --color-danger: #ff7b72;
+  }
 }
 
+html,
 body {
+  width: 100%;
   min-height: 100vh;
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: var(--transition);
+}
+body {
   display: flex;
   flex-direction: column;
 }
 
 #root {
-  width: 100%;
-  height: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
 }
 
 a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+  color: var(--color-primary);
 }
 
 a:hover {
-  color: #535bf2;
+  color: var(--color-primary-strong);
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
 }
 
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-primary);
+  color: white;
+  padding: 0.7rem 1.4rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.25s;
+  transition: var(--transition);
 }
 
 button:hover {
-  border-color: #646cff;
+  background-color: var(--color-primary-strong);
 }
 
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+button.secondary {
+  background-color: var(--color-surface);
+  color: var(--color-text);
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+button.secondary:hover {
+  background-color: var(--color-border);
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+input,
+textarea,
+select {
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  padding: 0.65rem 0.9rem;
+  color: var(--color-text);
+  transition: var(--transition);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(31, 115, 255, 0.2);
 }
 
-/* Markdown Content Styling */
 .markdown-content {
-  font-size: 1rem;
-  line-height: 1.6;
-  color: #333;
-  overflow-wrap: break-word;
-  word-break: break-word;
-}
-
-.markdown-content p {
-  margin: 1em 0;
-  font-size: 1rem;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 1.25rem;
+  padding: 2rem;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+  color: var(--color-text);
 }
 
 .markdown-content h1,
@@ -108,128 +127,76 @@ button:focus-visible {
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  margin: 1.5em 0 0.5em 0;
-  font-weight: 600;
-  line-height: 1.25;
-  color: #1a1a1a;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.2;
 }
 
 .markdown-content h1 {
-  font-size: 2em;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 0.3em;
+  font-size: 2.2rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.35rem;
 }
 
 .markdown-content h2 {
-  font-size: 1.75em;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 0.2em;
+  font-size: 1.75rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.25rem;
 }
 
-.markdown-content h3 {
-  font-size: 1.5em;
-}
-
-.markdown-content h4 {
-  font-size: 1.25em;
-}
-
-.markdown-content h5,
-.markdown-content h6 {
-  font-size: 1em;
+.markdown-content p {
+  color: var(--color-muted);
+  margin-bottom: 1rem;
 }
 
 .markdown-content ul,
 .markdown-content ol {
-  margin: 1em 0;
-  padding-left: 2em;
-}
-
-.markdown-content ul ul,
-.markdown-content ol ol,
-.markdown-content ul ol,
-.markdown-content ol ul {
-  margin: 0.5em 0;
-}
-
-.markdown-content li {
-  margin: 0.5em 0;
-  line-height: 1.6;
+  margin-left: 1.25rem;
+  margin-bottom: 1rem;
 }
 
 .markdown-content blockquote {
-  margin: 1em 0;
-  padding: 0 1em;
-  border-left: 4px solid #ddd;
-  color: #666;
+  border-left: 4px solid var(--color-primary);
+  padding-left: 1rem;
+  color: var(--color-muted);
 }
 
 .markdown-content code {
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  font-family: 'Courier New', monospace;
-  font-size: 0.9em;
-  padding: 2px 6px;
-  color: #d63384;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.2rem 0.4rem;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
 }
 
 .markdown-content pre {
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  padding: 1em;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1rem;
   overflow-x: auto;
-  margin: 1em 0;
-}
-
-.markdown-content pre code {
-  background-color: transparent;
-  border: none;
-  color: #333;
-  padding: 0;
-}
-
-.markdown-content a {
-  color: #0366d6;
-  text-decoration: none;
-}
-
-.markdown-content a:hover {
-  text-decoration: underline;
-}
-
-.markdown-content img {
-  max-width: 100%;
-  height: auto;
-  margin: 1em 0;
 }
 
 .markdown-content table {
-  border-collapse: collapse;
-  margin: 1em 0;
   width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
 }
 
-.markdown-content table tr {
-  border-top: 1px solid #ddd;
+.markdown-content td,
+.markdown-content th {
+  border: 1px solid var(--color-border);
+  padding: 0.75rem;
 }
 
-.markdown-content table td,
-.markdown-content table th {
-  border: 1px solid #ddd;
-  padding: 0.75em;
-  text-align: left;
-}
-
-.markdown-content table th {
-  background-color: #f5f5f5;
+.markdown-content th {
+  background-color: var(--color-surface);
   font-weight: 600;
 }
 
 .markdown-content hr {
-  background-color: #ddd;
   border: 0;
   height: 1px;
-  margin: 2em 0;
+  background-color: var(--color-border);
+  margin: 2rem 0;
 }

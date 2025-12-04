@@ -33,11 +33,10 @@ function App() {
 
   return (
     <PluginProvider plugin={webPlugin}>
-      <div className="flex flex-col w-screen h-screen bg-white">
+      <div className="flex flex-col w-screen h-screen">
         <TabBar />
-        
         <div className="flex flex-1 overflow-hidden">
-          <main className="flex-1 flex flex-col overflow-hidden bg-white">
+          <main className="flex-1 flex flex-col overflow-hidden">
             {activeTabId === 'home' ? (
               <PeersView onPeerPress={handlePeerPress} />
             ) : activeTabId ? (
