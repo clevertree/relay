@@ -70,6 +70,12 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease -x bundleReleaseResources --no-daemon -v
 
+      - name: Debug build outputs
+        working-directory: apps/client-react-native/android
+        run: |
+          echo "Listing APK output files..."
+          find app/build -maxdepth 5 -type f
+
       - name: Verify APK
         run: |
           APK_PATH="${GITHUB_WORKSPACE}/apps/client-react-native/android/app/build/outputs/apk/release/app-release.apk"
