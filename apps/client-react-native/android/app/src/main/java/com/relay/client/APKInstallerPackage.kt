@@ -1,34 +1,17 @@
 package com.relay.client
 
-import com.facebook.react.TurboReactPackage
+import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.module.model.ReactModuleInfo
-import com.facebook.react.module.model.ReactModuleInfoProvider
+import com.facebook.react.uimanager.ViewManager
 
-class APKInstallerPackage : TurboReactPackage() {
-  override fun getModule(name: String, reactContext: ReactApplicationContext): NativeModule? {
-    return when (name) {
-      APKInstallerModule.NAME -> APKInstallerModule(reactContext)
-      else -> null
-    }
+class APKInstallerPackage : ReactPackage {
+
+  override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
+    return listOf(APKInstallerModule(reactContext))
   }
 
-  override fun getReactModuleInfoProvider(): ReactModuleInfoProvider {
-    return ReactModuleInfoProvider {
-      mapOf(
-        APKInstallerModule.NAME to ReactModuleInfo(
-          name = APKInstallerModule.NAME,
-          className = APKInstallerModule::class.java.name,
-          canOverrideExistingModule = false,
-          needsEagerInit = false,
-          isTurboModule = true
-        )
-      )
-    }
-  }
-
-  companion object {
-    const val NAME = "APKInstaller"
+  override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
+    return emptyList()
   }
 }

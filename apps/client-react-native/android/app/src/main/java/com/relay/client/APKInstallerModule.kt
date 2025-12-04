@@ -12,7 +12,6 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.module.annotations.ReactModule
 import java.io.File
 import java.io.FileOutputStream
-import java.util.Base64
 
 @ReactModule(name = "APKInstaller")
 class APKInstallerModule(reactContext: ReactApplicationContext) :
@@ -85,12 +84,8 @@ class APKInstallerModule(reactContext: ReactApplicationContext) :
    */
   private fun decodeBase64AndSaveAPK(dataUrl: String): File {
     val base64Data = dataUrl.substringAfter("base64,")
-    val decodedBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      Base64.getDecoder().decode(base64Data)
-    } else {
-      @Suppress("DEPRECATION")
-      android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
-    }
+    @Suppress("DEPRECATION")
+    val decodedBytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
 
     val cacheDir = reactApplicationContext.externalCacheDir ?: reactApplicationContext.cacheDir
     val apkFile = File(cacheDir, "relay_update_${System.currentTimeMillis()}.apk")
