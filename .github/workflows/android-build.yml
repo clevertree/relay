@@ -71,16 +71,17 @@ jobs:
           ./gradlew assembleRelease -x bundleReleaseResources --no-daemon -v
 
       - name: Verify APK
-        working-directory: apps/client-react-native/android
         run: |
-          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          APK_PATH="${GITHUB_WORKSPACE}/apps/client-react-native/android/app/build/outputs/apk/release/app-release.apk"
+          APK_DIR=$(dirname "$APK_PATH")
           if [ -f "$APK_PATH" ]; then
             echo "✓ APK found: $APK_PATH"
             ls -lh "$APK_PATH"
+            ls -la "$APK_DIR"
             unzip -t "$APK_PATH" | head -20
           else
             echo "✗ APK not found at $APK_PATH"
-            ls -la app/build/outputs/apk/ 2>/dev/null || echo "APK output directory not found"
+            ls -la "$APK_DIR" 2>/dev/null || echo "APK output directory not found"
             exit 1
           fi
 
