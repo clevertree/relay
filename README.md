@@ -193,3 +193,97 @@ Notes
 Licensing
 
 See each package for its own license where applicable.
+
+---
+
+Custom repo-defined UI (hooks + layout)
+
+Overview
+
+The web client (apps/client-web) now supports repository-defined UI via optional hook scripts and a layout component stored inside the served repository. When present, these scripts let each repository control how files are rendered, how search results are displayed, and how creation forms look — without requiring extra build steps or dependencies in the web client.
+
+Key concepts
+
+- Hook scripts (optional, inside the repo):
+  - `/template/hooks/get.mjs` — handles reading and rendering a file path.
+  - `/template/hooks/query.mjs` — handles search/QUERY and renders results.
+  - `/template/hooks/put.mjs` — renders a Create form and performs PUT requests.
+- Layout (optional, inside the repo):
+  - `/template/ui/layout.mjs` or `/template/ui/layout.js` — a React component used to wrap hook-rendered content. If not present, the client falls back to its built-in `TemplateLayout`.
+- FileRenderer (built-in, client-web):
+  - A simple component that renders response bodies by MIME-type (markdown, images, text, json, etc.). Repos can use it from hooks.
+
+How it works
+
+1) The Repo Browser attempts to load `/template/hooks/get.mjs` from the target socket before doing a direct fetch. If found, the script is fetched and dynamically imported in the browser, and its `default` export is called with a context object. If not found, the browser falls back to a regular GET of the requested path.
+
+2) The same mechanism is used for search and creation:
+   - Search: a new Search box routes through `/template/hooks/query.mjs` if present.
+   - Create: a new Create button routes through `/template/hooks/put.mjs` if present.
+
+3) Layout selection: before invoking a hook, the client tries to load `/template/ui/layout.mjs` (or `.js`). If available, it is used as the `Layout` component. Otherwise, `apps/client-web/src/components/TemplateLayout.tsx` is used.
+
+Hook execution context
+
+Each hook’s default export receives a single `ctx` object with these fields:
+
+```
+{
+  React,
+  createElement,        // alias for React.createElement
+  FileRenderer,         // client-provided component for MIME-aware rendering
+  Layout,               // repo-provided layout if present, else a simple default
+  params: {
+    socket,             // current host ("node.example.com" or "host:port")
+    path,               // current repository path ("/README.md", etc.)
+    branch,             // selected branch if any
+    repo,               // selected repo/subdir if any
+    kind,               // 'get' | 'query' | 'put'
+    ...extraParams,     // hook-specific (e.g., { q } for query)
+  },
+  helpers: {
+    buildRepoHeaders,   // (branch?, repo?) => headers for Relay API
+    buildPeerUrl,       // (path) => fully-qualified URL on the current socket
+  }
+}
+```
+
+Return value: The hook must return a React element (JSX or non-JSX via `createElement`).
+
+Default examples in this repo
+
+- `/template/hooks/get.mjs` — Performs a GET for the current `path` (scoped by branch/repo headers) and renders with `FileRenderer` wrapped by `Layout`.
+- `/template/hooks/query.mjs` — Issues a `QUERY` request with the user’s `q` string and renders each result row.
+- `/template/hooks/put.mjs` — Renders a basic form to create/update a file at the current directory, submitting via `PUT`.
+- `/template/ui/layout.tsx` — A simple React layout component repos may copy and customize. If a JS module `/template/ui/layout.mjs` is also provided alongside or instead, the web client will prefer loading that at runtime.
+
+Authoring hooks
+
+- Use either JSX or non-JSX. The default files in this repo use non-JSX with `createElement` for maximum portability.
+- Keep in mind these scripts are fetched and executed in the user’s browser. They should not rely on Node APIs.
+- The server blocks writes of `.js/.html` via the API by default; you should ship these hook files as part of your repository’s initial content or out-of-band. Reads of existing `.mjs/.js` files are allowed, and the client can load them.
+
+Client changes (summary)
+
+- `apps/client-web/src/components/RepoBrowser.tsx` now:
+  - Probes and loads `/template/hooks/get.mjs` before doing a direct fetch.
+  - Adds a Create button wired to `/template/hooks/put.mjs` if available.
+  - Adds a Search box wired to `/template/hooks/query.mjs` if available.
+  - Tries to load `/template/ui/layout.mjs` or `.js` as the `Layout` wrapper before running a hook.
+  - Falls back to direct GET fetch and the built-in `MarkdownRenderer`/`FileRenderer` when hooks are missing.
+
+- `apps/client-web/src/components/FileRenderer.tsx` — new component for MIME-aware rendering.
+- `apps/client-web/src/components/TemplateLayout.tsx` — default layout used if the repo does not provide one.
+
+Usage flow
+
+1. Open a peer in the web client and navigate to a path.
+2. If the peer’s repo has `/template/hooks/get.mjs`, it controls rendering. Otherwise the file is fetched and rendered as markdown/text/image/etc.
+3. Use the Create button to open the PUT hook UI (if present) to add a new file in the current directory.
+4. Use the Search box to run queries via the repo’s `query.mjs` (if present).
+
+Troubleshooting
+
+- If a hook is not found, the client will show an error for that action and continue to work in fallback mode for GET.
+- CORS: The client loads hooks and files from the same socket you are browsing; ensure your server serves these paths and allows GET/HEAD for hook files.
+- MIME rendering: If a file renders as plain text, ensure the server sets `Content-Type` or customize rendering via your hook.

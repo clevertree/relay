@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAppState } from '../state/store'
 import { fetchPeerOptions } from '../services/probing'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { FileRenderer } from './FileRenderer'
+import { TemplateLayout } from './TemplateLayout'
 
 interface RepoBrowserProps {
   tabId: string
@@ -19,8 +21,11 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [content, setContent] = useState<string | null>(null)
+  const [contentType, setContentType] = useState<string | null>(null)
   const [optionsInfo, setOptionsInfo] = useState<OptionsInfo>({})
   const [pathInput, setPathInput] = useState(tab?.path ?? '/README.md')
+  const [hookElement, setHookElement] = useState<React.ReactNode | null>(null)
+  const [queryInput, setQueryInput] = useState('')
 
   useEffect(() => {
     if (!tab || !tab.host) return
@@ -49,25 +54,31 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
 
     setLoading(true)
     setError(null)
+    setHookElement(null)
 
     try {
-      // Build URL with repo and branch headers
-      const url = buildPeerUrl(tab.host, tab.path ?? '/README.md')
-
-      const response = await fetch(url)
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          setError(`Content not found: ${tab.path}`)
-        } else {
-          setError(`Failed to load content: ${response.statusText}`)
+      // Try hook first: /template/hooks/get.mjs on the target host
+      const hookUsed = await tryRenderWithHook('get')
+      if (!hookUsed) {
+        // Fallback: direct fetch
+        const url = buildPeerUrl(tab.host, tab.path ?? '/README.md')
+        const response = await fetch(url, {
+          headers: buildRepoHeaders(tab.currentBranch, tab.repo),
+        })
+        if (!response.ok) {
+          if (response.status === 404) {
+            setError(`Content not found: ${tab.path}`)
+          } else {
+            setError(`Failed to load content: ${response.statusText}`)
+          }
+          setContent(null)
+          return
         }
-        setContent(null)
-        return
+        const ct = response.headers.get('content-type')
+        setContentType(ct)
+        const text = await response.text()
+        setContent(text)
       }
-
-      const text = await response.text()
-      setContent(text)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load content')
       setContent(null)
@@ -96,6 +107,127 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     handleNavigate(normalizedPath)
   }
 
+  const handleCreate = async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const used = await tryRenderWithHook('put')
+      if (!used) {
+        setError('Create UI not available: /template/hooks/put.mjs hook not found in repo')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load create UI')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!queryInput.trim()) return
+    setError(null)
+    setLoading(true)
+    try {
+      const used = await tryRenderWithHook('query', { q: queryInput })
+      if (!used) {
+        setError('Search UI not available: /template/hooks/query.mjs hook not found in repo')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to run search')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const tryRenderWithHook = async (
+    kind: 'get' | 'query' | 'put',
+    extraParams?: Record<string, unknown>,
+  ): Promise<boolean> => {
+    if (!tab?.host) return false
+    const protocol = tab.host.includes(':') ? 'http' : 'https'
+    const hookUrl = `${protocol}://${tab.host}/template/hooks/${kind}.mjs`
+
+    // Probe availability
+    const probe = await fetch(hookUrl, { method: 'HEAD' }).catch(() => null)
+    if (!probe || !probe.ok) return false
+
+    // Fetch hook source and dynamic import
+    const srcResp = await fetch(hookUrl)
+    if (!srcResp.ok) return false
+    const code = await srcResp.text()
+    const blob = new Blob([code], { type: 'text/javascript' })
+    const blobUrl = URL.createObjectURL(blob)
+    try {
+      // @ts-ignore webpackIgnore for remote blob
+      const mod: any = await import(/* webpackIgnore: true */ blobUrl)
+      if (!mod || typeof mod.default !== 'function') return false
+      const remoteLayout = await tryLoadRemoteLayout()
+      const ctx = buildHookContext(kind, extraParams, remoteLayout ?? undefined)
+      const element: React.ReactNode = await mod.default(ctx)
+      setHookElement(element)
+      setContent(null)
+      setContentType(null)
+      return true
+    } finally {
+      URL.revokeObjectURL(blobUrl)
+    }
+  }
+
+  const buildHookContext = (
+    kind: 'get' | 'query' | 'put',
+    extraParams?: Record<string, unknown>,
+    RemoteLayout?: React.ComponentType<any>,
+  ) => {
+    const params = {
+      socket: tab?.host,
+      path: tab?.path ?? '/README.md',
+      branch: tab?.currentBranch,
+      repo: tab?.repo,
+      kind,
+      ...extraParams,
+    }
+    return {
+      React,
+      createElement: React.createElement,
+      FileRenderer,
+      Layout: RemoteLayout ?? TemplateLayout,
+      params,
+      helpers: {
+        buildRepoHeaders,
+        buildPeerUrl: (p: string) => buildPeerUrl(tab!.host!, p),
+      },
+    }
+  }
+
+  const tryLoadRemoteLayout = async (): Promise<React.ComponentType<any> | null> => {
+    if (!tab?.host) return null
+    const protocol = tab.host.includes(':') ? 'http' : 'https'
+    const candidates = [
+      `${protocol}://${tab.host}/template/ui/layout.mjs`,
+      `${protocol}://${tab.host}/template/ui/layout.js`,
+    ]
+    for (const url of candidates) {
+      const headOk = await fetch(url, { method: 'HEAD' }).then(r => r.ok).catch(() => false)
+      if (!headOk) continue
+      const resp = await fetch(url)
+      if (!resp.ok) continue
+      const code = await resp.text()
+      const blob = new Blob([code], { type: 'text/javascript' })
+      const blobUrl = URL.createObjectURL(blob)
+      try {
+        // @ts-ignore webpackIgnore
+        const mod: any = await import(/* webpackIgnore: true */ blobUrl)
+        const LayoutComp = mod.default || mod.Layout || null
+        if (LayoutComp) return LayoutComp as React.ComponentType<any>
+      } catch {
+        // ignore and try next
+      } finally {
+        URL.revokeObjectURL(blobUrl)
+      }
+    }
+    return null
+  }
+
   if (!tab) {
     return <div className="repo-browser">Tab not found</div>
   }
@@ -112,6 +244,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
             className="flex-1 px-2 py-2 border border-gray-300 rounded font-mono text-sm"
           />
           <button type="submit" className="px-4 py-2 bg-blue-500 text-white border-none rounded cursor-pointer text-sm font-medium hover:bg-blue-600">Go</button>
+          <button type="button" onClick={handleCreate} className="px-4 py-2 bg-emerald-600 text-white border-none rounded cursor-pointer text-sm font-medium hover:bg-emerald-700">Create</button>
         </form>
 
         <div className="flex gap-4 p-2">
@@ -136,6 +269,16 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
               </select>
             </label>
           )}
+          <form className="flex items-center gap-2 ml-auto" onSubmit={handleSearch}>
+            <input
+              type="search"
+              value={queryInput}
+              onChange={(e) => setQueryInput(e.target.value)}
+              placeholder="Search..."
+              className="px-2 py-1 border border-gray-300 rounded text-sm"
+            />
+            <button type="submit" className="px-3 py-1 bg-gray-700 text-white rounded text-sm hover:bg-black">Search</button>
+          </form>
         </div>
       </div>
 
@@ -150,8 +293,14 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           </div>
         )}
 
-        {content && !loading && (
-          <MarkdownRenderer content={content} navigate={handleNavigate} />
+        {!loading && hookElement}
+
+        {content && !loading && !hookElement && (
+          contentType && contentType.includes('markdown') ? (
+            <MarkdownRenderer content={content} navigate={handleNavigate} />
+          ) : (
+            <FileRenderer content={content} contentType={contentType ?? 'text/plain'} />
+          )
         )}
       </div>
     </div>
@@ -174,4 +323,11 @@ function buildPeerUrl(host: string, path: string): string {
   }
 
   return url
+}
+
+function buildRepoHeaders(branch?: string, repo?: string): HeadersInit {
+  const headers: Record<string, string> = {}
+  if (branch) headers['x-relay-branch'] = branch
+  if (repo) headers['x-relay-repo'] = repo
+  return headers
 }
