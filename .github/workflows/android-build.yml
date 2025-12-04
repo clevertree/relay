@@ -75,6 +75,11 @@ jobs:
 
       - name: Clean gradle cache
         working-directory: apps/client-react-native/android
+        env:
+          KEYSTORE_PATH: ./app/relay-release.keystore
+          ANDROID_KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS || 'androiddebugkey' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'android' }}
         run: |
           chmod +x gradlew
           ./gradlew clean --no-daemon
