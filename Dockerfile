@@ -13,7 +13,6 @@ FROM node:20-slim as client-builder
 WORKDIR /work
 # Copy only the client-web directory and root files needed for npm
 COPY apps/client-web /work/apps/client-web
-COPY package.json package-lock.json /work/
 WORKDIR /work/apps/client-web
 RUN npm ci && npm run build
 
