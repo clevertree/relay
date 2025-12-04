@@ -1,8 +1,5 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { usePlugin } from '../plugins'
-import { isAllowedComponent } from '../plugins/types'
-import type { Components } from 'react-markdown'
+import Markdown from 'markdown-to-jsx'
+import { useEffect, useRef } from 'react'
 
 interface MarkdownRendererProps {
   content: string
@@ -10,217 +7,167 @@ interface MarkdownRendererProps {
 }
 
 /**
+ * Pre-process HTML to ensure markdown-to-jsx can pass attributes to custom components
+ * Key fix: Collapse multi-line HTML tags to single line so all attributes are recognized
+ */
+function preprocessHtmlForMarkdown(content: string): string {
+  let processed = content
+
+  // Collapse all HTML tags to single line (remove newlines/indentation within tags)
+  // This regex matches opening tags and self-closing tags, preserving attributes
+  processed = processed.replace(/<([^>]+?)>/g, (match) => {
+    // Remove newlines and extra whitespace within the tag, but preserve single spaces between attributes
+    return match.replace(/\n\s*/g, ' ').replace(/\s+/g, ' ')
+  })
+
+  return processed
+}
+
+
+/**
+ * Safe video component - sanitizes attributes
+ */
+function SafeVideoComponent({ children, ...props }: any) {
+  console.log('SafeVideoComponent props:', props)
+  
+  const allowedAttrs = ['id', 'src', 'width', 'height', 'controls', 'autoplay', 'loop', 'muted', 'preload', 'poster']
+  const safeProps: Record<string, any> = {}
+  
+  for (const [key, value] of Object.entries(props)) {
+    if (typeof value === 'function' || key.startsWith('on')) continue
+    if (['dangerouslySetInnerHTML', 'innerHTML'].includes(key)) continue
+    if (allowedAttrs.includes(key)) {
+      safeProps[key] = value
+    }
+  }
+  
+  // Handle boolean attributes
+  const booleanAttrs = ['controls', 'autoplay', 'loop', 'muted']
+  for (const attr of booleanAttrs) {
+    if (props[attr] !== undefined && props[attr] !== false && props[attr] !== null) {
+      safeProps[attr] = true
+    }
+  }
+  
+  return (
+    <video {...safeProps} style={{ maxWidth: '100%' }}>
+      {children}
+    </video>
+  )
+}
+
+/**
+ * Safe source component - sanitizes attributes
+ */
+function SafeSourceComponent(props: any) {
+  console.log('SafeSourceComponent props:', props)
+  
+  const allowedAttrs = ['src', 'type']
+  const safeProps: Record<string, any> = {}
+
+  for (const [key, value] of Object.entries(props)) {
+    if (typeof value === 'function' || key.startsWith('on')) continue
+    if (['dangerouslySetInnerHTML', 'innerHTML', 'children'].includes(key)) continue
+    if (allowedAttrs.includes(key)) {
+      safeProps[key] = value
+    }
+  }
+
+  console.log('Source final safeProps:', safeProps)
+  return <source {...safeProps} />
+}
+
+/**
+ * Safe track component - sanitizes attributes
+ */
+function SafeTrackComponent(props: any) {
+  console.log('SafeTrackComponent props:', props)
+  
+  const allowedAttrs = ['src', 'kind', 'srclang', 'label', 'default']
+  const safeProps: Record<string, any> = {}
+
+  for (const [key, value] of Object.entries(props)) {
+    if (typeof value === 'function' || key.startsWith('on')) continue
+    if (['dangerouslySetInnerHTML', 'innerHTML', 'children'].includes(key)) continue
+    if (allowedAttrs.includes(key)) {
+      if (key === 'default' && value) {
+        safeProps[key] = true
+      } else if (key !== 'default') {
+        safeProps[key] = value
+      }
+    }
+  }
+
+  console.log('Track final safeProps:', safeProps)
+  return <track {...safeProps} />
+}
+
+/**
  * Markdown Renderer
  * 
- * Renders markdown content with plugin components.
- * Only allows whitelisted components from the plugin.
+ * Renders markdown content with security-first HTML filtering.
+ * Uses markdown-to-jsx for native JSX component support.
  */
 export function MarkdownRenderer({ content, navigate }: MarkdownRendererProps) {
-  const { components } = usePlugin()
+  const contentRef = useRef<HTMLDivElement>(null)
 
-  // Build component mapping for react-markdown
-  // Only map allowed components
-  const markdownComponents: Components = {
-    // Override link handling for internal navigation
-    a: ({ href, children, ...props }: any) => {
-      if (!href) return <span {...props}>{children}</span>
+  // Pre-process content to ensure markdown-to-jsx can handle it
+  const processedContent = preprocessHtmlForMarkdown(content)
+
+  // Single event listener for all anchor clicks
+  useEffect(() => {
+    const handleAnchorClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      const anchor = target.closest('a')
       
+      if (!anchor) return
+
+      const href = anchor.getAttribute('href')
+      if (!href) return
+
+      // Check if this is an internal link
       const isInternal = href.startsWith('/') || href.startsWith('.') ||
         (!href.startsWith('http') && !href.startsWith('mailto:') && !href.startsWith('tel:'))
 
       if (isInternal) {
-        return (
-          <a
-            href={href}
-            onClick={(e) => {
-              e.preventDefault()
-              
-              // Resolve relative paths
-              let resolvedPath = href
-              if (href.startsWith('.')) {
-                const currentPath = window.location.pathname
-                const basePath = currentPath.substring(0, currentPath.lastIndexOf('/'))
-                resolvedPath = new URL(href, `http://localhost${basePath}/`).pathname
-              }
-              
-              navigate(resolvedPath)
-            }}
-            {...props}
-          >
-            {children}
-          </a>
-        )
+        e.preventDefault()
+        
+        // Resolve relative paths
+        let resolvedPath = href
+        if (href.startsWith('.')) {
+          const currentPath = window.location.pathname
+          const basePath = currentPath.substring(0, currentPath.lastIndexOf('/'))
+          resolvedPath = new URL(href, `http://localhost${basePath}/`).pathname
+        }
+        
+        navigate(resolvedPath)
       }
+    }
 
-      return (
-        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
-          {children}
-        </a>
-      )
-    },
-
-    // Override img for plugin Image component
-    img: ({ src, alt, ...props }: any) => {
-      if (!src) return null
-      const ImageComponent = components.Image
-      return <ImageComponent src={src} alt={alt || ''} {...props} />
-    },
-
-    // Override code blocks for plugin CodeBlock component
-    code: ({ className, children, ...props }: any) => {
-      // Check if this is a code block (has language class) or inline code
-      const match = /language-(\w+)/.exec(className || '')
-      
-      if (match) {
-        const CodeBlockComponent = components.CodeBlock
-        return (
-          <CodeBlockComponent language={match[1]} {...props}>
-            {String(children).replace(/\n$/, '')}
-          </CodeBlockComponent>
-        )
+    const element = contentRef.current
+    if (element) {
+      element.addEventListener('click', handleAnchorClick as EventListener)
+      return () => {
+        element.removeEventListener('click', handleAnchorClick as EventListener)
       }
-      
-      // Inline code
-      return <code className={className} {...props}>{children}</code>
-    },
+    }
+  }, [navigate])
+
+  const overrides = {
+    // Dangerous elements - completely blocked
+    script: () => null,
+    iframe: () => null,
+    // Safe media elements
+    video: SafeVideoComponent,
+    source: SafeSourceComponent,
+    track: SafeTrackComponent,
   }
-
-  // Process custom components in markdown
-  // Look for patterns like <Video src="..." /> in the content
-  const processedContent = processCustomComponents(content)
 
   return (
-    <div className="markdown-content">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={markdownComponents}
-      >
-        {processedContent.markdown}
-      </ReactMarkdown>
-      
-      {/* Render extracted custom components */}
-      {processedContent.customComponents.map((comp, index) => (
-        <CustomComponent
-          key={index}
-          name={comp.name}
-          props={comp.props}
-          components={components}
-        />
-      ))}
+    <div ref={contentRef} className="markdown-content">
+      <Markdown options={{ overrides }}>
+        {processedContent}
+      </Markdown>
     </div>
   )
-}
-
-interface ParsedComponent {
-  name: string
-  props: Record<string, string>
-}
-
-interface ProcessedContent {
-  markdown: string
-  customComponents: ParsedComponent[]
-}
-
-/**
- * Process custom components from markdown content
- * Extracts components like <Video src="..." /> and replaces them with placeholders
- */
-function processCustomComponents(content: string): ProcessedContent {
-  const customComponents: ParsedComponent[] = []
-  
-  // Match self-closing tags like <Video src="..." />
-  const selfClosingPattern = /<(\w+)\s+([^>]*?)\/>/g
-  // Match paired tags like <Video src="...">...</Video>
-  const pairedPattern = /<(\w+)\s+([^>]*)>([^<]*)<\/\1>/g
-  
-  let markdown = content
-
-  // Process self-closing tags
-  markdown = markdown.replace(selfClosingPattern, (_match, tagName, propsString) => {
-    if (isAllowedComponent(tagName)) {
-      const props = parseProps(propsString)
-      customComponents.push({ name: tagName, props })
-      return `<!-- CUSTOM_COMPONENT_${customComponents.length - 1} -->`
-    }
-    // Strip disallowed components
-    return ''
-  })
-
-  // Process paired tags
-  markdown = markdown.replace(pairedPattern, (_match, tagName, propsString, _children) => {
-    if (isAllowedComponent(tagName)) {
-      const props = parseProps(propsString)
-      customComponents.push({ name: tagName, props })
-      return `<!-- CUSTOM_COMPONENT_${customComponents.length - 1} -->`
-    }
-    // Strip disallowed components
-    return ''
-  })
-
-  return { markdown, customComponents }
-}
-
-/**
- * Parse props from a string like 'src="video.mp4" autoplay loop'
- */
-function parseProps(propsString: string): Record<string, string> {
-  const props: Record<string, string> = {}
-  
-  // Match quoted attributes: name="value" or name='value'
-  const quotedPattern = /(\w+)=["']([^"']*)["']/g
-  let match
-  while ((match = quotedPattern.exec(propsString)) !== null) {
-    props[match[1]] = match[2]
-  }
-  
-  // Match boolean attributes (just the name)
-  const booleanPattern = /\b(\w+)(?=[^=]|$)/g
-  while ((match = booleanPattern.exec(propsString)) !== null) {
-    const name = match[1]
-    if (!props[name]) {
-      props[name] = 'true'
-    }
-  }
-  
-  return props
-}
-
-interface CustomComponentProps {
-  name: string
-  props: Record<string, string>
-  components: ReturnType<typeof usePlugin>['components']
-}
-
-/**
- * Render a custom component by name
- */
-function CustomComponent({ name, props, components }: CustomComponentProps) {
-  if (!isAllowedComponent(name)) {
-    return null
-  }
-
-  const Component = components[name]
-  if (!Component) {
-    return null
-  }
-
-  // Convert string props to appropriate types
-  const processedProps = Object.entries(props).reduce((acc, [key, value]) => {
-    // Convert boolean strings
-    if (value === 'true') {
-      acc[key] = true
-    } else if (value === 'false') {
-      acc[key] = false
-    // Convert number strings
-    } else if (!isNaN(Number(value)) && value !== '') {
-      acc[key] = Number(value)
-    } else {
-      acc[key] = value
-    }
-    return acc
-  }, {} as Record<string, unknown>)
-
-  // Type assertion - we know the component matches because we checked isAllowedComponent
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return <Component {...(processedProps as any)} />
 }

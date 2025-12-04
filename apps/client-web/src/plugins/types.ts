@@ -65,7 +65,6 @@ export interface CodeBlockProps extends BaseComponentProps {
  * Only components registered in this map are allowed in markdown.
  */
 export interface PluginComponents {
-  Video: ComponentType<VideoProps>
   Image: ComponentType<ImageProps>
   Audio: ComponentType<AudioProps>
   Link: ComponentType<LinkProps>
@@ -129,7 +128,6 @@ export interface MediaCapabilities {
  * Only these components will be rendered; all others are stripped
  */
 export const ALLOWED_COMPONENTS: (keyof PluginComponents)[] = [
-  'Video',
   'Image',
   'Audio',
   'Link',

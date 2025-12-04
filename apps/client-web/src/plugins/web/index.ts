@@ -1,5 +1,4 @@
 import type { Plugin, PluginConfig } from '../types'
-import { Video } from './components/Video'
 import { Image } from './components/Image'
 import { Audio } from './components/Audio'
 import { Link } from './components/Link'
@@ -29,7 +28,6 @@ export function createWebPlugin(config: Partial<PluginConfig> = {}): Plugin {
     config: pluginConfig,
 
     components: {
-      Video,
       Image,
       Audio,
       Link,

@@ -12,6 +12,7 @@
     "server:ipfs-add": "cargo run --manifest-path apps/server/Cargo.toml -- ipfs-add template-ui",
     "server:host": "cargo run --manifest-path apps/server/Cargo.toml -- serve --repo /data/repo.git --static template-ui",
     "web:dev": "npm --prefix apps/client-web run dev",
+    "web:dev:full": "node dev-server.cjs",
     "web:build": "npm --prefix apps/client-web run build",
     "web:preview": "npm --prefix apps/client-web run preview",
     "test": "cargo test --workspace",
