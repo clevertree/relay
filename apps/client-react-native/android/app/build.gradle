@@ -100,6 +100,8 @@ android {
         release {
             // Build unsigned APK for CI/CD
             // For production releases, configure a proper signing keystore
+            debuggable false
+            signingConfig null  // Build unsigned APK
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
