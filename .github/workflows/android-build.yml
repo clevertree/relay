@@ -48,6 +48,13 @@ jobs:
         working-directory: apps/client-react-native
         run: npm run typecheck
 
+      - name: Generate debug keystore for CI/CD
+        working-directory: apps/client-react-native/android/app
+        run: |
+          keytool -genkey -v -keystore debug.keystore -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias androiddebugkey -keypass android -storepass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+
       - name: Assemble release APK
         working-directory: apps/client-react-native/android
         run: |

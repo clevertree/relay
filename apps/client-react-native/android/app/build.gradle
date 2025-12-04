@@ -92,16 +92,23 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // Use debug keystore for unsigned release APK in CI/CD
+            // This creates a release-optimized APK signed with debug key
+            // For production, replace with a real signing keystore
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Build unsigned APK for CI/CD
-            // For production releases, configure a proper signing keystore
-            debuggable false
-            signingConfig null  // Build unsigned APK
+            // Build release APK with debug signing for CI/CD testing
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
