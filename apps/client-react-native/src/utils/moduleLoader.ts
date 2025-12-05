@@ -16,13 +16,13 @@ const moduleCache: ModuleCache = {};
  * Load a module from a peer/repo
  * @param host - The peer host
  * @param modulePath - Path to the module (e.g., './lib/utils.mjs' or '/hooks/lib/utils.mjs')
- * @param currentPath - Current script path for resolving relative imports (default: '/hooks/router.mjs')
+ * @param currentPath - Current script path for resolving relative imports (default: '/hooks/get-client.mjs')
  * @returns Promise resolving to module exports
  */
 export async function loadModule(
   host: string,
   modulePath: string,
-  currentPath: string = '/hooks/router.mjs'
+  currentPath: string = '/hooks/get-client.mjs'
 ): Promise<any> {
   // Normalize path
   let normalizedPath = modulePath;

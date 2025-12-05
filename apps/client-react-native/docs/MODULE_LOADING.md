@@ -35,7 +35,7 @@ const mod = await loadModule('./lib/utils.mjs');
 Hooks receive `helpers.loadModule` in their context:
 
 ```javascript
-export default async function router(context) {
+export default async function getClient(context) {
   const { helpers } = context;
   
   // Load a module
@@ -60,13 +60,13 @@ Both implementations cache loaded modules to avoid redundant fetches:
 - **Web**: Blob URLs are created once per module
 - **React Native**: Parsed exports are cached by `host:path`
 
-## Example: router.mjs with modules
+## Example: get-client.tsx with modules
 
 ```javascript
-// hooks/router.mjs
+// hooks/get-client.tsx
 let tmdbClient = null;
 
-export default async function router(context) {
+export default async function getClient(context) {
   const { helpers } = context;
   
   // Lazy load on first use
@@ -78,7 +78,7 @@ export default async function router(context) {
   const fetchCreds = tmdbClient?.fetchTmdbCredentials || fetchTmdbCredentials;
   const creds = await fetchCreds();
   
-  // ...rest of router logic
+  // ...rest of getClient logic
 }
 ```
 

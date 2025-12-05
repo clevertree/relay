@@ -117,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState { repo_path, static_paths };
 
-    // Build router (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
+    // Build getClient (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
     let cors = CorsLayer::permissive();
     let app = Router::new()
         .route("/openapi.yaml", get(get_openapi_yaml))
