@@ -8,6 +8,27 @@ import {PeerProbe, PeerProtocol} from '../state/store';
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_SAMPLES = 3;
 
+/**
+ * Parse a full URL or host:port string to extract host and port
+ */
+function parseHostUrl(input: string): { host: string; port?: number; protocol?: string } {
+  try {
+    // Try parsing as full URL
+    const url = new URL(input);
+    const port = url.port ? parseInt(url.port, 10) : undefined;
+    return {
+      host: url.hostname,
+      port,
+      protocol: url.protocol.replace(':', ''),
+    };
+  } catch {
+    // Fall back to host:port format
+    const [host, portStr] = input.split(':');
+    const port = portStr ? parseInt(portStr, 10) : undefined;
+    return { host, port };
+  }
+}
+
 export interface ProbeResult {
   protocol: PeerProtocol;
   port: number;
@@ -56,13 +77,13 @@ async function fetchWithTimeout(
 async function probeHttps(host: string): Promise<ProbeResult> {
   const port = 443;
   const latencies: number[] = [];
+  const { host: hostname, protocol: urlProtocol } = parseHostUrl(host);
+  const protocol = urlProtocol || 'https';
 
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     const start = Date.now();
     try {
-      // Try HTTPS first, fall back to HTTP for local dev
-      const protocol = host.includes('localhost') || host.includes('10.0.2.2') ? 'http' : 'https';
-      const hostPort = host.includes(':') ? host : `${host}:${protocol === 'https' ? 443 : 8080}`;
+      const hostPort = host.includes(':') ? hostname : `${hostname}:${protocol === 'https' ? 443 : 8080}`;
       const url = `${protocol}://${hostPort}/`;
 
       const res = await fetchWithTimeout(url, {method: 'HEAD', timeout: PROBE_TIMEOUT_MS});
@@ -183,8 +204,9 @@ export async function fetchPeerOptions(host: string): Promise<{
   interface?: Record<string, {plugin_manifest?: string}>;
 }> {
   try {
-    const protocol = host.includes('localhost') || host.includes('10.0.2.2') ? 'http' : 'https';
-    const hostPort = host.includes(':') ? host : `${host}:${protocol === 'https' ? 443 : 8080}`;
+    const { host: hostname, protocol: urlProtocol } = parseHostUrl(host);
+    const protocol = urlProtocol || 'https';
+    const hostPort = host.includes(':') ? hostname : `${hostname}:${protocol === 'https' ? 443 : 8080}`;
     const url = `${protocol}://${hostPort}/`;
 
     const res = await fetchWithTimeout(url, {method: 'OPTIONS', timeout: PROBE_TIMEOUT_MS});

@@ -34,12 +34,24 @@ export interface OptionsResult {
   branch_heads?: Record<string, unknown>;
 }
 
+// Parse a full URL (scheme://host:port) and extract host:port
+function parseUrl(fullUrl: string): string {
+  try {
+    const url = new URL(fullUrl);
+    // Return host:port format
+    return url.port ? `${url.hostname}:${url.port}` : url.hostname;
+  } catch {
+    // If parsing fails, try to use it as-is (for backward compatibility)
+    return fullUrl;
+  }
+}
+
 // JS fallback implementation for early UI bring-up.
 const jsFallback: RelayCoreBridge = {
   async getMasterPeerList() {
     // Prefer a global injected value during development.
     const injected = (globalThis as Record<string, unknown>).RN$RELAY_MASTER_PEER_LIST as string | undefined;
-    const fromGlobal = injected?.split(/\s*;\s*/).filter(Boolean);
+    const fromGlobal = injected?.split(/\s*;\s*/).filter(Boolean).map(parseUrl);
     if (fromGlobal && fromGlobal.length > 0) return fromGlobal;
 
     // Platform-specific sensible defaults for local development.

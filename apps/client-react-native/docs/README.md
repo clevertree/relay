@@ -14,7 +14,7 @@ Quick start (UI only; no native modules yet):
    - `pnpm rn:ios` — run on iOS (requires generated `ios/` project; TODO)
 
 Environment:
-- Master peer list is taken from a global `RN$RELAY_MASTER_PEER_LIST` (semicolon-separated) if present, or defaults to emulator-localhost: `10.0.2.2:8080` (Android) / `localhost:8080` (iOS).
+- Master peer list is taken from a global `RN$RELAY_MASTER_PEER_LIST` (semicolon-separated, full URLs with scheme like `http://localhost:3000;https://node1.example.com`) if present, or defaults to emulator-localhost: `http://10.0.2.2:8080` (Android) / `http://localhost:8080` (iOS).
 
 Next steps:
 - Generate `android/` and `ios/` projects via React Native CLI (no Expo) and wire the Rust cdylib via JNI/Swift native modules.

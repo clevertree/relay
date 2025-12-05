@@ -27,9 +27,22 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "🚀 Deploying Relay to Rackspace" -ForegroundColor Cyan
 
+# Get script directory and kubeconfig path
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$kubeconfigPath = Join-Path $scriptDir "relay-kubeconfig.yaml"
+
+# Verify kubeconfig exists
+if (-not (Test-Path $kubeconfigPath)) {
+    Write-Host "✗ Kubeconfig not found: $kubeconfigPath" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "📋 Using kubeconfig: $kubeconfigPath" -ForegroundColor Yellow
+
 # Verify kubectl connection
 Write-Host "📋 Checking cluster connection..." -ForegroundColor Yellow
 try {
+    $env:KUBECONFIG = $kubeconfigPath
     $context = kubectl config current-context
     Write-Host "✓ Connected to: $context" -ForegroundColor Green
 }

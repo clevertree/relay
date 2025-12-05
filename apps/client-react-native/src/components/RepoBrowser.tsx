@@ -33,6 +33,20 @@ type OptionsInfo = {
   [k: string]: unknown
 }
 
+// Parse a full URL (scheme://host:port) and extract host:port and protocol
+function parseHostUrl(fullUrl: string): { host: string; protocol: 'http' | 'https' } {
+  try {
+    const url = new URL(fullUrl);
+    const host = url.port ? `${url.hostname}:${url.port}` : url.hostname;
+    const protocol = url.protocol.replace(':', '') as 'http' | 'https';
+    return { host, protocol };
+  } catch {
+    // Fallback for backward compatibility: assume http if localhost/10.0.2.2, else https
+    const protocol = (fullUrl.includes(':') || fullUrl.includes('localhost') || fullUrl.includes('10.0.2.2')) ? 'http' : 'https';
+    return { host: fullUrl, protocol };
+  }
+}
+
 function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
   const [path, setPath] = pathState
   const [element, setElement] = useState<React.ReactNode | null>(null)
@@ -42,7 +56,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
   const optionsRef = useRef<OptionsInfo | null>(null)
   const hookLoaderRef = useRef<HookLoader | null>(null)
 
-  const protocol = (host.includes(':') || host.includes('localhost') || host.includes('10.0.2.2')) ? 'http' : 'https'
+  const { host: parsedHost, protocol } = parseHostUrl(host)
 
   // Initialize hook loader with RN module executor
   useEffect(() => {
@@ -51,8 +65,8 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
       return {}
     }
     hookLoaderRef.current = new HookLoader({
-      host,
-      protocol: protocol as 'http' | 'https',
+      host: parsedHost,
+      protocol: protocol,
       moduleLoader: new RNModuleLoader(requireShim),
       onDiagnostics: (diag) => {
         console.debug('[HookLoader] Diagnostics:', diag)
@@ -62,7 +76,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
 
   const loadOptions = useCallback(async (): Promise<OptionsInfo | null> => {
     try {
-      const resp = await fetch(`${protocol}://${host}/`, { method: 'OPTIONS' })
+      const resp = await fetch(`${protocol}://${parsedHost}/`, { method: 'OPTIONS' })
       if (!resp.ok) throw new Error(`OPTIONS failed: ${resp.status}`)
       const json = (await resp.json()) as OptionsInfo
       optionsRef.current = json
@@ -72,11 +86,11 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
       setDetails({ phase: 'options', message: e?.message || String(e) })
       return null
     }
-  }, [host, protocol])
+  }, [parsedHost, protocol])
 
   const createHookContext = useCallback(
     (hookPath: string): HookContext => {
-      const buildPeerUrl = (p: string) => `${protocol}://${host}${p}`
+      const buildPeerUrl = (p: string) => `${protocol}://${parsedHost}${p}`
 
       const FileRendererAdapter = ({ path: filePath }: { path: string }) => {
         const [content, setContent] = useState<string>('')
@@ -131,7 +145,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
         },
       }
     },
-    [host, path, protocol]
+    [parsedHost, path, protocol]
   )
 
   const tryRender = useCallback(async () => {
@@ -211,6 +225,9 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
   initialPath = '/',
   onNavigate,
 }) => {
+  // Parse the host URL to extract protocol and host:port
+  const { host: parsedHost, protocol } = parseHostUrl(host);
+
   // State management
   const [path, setPath] = useState(initialPath);
   const [inputValue, setInputValue] = useState(initialPath);
@@ -228,12 +245,8 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
   const cacheRef = useRef(new Map<string, CacheEntry>());
 
   const getBaseUrl = useCallback(() => {
-    if (host.includes('localhost') || host.includes('10.0.2.2')) {
-      const port = host.includes(':') ? '' : ':8080';
-      return `http://${host}${port}`;
-    }
-    return `https://${host}`;
-  }, [host]);
+    return `${protocol}://${parsedHost}`;
+  }, [parsedHost, protocol]);
 
   /**
    * Get cached results if still fresh

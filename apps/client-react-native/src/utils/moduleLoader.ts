@@ -45,7 +45,8 @@ export async function loadModule(
   }
 
   // Fetch module source
-  const protocol = host.includes('localhost') || host.includes('10.0.2.2') ? 'http' : 'https';
+  // If host is already in http(s)://host:port format from env, use 'http' as default for module fetching
+  const protocol = 'http';
   const moduleUrl = `${protocol}://${host}${normalizedPath}`;
   console.debug('[loadModule] Fetching:', moduleUrl);
 

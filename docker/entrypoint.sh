@@ -260,13 +260,45 @@ server {
 
     server_name _;
 
+    # Serve static files (client-web) from the www directory
+    root /srv/relay/www;
+
+    # First try to serve static files from the www directory
+    # If not found, proxy to the relay server
     location / {
-        proxy_pass http://127.0.0.1:${RELAY_PORT};
+        # Try to serve files from the www directory first
+        try_files \$uri \$uri/ @proxy;
+
+        # Set cache headers for static assets
+        expires 1h;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Proxy for API and repo endpoints
+    location @proxy {
+        proxy_pass http://127.0.0.1:\${RELAY_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
+
+    # Explicitly proxy API requests (for dynamic content)
+    location ~ ^/(api|branches|repos|files|search|options)/ {
+        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Handle SPA routing - serve index.html for unknown routes
+    location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1h;
+        add_header Cache-Control "public, immutable";
+    }
+
+    error_page 404 =200 /index.html;
 }
 EOF
   # Remove any default nginx conf.d snippets to avoid duplicate default_server
@@ -362,13 +394,45 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
+    # Serve static files (client-web) from the www directory
+    root /srv/relay/www;
+
+    # First try to serve static files from the www directory
+    # If not found, proxy to the relay server
     location / {
-        proxy_pass http://127.0.0.1:${RELAY_PORT};
+        # Try to serve files from the www directory first
+        try_files \$uri \$uri/ @proxy;
+
+        # Set cache headers for static assets
+        expires 1h;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Proxy for API and repo endpoints
+    location @proxy {
+        proxy_pass http://127.0.0.1:\${RELAY_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
+
+    # Explicitly proxy API requests (for dynamic content)
+    location ~ ^/(api|branches|repos|files|search|options)/ {
+        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Handle SPA routing - serve index.html for unknown routes
+    location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1h;
+        add_header Cache-Control "public, immutable";
+    }
+
+    error_page 404 =200 /index.html;
 }
 EOF
       nginx -s reload || true

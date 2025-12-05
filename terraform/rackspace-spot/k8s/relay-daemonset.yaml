@@ -22,7 +22,7 @@ spec:
       containers:
         - name: relay
           # Image published by CI: use the latest sha-tagged image pushed to GHCR
-          image: ghcr.io/clevertree/relay:sha-93ea918
+          image: ghcr.io/clevertree/relay:sha-53fc113
           imagePullPolicy: Always
           # Pin this DaemonSet to the dfw1-designated node
           # We will label the node: relay-node=dfw1
