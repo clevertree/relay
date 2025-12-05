@@ -276,7 +276,7 @@ server {
 
     # Proxy for API and repo endpoints
     location @proxy {
-        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -285,7 +285,7 @@ server {
 
     # Explicitly proxy API requests (for dynamic content)
     location ~ ^/(api|branches|repos|files|search|options)/ {
-        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -410,7 +410,7 @@ server {
 
     # Proxy for API and repo endpoints
     location @proxy {
-        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -419,7 +419,7 @@ server {
 
     # Explicitly proxy API requests (for dynamic content)
     location ~ ^/(api|branches|repos|files|search|options)/ {
-        proxy_pass http://127.0.0.1:\${RELAY_PORT};
+        proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
