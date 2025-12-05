@@ -1,7 +1,6 @@
 module.exports = {
   presets: ['module:@react-native/babel-preset'],
   plugins: [
-    // Enable NativeWind className support
-    'nativewind/babel',
+    // NativeWind support is handled by tailwindcss and the compiler
   ],
 };

@@ -20,6 +20,7 @@ import {
   View,
 } from 'react-native';
 import MarkdownView from './MarkdownView';
+import { HookLoader, RNModuleLoader, transpileCode, looksLikeTsOrJsx, type HookContext } from '@relay/shared/runtime-loader';
 
 /**
  * New lightweight path: render the repository-owned UI by loading the get-hook module
@@ -39,8 +40,25 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
   const [error, setError] = useState<string | null>(null)
   const [details, setDetails] = useState<any>(null)
   const optionsRef = useRef<OptionsInfo | null>(null)
+  const hookLoaderRef = useRef<HookLoader | null>(null)
 
-  const protocol = host.includes(':') || host.includes('localhost') || host.includes('10.0.2.2') ? 'http' : 'https'
+  const protocol = (host.includes(':') || host.includes('localhost') || host.includes('10.0.2.2')) ? 'http' : 'https'
+
+  // Initialize hook loader with RN module executor
+  useEffect(() => {
+    const requireShim = (spec: string) => {
+      if (spec === 'react') return require('react')
+      return {}
+    }
+    hookLoaderRef.current = new HookLoader({
+      host,
+      protocol: protocol as 'http' | 'https',
+      moduleLoader: new RNModuleLoader(requireShim),
+      onDiagnostics: (diag) => {
+        console.debug('[HookLoader] Diagnostics:', diag)
+      },
+    })
+  }, [host, protocol])
 
   const loadOptions = useCallback(async (): Promise<OptionsInfo | null> => {
     try {
@@ -49,119 +67,112 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
       const json = (await resp.json()) as OptionsInfo
       optionsRef.current = json
       return json
-    } catch (e:any) {
+    } catch (e: any) {
       setError('Failed to load repository OPTIONS')
       setDetails({ phase: 'options', message: e?.message || String(e) })
       return null
     }
   }, [host, protocol])
 
-  // RN module loader: fetch+transform TS/TSX to CJS and eval
-  const transformToCjs = useCallback(async (code: string, filename: string) => {
-    const BabelNs: any = await import('@babel/standalone')
-    const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
-    const hasJsxPragma = /@jsx\s+h/m.test(code)
-    const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
-    const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
-    const CJS_PLUGIN = Babel.availablePlugins?.['transform-modules-commonjs'] || Babel.availablePlugins?.['commonjs'] || 'transform-modules-commonjs'
-    const presets: any[] = []
-    if (TS_PRESET) presets.push([TS_PRESET, hasJsxPragma ? { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' } : {}])
-    presets.push([REACT_PRESET, hasJsxPragma ? { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: true } : { runtime: 'automatic', development: true }])
-    const plugins: any[] = []
-    if (CJS_PLUGIN) plugins.push([CJS_PLUGIN, {}])
-    const out = Babel.transform(code, {
-      filename,
-      presets,
-      plugins,
-      sourceMaps: 'inline',
-      retainLines: true,
-    })
-    return out.code as string
-  }, [])
+  const createHookContext = useCallback(
+    (hookPath: string): HookContext => {
+      const buildPeerUrl = (p: string) => `${protocol}://${host}${p}`
 
-  const loadModule = useCallback(async (modulePath: string, fromPath: string): Promise<any> => {
-    // Resolve relative to current hook dir or /hooks/
-    let normalized = modulePath
-    if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
-      const baseDir = fromPath.split('/').slice(0, -1).join('/') || '/hooks'
-      normalized = `${baseDir}/${modulePath}`
-    } else if (!modulePath.startsWith('/')) {
-      normalized = `/hooks/${modulePath}`
-    }
-    const url = `${protocol}://${host}${normalized}`
-    const resp = await fetch(url)
-    if (!resp.ok) throw new Error(`Failed to fetch ${normalized}: ${resp.status}`)
-    const code = await resp.text()
-    const cjs = await transformToCjs(code, normalized.split('/').pop() || 'module.tsx')
-    const exports: any = {}
-    const module = { exports }
-    const localRequire = (spec: string) => {
-      // Very small shim: allow only relative/absolute hook imports
-      return {
-        ...(spec === 'react' ? require('react') : {}),
+      const FileRendererAdapter = ({ path: filePath }: { path: string }) => {
+        const [content, setContent] = useState<string>('')
+        const [loading, setLoading] = useState(true)
+        const [error, setError] = useState<string | null>(null)
+
+        useEffect(() => {
+          if (!filePath) {
+            setLoading(false)
+            return
+          }
+          ;(async () => {
+            try {
+              const url = buildPeerUrl(filePath)
+              const resp = await fetch(url)
+              if (!resp.ok) throw new Error(`Failed to fetch file: ${resp.status}`)
+              const text = await resp.text()
+              setContent(text)
+              setError(null)
+            } catch (err) {
+              setError(`Failed to load ${filePath}: ${(err as any)?.message || err}`)
+              setContent('')
+            } finally {
+              setLoading(false)
+            }
+          })()
+        }, [filePath])
+
+        if (loading) return <Text>Loading...</Text>
+        if (error) return <Text style={{ color: 'red' }}>{error}</Text>
+        return <MarkdownView content={content} />
       }
-    }
-    // eslint-disable-next-line no-new-func
-    const fn = new Function('require','module','exports', `${cjs}\n//# sourceURL=${normalized}`)
-    fn(localRequire as any, module as any, exports)
-    return (module as any).exports
-  }, [host, protocol, transformToCjs])
+
+      const loadModule = async (modulePath: string): Promise<any> => {
+        if (!hookLoaderRef.current) {
+          throw new Error('[useHookRenderer] Hook loader not initialized')
+        }
+        return hookLoaderRef.current.loadModule(modulePath, hookPath, createHookContext(hookPath))
+      }
+
+      return {
+        React: require('react'),
+        createElement: require('react').createElement,
+        FileRenderer: FileRendererAdapter,
+        Layout: undefined,
+        params: { path },
+        helpers: {
+          navigate: (p: string) => setPath(p),
+          setBranch: (_: string) => {},
+          buildPeerUrl,
+          loadModule,
+        },
+      }
+    },
+    [host, path, protocol]
+  )
 
   const tryRender = useCallback(async () => {
-    setLoading(true); setError(null); setDetails(null)
+    setLoading(true)
+    setError(null)
+    setDetails(null)
+
     const opts = optionsRef.current || (await loadOptions())
     const hookPath = opts?.client?.hooks?.get?.path
+
     if (!hookPath) {
       setError('Missing hook path in OPTIONS (client.hooks.get.path)')
       setDetails({ options: opts })
       setLoading(false)
       return
     }
-    const hookUrl = `${protocol}://${host}${hookPath}`
+
     try {
-      const resp = await fetch(hookUrl)
-      const code = await resp.text()
-      const cjs = await transformToCjs(code, hookPath.split('/').pop() || 'hook.tsx')
-      const exports: any = {}
-      const module = { exports }
-      const req = (spec: string) => {
-        if (spec === 'react') return require('react')
-        // dynamic local module load
-        return {}
+      if (!hookLoaderRef.current) {
+        throw new Error('Hook loader not initialized')
       }
-      // eslint-disable-next-line no-new-func
-      const fn = new Function('require','module','exports', `${cjs}\n//# sourceURL=${hookPath}`)
-      fn(req as any, module as any, exports)
-      const mod = (module as any).exports
-      if (!mod || typeof mod.default !== 'function') {
-        throw new Error('Hook module must export default function(ctx)')
-      }
-      const ctx = {
-        React: require('react'),
-        createElement: require('react').createElement,
-        FileRenderer: (props: { path: string }) => <MarkdownView source={props.path} />, // minimal placeholder
-        Layout: undefined,
-        params: { path },
-        helpers: {
-          navigate: (p: string) => setPath(p),
-          setBranch: (_: string) => {},
-          buildPeerUrl: (p: string) => `${protocol}://${host}${p}`,
-          loadModule: async (p: string) => loadModule(p, hookPath),
-        },
-      }
-      const el: React.ReactNode = await mod.default(ctx)
+
+      const ctx = createHookContext(hookPath)
+      const el = await hookLoaderRef.current.loadAndExecuteHook(hookPath, ctx)
       setElement(el)
-      setError(null); setDetails(null)
-    } catch (e:any) {
+      setError(null)
+      setDetails(null)
+    } catch (e: any) {
       setError('Hook execution failed')
-      setDetails({ message: e?.message || String(e) })
+      setDetails({ message: e?.message || String(e), stack: e?.stack })
       setElement(null)
     } finally {
       setLoading(false)
     }
-  }, [host, protocol, loadOptions, path, loadModule, setPath, transformToCjs])
+  }, [loadOptions, createHookContext])
 
-  useEffect(() => { if (USE_REPO_HOOK) { void tryRender() } }, [path, tryRender])
+  useEffect(() => {
+    if (USE_REPO_HOOK) {
+      void tryRender()
+    }
+  }, [path, tryRender])
 
   return { element, loading, error, details, setPath }
 }

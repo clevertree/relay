@@ -1,0 +1,25 @@
+{
+  "name": "@relay/shared",
+  "version": "1.0.0",
+  "description": "Shared utilities for Relay clients (web and React Native)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime-loader": "./src/runtimeLoader.ts"
+  },
+  "files": ["src"],
+  "keywords": ["relay", "runtime", "loader", "hooks"],
+  "dependencies": {
+    "@babel/standalone": "^7.25.0",
+    "react": "^18.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-native": "^0.75.0"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    }
+  }
+}

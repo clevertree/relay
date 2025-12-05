@@ -13,7 +13,9 @@
     "paths": {
       "@/components/*": ["src/components/*"],
       "@/state/*": ["src/state/*"],
-      "@/native/*": ["native/*"]
+      "@/native/*": ["native/*"],
+      "@relay/shared": ["../shared/src/index.ts"],
+      "@relay/shared/*": ["../shared/src/*"]
     }
   },
   "include": ["src", "native"],
