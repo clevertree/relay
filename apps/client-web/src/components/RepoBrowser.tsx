@@ -26,17 +26,13 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [errorDetails, setErrorDetails] = useState<any>(null)
-  const [content, setContent] = useState<string | null>(null)
-  const [contentType, setContentType] = useState<string | null>(null)
   const [optionsInfo, setOptionsInfo] = useState<OptionsInfo>({})
-  const [pathInput, setPathInput] = useState(tab?.path ?? '/README.md')
   const [hookElement, setHookElement] = useState<React.ReactNode | null>(null)
   // Client is now dumb: search and navigation UI are moved into repo layout
   // Keep minimal state only for hook/file rendering
 
   useEffect(() => {
     if (!tab || !tab.host) return
-    setPathInput(tab.path ?? '/README.md')
     ;(async () => {
       try {
         const opts = await loadOptions()
