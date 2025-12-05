@@ -60,10 +60,10 @@ Both implementations cache loaded modules to avoid redundant fetches:
 - **Web**: Blob URLs are created once per module
 - **React Native**: Parsed exports are cached by `host:path`
 
-## Example: get-client.tsx with modules
+## Example: get-client.jsx with modules
 
 ```javascript
-// hooks/get-client.tsx
+// hooks/get-client.jsx
 let tmdbClient = null;
 
 export default async function getClient(context) {

@@ -226,7 +226,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
       
       try {
         // Build context first so we can inject it as global for JSX transpiled code
-        const ctx = buildHookContext(kind, extraParams, undefined)
+        const ctx = buildHookContext(kind, extraParams, undefined, hookPath)
         
         console.debug(`[Hook ${kind}] Context ready, React type:`, typeof ctx.React)
         if (!ctx.React) {
@@ -301,6 +301,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
     kind: 'get' | 'query' | 'put',
     extraParams?: Record<string, unknown>,
     RemoteLayout?: React.ComponentType<any>,
+    hookBasePath?: string, // full path to the loaded hook module (e.g., /hooks/get-client.jsx)
   ) => {
     // Wrap FileRenderer to adapt it from { content, contentType } to { path }
     // This allows hooks to use FileRenderer({ path: "/file.md" })
@@ -362,8 +363,11 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
       // Normalize path - handle both relative and absolute
       let normalizedPath = modulePath
       if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
-        // Relative to current hook path
-        const currentDir = (tab.path ?? '/hooks/get-client.tsx').split('/').slice(0, -1).join('/')
+        // Relative to current hook path, not the content path
+        const basePath = hookBasePath && hookBasePath.startsWith('/')
+          ? hookBasePath
+          : '/hooks/get-client.jsx'
+        const currentDir = basePath.split('/').slice(0, -1).join('/')
         normalizedPath = `${currentDir}/${modulePath}`.replace(/\/\.\//g, '/').replace(/\/[^/]+\/\.\.\//g, '/')
       } else if (!modulePath.startsWith('/')) {
         // Assume it's relative to /hooks/
@@ -411,11 +415,11 @@ const _jsx_ = (...args) => __globalCtx__.__ctx__?.React?.createElement(...args);
 const _jsxFrag_ = __globalCtx__.__ctx__?.React?.Fragment;
 if (!React) throw new Error('React not available in loadModule preamble');
 `
-            finalCode = preamble + result.code
-          } catch (e) {
-            console.warn('[loadModule] Babel transform failed, trying raw import', e)
-          }
-        }
+        finalCode = preamble + result.code
+      } catch (e) {
+        console.warn('[loadModule] Babel transform failed, trying raw import', e)
+      }
+      }
 
         const blob = new Blob([finalCode], { type: 'text/javascript' })
         const blobUrl = URL.createObjectURL(blob)
