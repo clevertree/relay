@@ -155,6 +155,7 @@ export async function transpileCode(
   toCommonJs: boolean = false
 ): Promise<string> {
   try {
+    // @ts-ignore - @babel/standalone doesn't have type definitions
     const BabelNs: any = await import('@babel/standalone')
     const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
 

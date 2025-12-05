@@ -17,10 +17,10 @@
   "dependencies": {
     "@babel/runtime": "^7.24.0",
     "@babel/standalone": "^7.26.2",
+    "@noble/hashes": "^1.4.0",
+    "@react-navigation/material-top-tabs": "^6.6.0",
     "@react-navigation/native": "^6.1.0",
     "@react-navigation/native-stack": "^6.9.0",
-    "@react-navigation/material-top-tabs": "^6.6.0",
-    "@noble/hashes": "^1.4.0",
     "@relay/shared": "file:../shared",
     "nativewind": "^4.0.36",
     "react": "18.2.0",
