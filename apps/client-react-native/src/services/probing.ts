@@ -9,6 +9,21 @@ const PROBE_TIMEOUT_MS = 5000;
 const PROBE_SAMPLES = 3;
 
 /**
+ * Parse a full URL or host:port string to extract just hostname
+ * Handles: "https://host:port", "http://host", "host:port", "host"
+ */
+function extractHostname(input: string): string {
+  try {
+    // Try parsing as full URL first
+    const url = new URL(input.startsWith('http') ? input : `https://${input}`);
+    return url.port ? `${url.hostname}:${url.port}` : url.hostname;
+  } catch {
+    // Fall back to input as-is
+    return input;
+  }
+}
+
+/**
  * Parse a full URL or host:port string to extract host and port
  */
 function parseHostUrl(input: string): { host: string; port?: number; protocol?: string } {
@@ -77,14 +92,12 @@ async function fetchWithTimeout(
 async function probeHttps(host: string): Promise<ProbeResult> {
   const port = 443;
   const latencies: number[] = [];
-  const { host: hostname, protocol: urlProtocol } = parseHostUrl(host);
-  const protocol = urlProtocol || 'https';
+  const hostPort = extractHostname(host);
 
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     const start = Date.now();
     try {
-      const hostPort = host.includes(':') ? hostname : `${hostname}:${protocol === 'https' ? 443 : 8080}`;
-      const url = `${protocol}://${hostPort}/`;
+      const url = `https://${hostPort}/`;
 
       const res = await fetchWithTimeout(url, {method: 'HEAD', timeout: PROBE_TIMEOUT_MS});
       if (res.ok || res.status < 500) {
@@ -109,12 +122,12 @@ async function probeHttps(host: string): Promise<ProbeResult> {
 async function probeIpfsApi(host: string): Promise<ProbeResult> {
   const port = 5001;
   const latencies: number[] = [];
-  const baseHost = host.split(':')[0];
+  const hostname = extractHostname(host).split(':')[0]; // Get just the hostname without port
 
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     const start = Date.now();
     try {
-      const url = `http://${baseHost}:${port}/api/v0/version`;
+      const url = `http://${hostname}:${port}/api/v0/version`;
       const res = await fetchWithTimeout(url, {method: 'POST', timeout: PROBE_TIMEOUT_MS});
       if (res.ok) {
         latencies.push(Date.now() - start);
@@ -138,12 +151,12 @@ async function probeIpfsApi(host: string): Promise<ProbeResult> {
 async function probeIpfsGateway(host: string): Promise<ProbeResult> {
   const port = 8080;
   const latencies: number[] = [];
-  const baseHost = host.split(':')[0];
+  const hostname = extractHostname(host).split(':')[0]; // Get just the hostname without port
 
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     const start = Date.now();
     try {
-      const url = `http://${baseHost}:${port}/ipfs/`;
+      const url = `http://${hostname}:${port}/ipfs/`;
       const res = await fetchWithTimeout(url, {method: 'HEAD', timeout: PROBE_TIMEOUT_MS});
       // Gateway may return 400 for malformed path, but that still means it's up
       if (res.status < 500) {
@@ -204,10 +217,8 @@ export async function fetchPeerOptions(host: string): Promise<{
   interface?: Record<string, {plugin_manifest?: string}>;
 }> {
   try {
-    const { host: hostname, protocol: urlProtocol } = parseHostUrl(host);
-    const protocol = urlProtocol || 'https';
-    const hostPort = host.includes(':') ? hostname : `${hostname}:${protocol === 'https' ? 443 : 8080}`;
-    const url = `${protocol}://${hostPort}/`;
+    const hostPort = extractHostname(host);
+    const url = `https://${hostPort}/`;
 
     const res = await fetchWithTimeout(url, {method: 'OPTIONS', timeout: PROBE_TIMEOUT_MS});
     if (!res.ok) return {};
