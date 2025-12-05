@@ -127,9 +127,37 @@ export class RNModuleLoader implements ModuleLoader {
     const exports: any = {}
     const module = { exports }
 
+    // Inject context and helpers into the function scope for the hook to access
+    const contextStr = JSON.stringify(context, (key, value) => {
+      // Skip non-serializable values (functions, React components)
+      if (typeof value === 'function' || (value && typeof value === 'object' && value.$$typeof)) {
+        return undefined
+      }
+      return value
+    })
+
     // eslint-disable-next-line no-new-func
-    const fn = new Function('require', 'module', 'exports', `${code}\n//# sourceURL=${filename}`)
-    fn(this.requireShim, module, exports)
+    const fn = new Function(
+      'require',
+      'module',
+      'exports',
+      'context',
+      `
+try {
+  ${code}
+} catch (err) {
+  console.error('[RNModuleLoader] Code execution error in ${filename}:', err.message || err);
+  throw err;
+}
+//# sourceURL=${filename}
+    `
+    )
+    try {
+      fn(this.requireShim, module, exports, context)
+    } catch (err) {
+      console.error(`[RNModuleLoader] Failed to execute module ${filename}:`, err)
+      throw err
+    }
 
     const mod = (module as any).exports
 
@@ -313,6 +341,8 @@ export class HookLoader {
     try {
       diag.phase = 'fetch'
       const hookUrl = `${this.protocol}://${this.host}${hookPath}`
+      console.debug(`[HookLoader] Fetching hook from: ${hookUrl}`)
+      
       const response = await fetch(hookUrl)
 
       diag.fetch = {
@@ -327,17 +357,20 @@ export class HookLoader {
 
       const code = await response.text()
       diag.codeLength = code.length
+      console.debug(`[HookLoader] Received hook code (${code.length} chars)`)
 
       // Transpile if needed
       diag.phase = 'transform'
       let finalCode = code
       if (looksLikeTsOrJsx(code, hookPath)) {
         try {
+          console.debug(`[HookLoader] Transpiling ${hookPath}`)
           finalCode = await transpileCode(
             code,
             { filename: hookPath.split('/').pop() || 'hook.tsx', hasJsxPragma: /@jsx\s+h/m.test(code) },
             false // Web uses dynamic import
           )
+          console.debug(`[HookLoader] Transpilation complete (${finalCode.length} chars)`)
         } catch (err) {
           console.warn('[HookLoader] JSX transpilation failed, trying raw:', err)
           diag.transpileWarn = err instanceof Error ? err.message : String(err)
@@ -346,18 +379,29 @@ export class HookLoader {
 
       // Execute
       diag.phase = 'import'
-      const mod = await this.moduleLoader.executeModule(finalCode, hookPath, context)
+      console.debug(`[HookLoader] Executing hook module`)
+      
+      try {
+        const mod = await this.moduleLoader.executeModule(finalCode, hookPath, context)
 
-      if (!mod || typeof mod.default !== 'function') {
-        throw new Error('Hook module does not export a default function')
+        if (!mod || typeof mod.default !== 'function') {
+          throw new Error('Hook module does not export a default function')
+        }
+
+        diag.phase = 'exec'
+        console.debug(`[HookLoader] Calling hook function`)
+        const element = await mod.default(context)
+        console.debug(`[HookLoader] Hook executed successfully`)
+
+        return element
+      } catch (execErr) {
+        console.error('[HookLoader] Hook execution error:', execErr)
+        throw execErr
       }
-
-      diag.phase = 'exec'
-      const element = await mod.default(context)
-
-      return element
     } catch (err) {
       diag.error = err instanceof Error ? err.message : String(err)
+      diag.stack = err instanceof Error ? err.stack : undefined
+      console.error('[HookLoader] Error during loadAndExecuteHook:', diag)
       this.onDiagnostics(diag)
       throw err
     }
