@@ -178,16 +178,21 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           || hookPath.endsWith('.jsx') || hookPath.endsWith('.tsx') || hookPath.endsWith('.ts')
         if (looksLikeJsxOrTsx) {
           console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with @babel/standalone`)
-          const Babel: any = await import(/* @vite-ignore */ '@babel/standalone')
+          const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
+          const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
           const presets: any[] = []
           // Choose React runtime: if file explicitly opts into pragma with @jsx h, transpile with classic runtime to avoid injecting jsx-runtime imports
           const hasJsxPragma = /@jsx\s+h/m.test(code)
           // TypeScript first so JSX remains for React preset to handle
-          if (Babel.presets.typescript) {
-            const tsOpts = hasJsxPragma ? { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' } : {}
-            presets.push([Babel.presets.typescript, tsOpts])
+          const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
+          const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
+          if (TS_PRESET) {
+            // Force classic pragma to avoid injecting react/jsx-runtime (not resolvable from blob modules)
+            const tsOpts = { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' }
+            presets.push([TS_PRESET, tsOpts])
           }
-          presets.push([Babel.presets.react, hasJsxPragma ? { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: true } : { runtime: 'automatic', development: true }])
+          // Always use classic runtime so transformed code has no bare imports
+          presets.push([REACT_PRESET, { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: true }])
           const result = Babel.transform(code, {
             filename: hookPath.split('/').pop() || 'hook.tsx',
             presets,
@@ -226,6 +231,9 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         const element: React.ReactNode = await mod.default(ctx)
         console.debug(`[Hook ${kind}] Hook executed successfully`)
         setHookElement(element)
+        // Clear any previous error state so diagnostics <pre> disappears
+        setError(null)
+        setErrorDetails(null)
         setContent(null)
         setContentType(null)
         return true
@@ -301,14 +309,19 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           || normalizedPath.endsWith('.tsx') || normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.jsx')
         if (looksLikeTsOrJsx) {
           try {
-            const Babel: any = await import(/* @vite-ignore */ '@babel/standalone')
+            const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
+            const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
             const presets: any[] = []
             const hasJsxPragma = /@jsx\s+h/m.test(code)
-            if (Babel.presets.typescript) {
-              const tsOpts = hasJsxPragma ? { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' } : {}
-              presets.push([Babel.presets.typescript, tsOpts])
+            const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
+            const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
+            if (TS_PRESET) {
+              // Force classic pragma to avoid injecting react/jsx-runtime (not resolvable from blob modules)
+              const tsOpts = { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' }
+              presets.push([TS_PRESET, tsOpts])
             }
-            presets.push([Babel.presets.react, hasJsxPragma ? { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: true } : { runtime: 'automatic', development: true }])
+            // Always use classic runtime so transformed code has no bare imports
+            presets.push([REACT_PRESET, { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: true }])
             const result = Babel.transform(code, {
               filename: normalizedPath.split('/').pop() || 'module.tsx',
               presets,

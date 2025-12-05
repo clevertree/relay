@@ -7,7 +7,7 @@
  * - Improved UX with load more functionality
  */
 
-import React, {useState, useCallback, useRef} from 'react';
+import React, {useState, useCallback, useRef, useEffect} from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -20,6 +20,151 @@ import {
   View,
 } from 'react-native';
 import MarkdownView from './MarkdownView';
+
+/**
+ * New lightweight path: render the repository-owned UI by loading the get-hook module
+ * Disables legacy Visit/Search UI so the client is a dumb host, same as web.
+ */
+const USE_REPO_HOOK = true;
+
+type OptionsInfo = {
+  client?: { hooks?: { get?: { path: string }; query?: { path: string } } }
+  [k: string]: unknown
+}
+
+function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
+  const [path, setPath] = pathState
+  const [element, setElement] = useState<React.ReactNode | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [details, setDetails] = useState<any>(null)
+  const optionsRef = useRef<OptionsInfo | null>(null)
+
+  const protocol = host.includes(':') || host.includes('localhost') || host.includes('10.0.2.2') ? 'http' : 'https'
+
+  const loadOptions = useCallback(async (): Promise<OptionsInfo | null> => {
+    try {
+      const resp = await fetch(`${protocol}://${host}/`, { method: 'OPTIONS' })
+      if (!resp.ok) throw new Error(`OPTIONS failed: ${resp.status}`)
+      const json = (await resp.json()) as OptionsInfo
+      optionsRef.current = json
+      return json
+    } catch (e:any) {
+      setError('Failed to load repository OPTIONS')
+      setDetails({ phase: 'options', message: e?.message || String(e) })
+      return null
+    }
+  }, [host, protocol])
+
+  // RN module loader: fetch+transform TS/TSX to CJS and eval
+  const transformToCjs = useCallback(async (code: string, filename: string) => {
+    const BabelNs: any = await import('@babel/standalone')
+    const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
+    const hasJsxPragma = /@jsx\s+h/m.test(code)
+    const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
+    const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
+    const CJS_PLUGIN = Babel.availablePlugins?.['transform-modules-commonjs'] || Babel.availablePlugins?.['commonjs'] || 'transform-modules-commonjs'
+    const presets: any[] = []
+    if (TS_PRESET) presets.push([TS_PRESET, hasJsxPragma ? { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' } : {}])
+    presets.push([REACT_PRESET, hasJsxPragma ? { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: true } : { runtime: 'automatic', development: true }])
+    const plugins: any[] = []
+    if (CJS_PLUGIN) plugins.push([CJS_PLUGIN, {}])
+    const out = Babel.transform(code, {
+      filename,
+      presets,
+      plugins,
+      sourceMaps: 'inline',
+      retainLines: true,
+    })
+    return out.code as string
+  }, [])
+
+  const loadModule = useCallback(async (modulePath: string, fromPath: string): Promise<any> => {
+    // Resolve relative to current hook dir or /hooks/
+    let normalized = modulePath
+    if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
+      const baseDir = fromPath.split('/').slice(0, -1).join('/') || '/hooks'
+      normalized = `${baseDir}/${modulePath}`
+    } else if (!modulePath.startsWith('/')) {
+      normalized = `/hooks/${modulePath}`
+    }
+    const url = `${protocol}://${host}${normalized}`
+    const resp = await fetch(url)
+    if (!resp.ok) throw new Error(`Failed to fetch ${normalized}: ${resp.status}`)
+    const code = await resp.text()
+    const cjs = await transformToCjs(code, normalized.split('/').pop() || 'module.tsx')
+    const exports: any = {}
+    const module = { exports }
+    const localRequire = (spec: string) => {
+      // Very small shim: allow only relative/absolute hook imports
+      return {
+        ...(spec === 'react' ? require('react') : {}),
+      }
+    }
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('require','module','exports', `${cjs}\n//# sourceURL=${normalized}`)
+    fn(localRequire as any, module as any, exports)
+    return (module as any).exports
+  }, [host, protocol, transformToCjs])
+
+  const tryRender = useCallback(async () => {
+    setLoading(true); setError(null); setDetails(null)
+    const opts = optionsRef.current || (await loadOptions())
+    const hookPath = opts?.client?.hooks?.get?.path
+    if (!hookPath) {
+      setError('Missing hook path in OPTIONS (client.hooks.get.path)')
+      setDetails({ options: opts })
+      setLoading(false)
+      return
+    }
+    const hookUrl = `${protocol}://${host}${hookPath}`
+    try {
+      const resp = await fetch(hookUrl)
+      const code = await resp.text()
+      const cjs = await transformToCjs(code, hookPath.split('/').pop() || 'hook.tsx')
+      const exports: any = {}
+      const module = { exports }
+      const req = (spec: string) => {
+        if (spec === 'react') return require('react')
+        // dynamic local module load
+        return {}
+      }
+      // eslint-disable-next-line no-new-func
+      const fn = new Function('require','module','exports', `${cjs}\n//# sourceURL=${hookPath}`)
+      fn(req as any, module as any, exports)
+      const mod = (module as any).exports
+      if (!mod || typeof mod.default !== 'function') {
+        throw new Error('Hook module must export default function(ctx)')
+      }
+      const ctx = {
+        React: require('react'),
+        createElement: require('react').createElement,
+        FileRenderer: (props: { path: string }) => <MarkdownView source={props.path} />, // minimal placeholder
+        Layout: undefined,
+        params: { path },
+        helpers: {
+          navigate: (p: string) => setPath(p),
+          setBranch: (_: string) => {},
+          buildPeerUrl: (p: string) => `${protocol}://${host}${p}`,
+          loadModule: async (p: string) => loadModule(p, hookPath),
+        },
+      }
+      const el: React.ReactNode = await mod.default(ctx)
+      setElement(el)
+      setError(null); setDetails(null)
+    } catch (e:any) {
+      setError('Hook execution failed')
+      setDetails({ message: e?.message || String(e) })
+      setElement(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [host, protocol, loadOptions, path, loadModule, setPath, transformToCjs])
+
+  useEffect(() => { if (USE_REPO_HOOK) { void tryRender() } }, [path, tryRender])
+
+  return { element, loading, error, details, setPath }
+}
 
 const DEFAULT_PAGE_SIZE = 50;
 const CACHE_TTL_MS = 300000; // 5 minutes
