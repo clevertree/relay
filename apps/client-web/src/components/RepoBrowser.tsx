@@ -81,12 +81,10 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
       const hookUsed = await tryRenderWithHook('get', undefined, opts || optionsInfo)
       if (!hookUsed) {
         setError('Failed to render via repository hook')
-        setContent(null)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load content')
       setErrorDetails(err)
-      setContent(null)
     } finally {
       setLoading(false)
     }
@@ -262,8 +260,6 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
         // Clear any previous error state so diagnostics <pre> disappears
         setError(null)
         setErrorDetails(null)
-        setContent(null)
-        setContentType(null)
         return true
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
