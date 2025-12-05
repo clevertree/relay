@@ -178,6 +178,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           || hookPath.endsWith('.jsx') || hookPath.endsWith('.tsx') || hookPath.endsWith('.ts')
         if (looksLikeJsxOrTsx) {
           console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with @babel/standalone`)
+          // @ts-ignore - @babel/standalone doesn't have type definitions
           const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
           const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
           
@@ -391,6 +392,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
           || normalizedPath.endsWith('.tsx') || normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.jsx')
         if (looksLikeTsOrJsx) {
           try {
+            // @ts-ignore - @babel/standalone doesn't have type definitions
             const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
             const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
             const presets: any[] = []
