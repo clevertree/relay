@@ -460,7 +460,7 @@ if (!React) throw new Error('React not available in loadModule preamble');
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 overflow-y-auto">
         {loading && <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>}
 
         {error && (

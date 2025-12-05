@@ -2,9 +2,10 @@
 module.exports = {
   darkMode: 'media',
   content: [
-    './template/**/*.{html,md,js}',
+    './template/**/*.{html,md,js,jsx}',
     './template/.storybook/**/*.{html,js}',
     './template/site/**/*.js',
+    { raw: '<div className="mb-6 mt-6 mb-4 mt-4"></div>' }, // Force include spacing classes
   ],
   theme: {
     extend: {
