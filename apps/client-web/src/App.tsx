@@ -3,6 +3,7 @@ import { useAppState } from './state/store'
 import { PeersView } from './components/PeersView'
 import { TabBar } from './components/TabBar'
 import { RepoBrowser } from './components/RepoBrowser'
+import { DebugMenu } from './components/DebugMenu'
 import { PluginProvider } from './plugins/PluginContext'
 import { webPlugin } from './plugins/web'
 
@@ -34,6 +35,7 @@ function App() {
   return (
     <PluginProvider plugin={webPlugin}>
       <div className="flex flex-col w-screen h-screen">
+        <DebugMenu />
         <TabBar />
         <div className="flex flex-1 overflow-hidden">
           <main className="flex-1 flex flex-col overflow-hidden">
