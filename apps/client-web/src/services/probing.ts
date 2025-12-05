@@ -16,6 +16,22 @@ export interface ProbeResult {
 }
 
 /**
+ * Extract host:port from a full URL or hostname string
+ * Handles: "https://host:port", "http://host", "host:port", "host"
+ */
+function extractHostPort(input: string): string {
+  try {
+    // Try to parse as a full URL
+    const url = new URL(input.startsWith('http') ? input : `https://${input}`)
+    // Return host:port or just host
+    return url.port ? `${url.hostname}:${url.port}` : url.hostname
+  } catch {
+    // If parsing fails, return as-is (might be just hostname or hostname:port)
+    return input
+  }
+}
+
+/**
  * Measures median latency from multiple samples
  */
 function median(values: number[]): number {
@@ -53,13 +69,14 @@ async function fetchWithTimeout(
  * Probe HTTPS endpoint
  */
 export async function probeHttps(host: string): Promise<ProbeResult> {
+  const hostPort = extractHostPort(host)
   const latencies: number[] = []
 
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     try {
       const start = performance.now()
       // Use HEAD with no-cors mode to avoid CORS preflight issues
-      await fetchWithTimeout(`https://${host}/`, {
+      await fetchWithTimeout(`https://${hostPort}/`, {
         method: 'HEAD',
         timeout: PROBE_TIMEOUT_MS,
         mode: 'no-cors',
@@ -91,12 +108,13 @@ export async function probeHttps(host: string): Promise<ProbeResult> {
  * Probe HTTP endpoint (for local development)
  */
 export async function probeHttp(host: string): Promise<ProbeResult> {
+  const hostPort = extractHostPort(host)
   const latencies: number[] = []
 
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     try {
       const start = performance.now()
-      const response = await fetchWithTimeout(`http://${host}/`, {
+      const response = await fetchWithTimeout(`http://${hostPort}/`, {
         method: 'OPTIONS',
         timeout: PROBE_TIMEOUT_MS,
       })
@@ -136,12 +154,13 @@ export async function fetchPeerOptions(
   branchHeads?: Record<string, string>
   lastUpdateTs?: number
 }> {
+  const hostPort = extractHostPort(host)
   const isSecureContext = window.location.protocol === 'https:'
   const protocols = isSecureContext ? ['https', 'http'] : ['http', 'https']
 
   for (const protocol of protocols) {
     try {
-      const response = await fetchWithTimeout(`${protocol}://${host}/`, {
+      const response = await fetchWithTimeout(`${protocol}://${hostPort}/`, {
         method: 'OPTIONS',
         timeout: PROBE_TIMEOUT_MS,
       })
