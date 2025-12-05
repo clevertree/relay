@@ -180,29 +180,40 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with @babel/standalone`)
           const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
           const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
+          
           const presets: any[] = []
-          // Choose React runtime: if file explicitly opts into pragma with @jsx h, transpile with classic runtime to avoid injecting jsx-runtime imports
-          const hasJsxPragma = /@jsx\s+h/m.test(code)
           // TypeScript first so JSX remains for React preset to handle
           const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
           const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
           if (TS_PRESET) {
-            // Force classic pragma to avoid injecting react/jsx-runtime (not resolvable from blob modules)
-            const tsOpts = { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' }
-            presets.push([TS_PRESET, tsOpts])
+            presets.push([TS_PRESET])
           }
-          // Always use classic runtime so transformed code has no bare imports
-          presets.push([REACT_PRESET, { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: true }])
+          // Use classic runtime with _jsx_ helper - we'll inject it at the top
+          presets.push([REACT_PRESET, { runtime: 'classic', pragma: '_jsx_', pragmaFrag: '_jsxFrag_', development: true }])
           const result = Babel.transform(code, {
             filename: hookPath.split('/').pop() || 'hook.tsx',
             presets,
             sourceMaps: 'inline',
             retainLines: true,
-            // Keep modules as ESM for dynamic import
             plugins: [],
           })
-          finalCode = result.code
+          // Inject helpers that reference window.__ctx__ 
+          // Use globalThis for better compatibility with blob modules
+          const preamble = `
+const __ctx_obj__ = (typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : {});
+const React = __ctx_obj__.__ctx__ && __ctx_obj__.__ctx__.React;
+if (!React) {
+  const errorMsg = 'React not available in preamble. __ctx_obj__=' + (typeof __ctx_obj__) + ', __ctx_obj__.__ctx__=' + (typeof __ctx_obj__.__ctx__) + ', React=' + (typeof React);
+  console.error(errorMsg);
+  throw new Error(errorMsg);
+}
+const _jsx_ = (...args) => __ctx_obj__.__ctx__.React.createElement(...args);
+const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
+`
+          finalCode = preamble + result.code
           usedJsx = true
+          console.debug(`[Hook ${kind}] Preamble:`, preamble)
+          console.debug(`[Hook ${kind}] First 1000 chars of final code:\n${finalCode.substring(0, 1000)}`)
         }
       } catch (jsxErr) {
         console.warn(`[Hook ${kind}] JSX transform failed, will attempt raw import`, jsxErr)
@@ -214,6 +225,25 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
       console.debug(`[Hook ${kind}] Created blob URL: ${blobUrl}`)
       
       try {
+        // Build context first so we can inject it as global for JSX transpiled code
+        const ctx = buildHookContext(kind, extraParams, undefined)
+        
+        console.debug(`[Hook ${kind}] Context ready, React type:`, typeof ctx.React)
+        if (!ctx.React) {
+          throw new Error(`[Hook ${kind}] buildHookContext returned falsy React: ${ctx.React}`)
+        }
+        console.debug(`[Hook ${kind}] Setting window.__ctx__:`, { hasReact: !!ctx.React, keys: Object.keys(ctx) })
+        
+        // Inject __ctx__ as a global for JSX transpilation (React.createElement calls)
+        ;(window as any).__ctx__ = ctx
+        
+        // Verify immediately after setting
+        const verifyCtx = (window as any).__ctx__
+        if (!verifyCtx || !verifyCtx.React) {
+          throw new Error(`[Hook ${kind}] Failed to set window.__ctx__ or React not available. ctx=${typeof verifyCtx}, React=${typeof verifyCtx?.React}`)
+        }
+        console.debug(`[Hook ${kind}] window.__ctx__ set and verified, React available:`, verifyCtx.React.constructor?.name)
+        
         // @vite-ignore - Dynamic import of remote blob module (intentional pattern)
         console.debug(`[Hook ${kind}] Attempting dynamic import...`, usedJsx ? '(transformed from JSX)' : '')
         const mod: any = await import(/* @vite-ignore */ blobUrl)
@@ -227,9 +257,10 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           return false
         }
         
-        const ctx = buildHookContext(kind, extraParams, undefined)
+        console.debug(`[Hook ${kind}] Calling hook function...`)
         const element: React.ReactNode = await mod.default(ctx)
-        console.debug(`[Hook ${kind}] Hook executed successfully`)
+        console.debug(`[Hook ${kind}] Hook executed successfully, element:`, element)
+        console.debug(`[Hook ${kind}] Element type:`, typeof element, element?.constructor?.name, React.isValidElement(element))
         setHookElement(element)
         // Clear any previous error state so diagnostics <pre> disappears
         setError(null)
@@ -238,15 +269,24 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         setContentType(null)
         return true
       } catch (err) {
-        console.debug(`[Hook ${kind}] Execution failed:`, err instanceof Error ? err.message : err)
+        const errMsg = err instanceof Error ? err.message : String(err)
+        const errStack = err instanceof Error && err.stack ? err.stack : ''
+        console.debug(`[Hook ${kind}] Execution failed:`, errMsg)
         console.error(`[Hook ${kind}] Full error:`, err)
+        console.error(`[Hook ${kind}] Stack:`, errStack)
         setError(
-          `Hook execution failed: ${(err as any)?.message || err}. If using JSX, add '// @use-jsx' comment at the top or use .jsx extension so the loader transpiles it.`
+          `Hook execution failed: ${errMsg}. If using JSX, add '// @use-jsx' comment at the top or use .jsx extension so the loader transpiles it.`
         )
-        setErrorDetails({ ...diagnostics, reason: 'execution-failed' })
+        setErrorDetails({ ...diagnostics, reason: 'execution-failed', error: errMsg, stack: errStack.split('\n').slice(0, 5) })
         return false
       } finally {
         URL.revokeObjectURL(blobUrl)
+        // Clean up global - delayed because the hook may still be running async operations
+        // that depend on window.__ctx__ (via helpers.loadModule calls)
+        setTimeout(() => {
+          delete (window as any).__ctx__
+          console.debug(`[Hook ${kind}] Cleaned up window.__ctx__ after async operations`)
+        }, 500)
       }
     } catch (fetchErr) {
       console.debug(`[Hook ${kind}] Fetch error:`, fetchErr instanceof Error ? fetchErr.message : fetchErr)
@@ -262,6 +302,44 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     extraParams?: Record<string, unknown>,
     RemoteLayout?: React.ComponentType<any>,
   ) => {
+    // Wrap FileRenderer to adapt it from { content, contentType } to { path }
+    // This allows hooks to use FileRenderer({ path: "/file.md" })
+    const FileRendererAdapter = ({ path: filePath }: { path: string }) => {
+      const [content, setContent] = React.useState<string>('')
+      const [contentType, setContentType] = React.useState<string>('')
+      const [loading, setLoading] = React.useState(true)
+      const [error, setError] = React.useState<string | null>(null)
+
+      React.useEffect(() => {
+        if (!filePath) {
+          setLoading(false)
+          return
+        }
+        ;(async () => {
+          try {
+            const url = buildPeerUrl(tab!.host!, filePath)
+            const resp = await fetch(url, {
+              headers: buildRepoHeaders(tab?.currentBranch, tab?.repo),
+            })
+            if (!resp.ok) throw new Error(`Failed to fetch file: ${resp.status}`)
+            const text = await resp.text()
+            setContent(text)
+            setContentType(resp.headers.get('Content-Type') || 'text/plain')
+            setError(null)
+          } catch (err) {
+            setError(`Failed to load ${filePath}: ${(err as any)?.message || err}`)
+            setContent('')
+          } finally {
+            setLoading(false)
+          }
+        })()
+      }, [filePath])
+
+      if (loading) return <div className="text-gray-500">Loading...</div>
+      if (error) return <div className="text-red-500">{error}</div>
+      return <FileRenderer content={content} contentType={contentType} />
+    }
+
     const params = {
       socket: tab?.host,
       path: tab?.path ?? '/README.md',
@@ -312,23 +390,28 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
             const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
             const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
             const presets: any[] = []
-            const hasJsxPragma = /@jsx\s+h/m.test(code)
             const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
             const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
             if (TS_PRESET) {
-              // Force classic pragma to avoid injecting react/jsx-runtime (not resolvable from blob modules)
-              const tsOpts = { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' }
-              presets.push([TS_PRESET, tsOpts])
+              presets.push([TS_PRESET])
             }
-            // Always use classic runtime so transformed code has no bare imports
-            presets.push([REACT_PRESET, { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: true }])
+            // Use classic runtime with _jsx_ helper
+            presets.push([REACT_PRESET, { runtime: 'classic', pragma: '_jsx_', pragmaFrag: '_jsxFrag_', development: true }])
             const result = Babel.transform(code, {
               filename: normalizedPath.split('/').pop() || 'module.tsx',
               presets,
               sourceMaps: 'inline',
               retainLines: true,
             })
-            finalCode = result.code
+            // Inject _jsx_ and _jsxFrag_ helpers
+            const preamble = `
+const __globalCtx__ = typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : {};
+const React = __globalCtx__.__ctx__?.React;
+const _jsx_ = (...args) => __globalCtx__.__ctx__?.React?.createElement(...args);
+const _jsxFrag_ = __globalCtx__.__ctx__?.React?.Fragment;
+if (!React) throw new Error('React not available in loadModule preamble');
+`
+            finalCode = preamble + result.code
           } catch (e) {
             console.warn('[loadModule] Babel transform failed, trying raw import', e)
           }
@@ -354,7 +437,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     return {
       React,
       createElement: React.createElement,
-      FileRenderer,
+      FileRenderer: FileRendererAdapter,
       Layout: RemoteLayout ?? TemplateLayout,
       params,
       helpers: {
@@ -396,7 +479,19 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           </div>
         )}
 
-        {!loading && hookElement}
+        {!loading && hookElement && (
+          <div>
+            <div className="text-xs text-gray-500 mb-4">
+              hookElement: {React.isValidElement(hookElement) ? 'valid React element' : typeof hookElement}
+            </div>
+            {hookElement}
+          </div>
+        )}
+        {!loading && !error && !hookElement && (
+          <div className="p-4 bg-blue-100 text-blue-700">
+            No content - hook returned null or undefined
+          </div>
+        )}
       </div>
     </div>
   )
