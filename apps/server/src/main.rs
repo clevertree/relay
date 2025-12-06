@@ -38,6 +38,7 @@ struct AppState {
 
 const HEADER_BRANCH: &str = "X-Relay-Branch";
 const HEADER_REPO: &str = "X-Relay-Repo";
+const HEADER_VERSION: &str = "X-Relay-Version";
 const DEFAULT_BRANCH: &str = "main";
 // All repository files are now allowed for read and write operations.
 
@@ -1585,6 +1586,10 @@ async fn cors_headers(
     headers.insert(
         axum::http::header::ACCESS_CONTROL_EXPOSE_HEADERS,
         axum::http::HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        axum::http::header::HeaderName::from_static(HEADER_VERSION),
+        axum::http::HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
     );
     res
 }
