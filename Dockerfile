@@ -43,9 +43,6 @@ COPY --from=builder /work/target/release/relay-server /usr/local/bin/relay-serve
 # Copy client-web build
 COPY --from=client-builder /work/apps/client-web/dist /srv/relay/www
 
-# Copy local repo.git if available (for faster startup, especially in offline environments)
-COPY data/repo.git /srv/relay/data/repo.git/
-
 # Create dirs
 RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay
 
