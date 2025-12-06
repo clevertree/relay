@@ -290,11 +290,6 @@ server {
         add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
         add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
         
-        # Handle preflight OPTIONS requests
-        if ($request_method ~* ^OPTIONS$) {
-            return 204;
-        }
-        
         proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -360,11 +355,6 @@ server {
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
         add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
-        
-        # Handle preflight OPTIONS requests
-        if ($request_method ~* ^OPTIONS$) {
-            return 204;
-        }
         
         proxy_pass http://127.0.0.1:${RELAY_PORT};
         proxy_set_header Host $host;
