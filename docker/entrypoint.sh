@@ -6,11 +6,29 @@ set -e
 
 clone_default_repo() {
   repo=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
-  if [ ! -d "$repo" ] || [ ! -d "$repo/objects" ]; then
-    tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay}
-    echo "Cloning bare repo from $tmpl to $repo"
+  # If repo already exists and looks valid, keep it
+  if [ -d "$repo" ] && [ -d "$repo/objects" ]; then
+    echo "Using existing bare repo at $repo"
+    return
+  fi
+
+  # Prefer copying a provided default repo from /data/repo.git (mount host ./data -> /data)
+  if [ -d "/data/repo.git" ] && [ -d "/data/repo.git/objects" ]; then
+    echo "Copying default bare repo from /data/repo.git to $repo"
     mkdir -p "$(dirname "$repo")"
-    git clone --bare "$tmpl" "$repo"
+    cp -a /data/repo.git "$repo"
+    return
+  fi
+
+  # Otherwise, attempt to clone the template; if it fails, initialize an empty bare repo
+  tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
+  echo "Cloning bare repo from $tmpl to $repo"
+  mkdir -p "$(dirname "$repo")"
+  if git clone --bare "$tmpl" "$repo"; then
+    echo "Template cloned successfully"
+  else
+    echo "Template clone failed; initializing empty bare repo at $repo"
+    git init --bare "$repo"
   fi
 }
 
@@ -251,14 +269,21 @@ PY
   fi
 
   # --- Configure nginx to proxy to relay-server (always, even without SSL) ---
-  echo "Configuring nginx to proxy to relay-server"
+  echo "Configuring nginx to proxy to relay-server on 8080"
   RELAY_PORT=$(echo "$RELAY_BIND" | awk -F: '{print $NF}')
-  cat > /etc/nginx/sites-enabled/default <<EOF
+  # Keep 8080 debug server block in a dedicated file so it isn't overwritten by SSL configs
+  cat > /etc/nginx/sites-enabled/relay-8080.conf <<EOF
 server {
     listen 8080 default_server;
     listen [::]:8080 default_server;
 
     server_name _;
+
+    # Forward 405 responses (e.g., static handler on OPTIONS) to the relay server upstream
+    error_page 405 = @proxy;
+
+    # Ensure directory requests (like "/") serve index.html from client-web
+    index index.html;
 
     # Serve static files (client-web) from the www directory
     root /srv/relay/www;
@@ -289,7 +314,7 @@ server {
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
         add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
-        
+
         proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -297,13 +322,11 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    # Handle SPA routing - serve index.html for unknown routes
+    # Cache static assets
     location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
         expires 1h;
         add_header Cache-Control "public, immutable";
     }
-
-    error_page 404 =200 /index.html;
 }
 EOF
   # Remove any default nginx conf.d snippets to avoid duplicate default_server
@@ -355,7 +378,7 @@ server {
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
         add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
-        
+
         proxy_pass http://127.0.0.1:${RELAY_PORT};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -415,6 +438,12 @@ server {
     # Serve static files (client-web) from the www directory
     root /srv/relay/www;
 
+    # Forward 405 responses (e.g., static handler on OPTIONS) to the relay server upstream
+    error_page 405 = @proxy;
+
+    # Ensure directory requests (like "/") serve index.html from client-web
+    index index.html;
+
     # First try to serve static files from the www directory
     # If not found, proxy to the relay server
     location / {
@@ -441,7 +470,7 @@ server {
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
         add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
-        
+
         proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -449,13 +478,11 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    # Handle SPA routing - serve index.html for unknown routes
+    # Cache static assets
     location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
         expires 1h;
         add_header Cache-Control "public, immutable";
     }
-
-    error_page 404 =200 /index.html;
 }
 EOF
       nginx -s reload || true

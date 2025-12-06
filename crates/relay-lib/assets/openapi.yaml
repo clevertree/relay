@@ -6,7 +6,7 @@ info:
     The Relay API exposes CRUD operations on a Git repository with branch and repository selection via headers or cookies.
     Disallowed file types for writes: .html, .htm, .js
 servers:
-  - url: http://localhost:8088
+  - url: http://localhost:8080
     description: Local Relay server
 tags:
   - name: files
@@ -36,7 +36,7 @@ paths:
           type: string
         description: Repository-relative path (URL-encoded)
     get:
-      tags: [files]
+      tags: [ files ]
       summary: Read file contents from a branch
       operationId: getFile
       responses:
@@ -52,7 +52,7 @@ paths:
         '404':
           description: File not found
     put:
-      tags: [files]
+      tags: [ files ]
       summary: Create or update a file on a branch, committing the change
       operationId: putFile
       requestBody:
@@ -72,7 +72,7 @@ paths:
         '403':
           description: Disallowed file type
     delete:
-      tags: [files]
+      tags: [ files ]
       summary: Delete a file from a branch, committing the change
       operationId: deleteFile
       responses:
@@ -88,7 +88,7 @@ paths:
           description: Disallowed file type
   /:
     options:
-      tags: [system]
+      tags: [ system ]
       summary: "Discovery: capabilities, branches, repos, and current selections"
       operationId: optionsRoot
       responses:
@@ -104,7 +104,7 @@ paths:
                 $ref: '#/components/schemas/OptionsResponse'
   '/{any*}':
     options:
-      tags: [system]
+      tags: [ system ]
       summary: Discovery for a specific path
       operationId: optionsAny
       responses:
@@ -132,7 +132,7 @@ components:
           type: array
           items:
             type: string
-          example: [git, torrent, ipfs, http]
+          example: [ git, torrent, ipfs, http ]
         branches:
           type: array
           items:

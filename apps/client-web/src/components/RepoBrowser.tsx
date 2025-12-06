@@ -60,11 +60,44 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     if (!tab || !tab.host) return null
     try {
       const baseUrl = normalizeHostUrl(tab.host)
-      
-  const resp = await fetch(`${baseUrl}/`, { method: 'OPTIONS' })
-  if (!resp.ok) throw new Error(`OPTIONS / failed: ${resp.status} ${resp.statusText}`)
-      const options = (await resp.json()) as OptionsInfo
+      const diagnostics: Record<string, any> = { phase: 'options', url: `${baseUrl}/` }
+
+      // Attempt OPTIONS discovery first
+      const resp = await fetch(`${baseUrl}/`, { method: 'OPTIONS' })
+      diagnostics.options = {
+        status: resp.status,
+        ok: resp.ok,
+        headers: {
+          'content-type': resp.headers.get('content-type'),
+          'content-length': resp.headers.get('content-length'),
+        },
+      }
+
+      let options: OptionsInfo | null = null
+      let parsedFrom: 'OPTIONS' | null = null
+
+      try {
+        // Some reverse proxies return 200 with empty body for OPTIONS
+        const text = await resp.text()
+        diagnostics.optionsBodyLength = text?.length || 0
+        if (text && text.trim().length > 0) {
+          options = JSON.parse(text)
+          parsedFrom = 'OPTIONS'
+        }
+      } catch (parseErr) {
+        diagnostics.optionsParseError = parseErr instanceof Error ? parseErr.message : String(parseErr)
+      }
+
+      if (!options) {
+        const message = `Repository discovery failed: OPTIONS returned ${diagnostics.options?.status} with body length ${diagnostics.optionsBodyLength}. The server must implement OPTIONS / to return capabilities and client hooks.`
+        setError(message)
+        setErrorDetails(diagnostics)
+        console.error('[RepoBrowser] Discovery failed. Diagnostics:', diagnostics)
+        return null
+      }
+
       setOptionsInfo(options)
+      diagnostics.parsedFrom = parsedFrom
       const branches = options.repos?.[0]?.branches ? Object.keys(options.repos[0].branches) : undefined
       updateTab(tab.id, (t) => ({
         ...t,
@@ -72,7 +105,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         reposList: options.repos?.map((r) => r.name),
       }))
       if (!options?.client?.hooks?.get?.path || !options?.client?.hooks?.query?.path) {
-        console.error('[RepoBrowser] OPTIONS / missing client hook paths', options)
+        console.error('[RepoBrowser] Discovery missing client hook paths', { options, diagnostics })
       }
       return options
     } catch (err) {
@@ -91,8 +124,16 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     setHookElement(null)
 
     try {
-      // Render strictly via repo-provided hook path from OPTIONS
-      const hookUsed = await tryRenderWithHook('get', undefined, opts || optionsInfo)
+      // If we don't have options, abort with a clearer error and diagnostics
+      const info = opts || optionsInfo
+      if (!info || !info.client) {
+        setError('Repository discovery did not return client hooks. OPTIONS may be blocked or empty; attempted GET fallback. See details for diagnostics.')
+        setErrorDetails({ phase: 'render', reason: 'no-options', optionsInfo })
+        return
+      }
+
+      // Render strictly via repo-provided hook path from discovery
+      const hookUsed = await tryRenderWithHook('get', undefined, info)
       if (!hookUsed) {
         setError('Failed to render via repository hook')
       }
@@ -135,16 +176,21 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
     const queryPath = info?.client?.hooks?.query?.path
     const hookPath = kind === 'get' ? getPath : kind === 'query' ? queryPath : undefined
     if (!hookPath) {
-      console.debug(`[Hook ${kind}] Missing hook path in OPTIONS, attempting one-time refresh`)
+      console.debug(`[Hook ${kind}] Missing hook path in discovery, attempting one-time refresh`)
       const refreshed = await loadOptions()
       const retryInfo = refreshed ?? optionsInfo
       const retryPath = kind === 'get' ? retryInfo?.client?.hooks?.get?.path : kind === 'query' ? retryInfo?.client?.hooks?.query?.path : undefined
       if (!retryPath) {
         setError(
-          'Missing hook path in OPTIONS. Ensure .relay.yaml has client.hooks.get.path and client.hooks.query.path.'
+          'Missing hook path in repository discovery. OPTIONS may be empty or blocked by proxy. We also attempted GET / fallback. Ensure .relay.yaml exposes client.hooks.get.path and client.hooks.query.path.'
         )
-        setErrorDetails({ ...diagnostics, reason: 'missing-hook-path', options: retryInfo || {} })
-        console.error('[RepoBrowser] Hook path missing after refresh. OPTIONS payload:', retryInfo)
+        setErrorDetails({
+          ...diagnostics,
+          reason: 'missing-hook-path',
+          note: 'OPTIONS returned empty or missing body; GET fallback may have succeeded or failed. See optionsInfo for raw payload.',
+          options: retryInfo || {},
+        })
+        console.error('[RepoBrowser] Hook path missing after refresh. Discovery payload:', retryInfo)
         return false
       }
       return tryRenderWithHook(kind, extraParams, retryInfo)
@@ -161,9 +207,9 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         ok: srcResp.ok,
         contentType: srcResp.headers.get('content-type'),
       }
-      
+
       console.debug(`[Hook ${kind}] Fetch response:`, diagnostics.fetch)
-      
+
       if (!srcResp.ok) {
         console.debug(`[Hook ${kind}] Fetch failed with status ${srcResp.status}`)
         setError(
@@ -173,10 +219,10 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         console.error('[RepoBrowser] Failed to fetch hook source:', hookUrl, srcResp.status, srcResp.statusText)
         return false
       }
-      
+
       const code = await srcResp.text()
       diagnostics.codeLength = code.length
-      console.debug(`[Hook ${kind}] Received code (${code.length} chars)`) 
+      console.debug(`[Hook ${kind}] Received code (${code.length} chars)`)
 
       // Optionally pre-process JSX/TSX if present/opted-in
       let finalCode = code
@@ -189,7 +235,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
           // @ts-ignore - @babel/standalone doesn't have type definitions
           const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
           const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
-          
+
           const presets: any[] = []
           // TypeScript first so JSX remains for React preset to handle
           const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
@@ -206,7 +252,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
             retainLines: true,
             plugins: [],
           })
-          // Inject helpers that reference window.__ctx__ 
+          // Inject helpers that reference window.__ctx__
           // Use globalThis for better compatibility with blob modules
           const preamble = `
 const __ctx_obj__ = (typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : {});
@@ -232,32 +278,32 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
       const blob = new Blob([finalCode], { type: 'text/javascript' })
       const blobUrl = URL.createObjectURL(blob)
       console.debug(`[Hook ${kind}] Created blob URL: ${blobUrl}`)
-      
+
       try {
         // Build context first so we can inject it as global for JSX transpiled code
         const ctx = buildHookContext(kind, extraParams, undefined, hookPath)
-        
+
         console.debug(`[Hook ${kind}] Context ready, React type:`, typeof ctx.React)
         if (!ctx.React) {
           throw new Error(`[Hook ${kind}] buildHookContext returned falsy React: ${ctx.React}`)
         }
         console.debug(`[Hook ${kind}] Setting window.__ctx__:`, { hasReact: !!ctx.React, keys: Object.keys(ctx) })
-        
+
         // Inject __ctx__ as a global for JSX transpilation (React.createElement calls)
         ;(window as any).__ctx__ = ctx
-        
+
         // Verify immediately after setting
         const verifyCtx = (window as any).__ctx__
         if (!verifyCtx || !verifyCtx.React) {
           throw new Error(`[Hook ${kind}] Failed to set window.__ctx__ or React not available. ctx=${typeof verifyCtx}, React=${typeof verifyCtx?.React}`)
         }
         console.debug(`[Hook ${kind}] window.__ctx__ set and verified, React available:`, verifyCtx.React.constructor?.name)
-        
+
         // @vite-ignore - Dynamic import of remote blob module (intentional pattern)
         console.debug(`[Hook ${kind}] Attempting dynamic import...`, usedJsx ? '(transformed from JSX)' : '')
         const mod: any = await import(/* @vite-ignore */ blobUrl)
         console.debug(`[Hook ${kind}] Import successful, module:`, mod)
-        
+
         if (!mod || typeof mod.default !== 'function') {
           console.debug(`[Hook ${kind}] Module missing or default is not a function:`, { has: !!mod, typeOfDefault: typeof mod?.default })
           setError('Hook module does not export a default function. Export default async function(ctx) { ... }')
@@ -265,7 +311,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
           console.error('[RepoBrowser] Hook module bad export (expected default function):', hookUrl)
           return false
         }
-        
+
         console.debug(`[Hook ${kind}] Calling hook function...`)
         const element: React.ReactNode = await mod.default(ctx)
         console.debug(`[Hook ${kind}] Hook executed successfully, element:`, element)
@@ -356,7 +402,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
       kind,
       ...extraParams,
     }
-    
+
     /**
      * Load a module from the same repo/host
      * @param modulePath - Relative path like './lib/utils.mjs' or absolute like '/hooks/lib/utils.mjs'
@@ -366,7 +412,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
       if (!tab?.host) {
         throw new Error('[loadModule] No host available')
       }
-      
+
       // Normalize path - handle both relative and absolute
       let normalizedPath = modulePath
       if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
@@ -380,17 +426,17 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
         // Assume it's relative to /hooks/
         normalizedPath = `/hooks/${modulePath}`
       }
-      
+
       const baseUrl = normalizeHostUrl(tab.host)
       const moduleUrl = `${baseUrl}${normalizedPath}`
       console.debug('[loadModule] Loading:', { modulePath, normalizedPath, moduleUrl })
-      
+
       try {
         const response = await fetch(moduleUrl)
         if (!response.ok) {
           throw new Error(`Failed to fetch module: ${response.status} ${response.statusText}`)
         }
-        
+
         const code = await response.text()
         // Transform TS/TSX/JSX if needed
         let finalCode = code
@@ -431,7 +477,7 @@ if (!React) throw new Error('React not available in loadModule preamble');
 
         const blob = new Blob([finalCode], { type: 'text/javascript' })
         const blobUrl = URL.createObjectURL(blob)
-        
+
         try {
           // @vite-ignore - Dynamic import of remote blob module (intentional pattern)
           const mod: any = await import(/* @vite-ignore */ blobUrl)
@@ -445,7 +491,7 @@ if (!React) throw new Error('React not available in loadModule preamble');
         throw err
       }
     }
-    
+
     return {
       React,
       createElement: React.createElement,
@@ -515,9 +561,9 @@ if (!React) throw new Error('React not available in loadModule preamble');
 function buildPeerUrl(host: string, path: string): string {
   // Prefer HTTPS, fallback to HTTP
   const protocol = host.includes(':') ? 'http' : 'https'
-  
+
   let url = `${protocol}://${host}${path}`
-  
+
   // If path doesn't have extension, assume markdown
   if (!path.includes('.') || path.endsWith('/')) {
     if (!path.endsWith('/')) url += '/'

@@ -5,11 +5,12 @@ use std::{
 };
 
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{Path as AxPath, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, Request, StatusCode},
+    middleware::Next,
     response::{IntoResponse, Response},
-    routing::{get, options},
+    routing::get,
     Json, Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -23,7 +24,6 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::time::Duration;
-use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 use tracing_appender::rolling;
@@ -130,8 +130,7 @@ async fn main() -> anyhow::Result<()> {
         static_paths,
     };
 
-    // Build getClient (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
-    let cors = CorsLayer::permissive();
+    // Build app (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
     let app = Router::new()
         .route("/openapi.yaml", get(get_openapi_yaml))
         .route("/swagger-ui", get(get_swagger_ui))
@@ -144,7 +143,8 @@ async fn main() -> anyhow::Result<()> {
                 .delete(delete_file)
                 .options(options_capabilities),
         )
-        .layer(cors)
+        // Add permissive CORS headers without intercepting OPTIONS
+        .layer(axum::middleware::from_fn(cors_headers))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -1568,11 +1568,38 @@ fn git_resolve_and_respond(
 // IPFS fallback removed; IPFS logic is delegated to repo scripts (hooks/get.mjs)
 
 async fn get_root(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    query: Option<Query<HashMap<String, String>>>,
+    _state: State<AppState>,
+    _headers: HeaderMap,
+    _query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
-    options_capabilities(State(state), headers, query).await
+    // GET / should not return discovery; serve no content here.
+    StatusCode::NO_CONTENT
+}
+
+/// Append permissive CORS headers to all responses without short-circuiting OPTIONS.
+async fn cors_headers(
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        axum::http::HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        axum::http::header::HeaderName::from_static("access-control-allow-methods"),
+        axum::http::HeaderValue::from_static("GET, PUT, DELETE, OPTIONS, QUERY"),
+    );
+    headers.insert(
+        axum::http::header::HeaderName::from_static("access-control-allow-headers"),
+        axum::http::HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        axum::http::HeaderValue::from_static("*"),
+    );
+    res
 }
 
 async fn put_file(

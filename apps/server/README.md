@@ -20,7 +20,8 @@ Endpoints
       auto-linked when present.
 - PUT /{path} — write file and commit to selected branch/repo (branch via header or query `?branch=...`; repo via header
   or query `?repo=...`).
-    - Commits are validated by any `.relay/pre-commit.mjs` script present in the repository. Rejected commits return 400/500
+    - Commits are validated by any `.relay/pre-commit.mjs` script present in the repository. Rejected commits return
+      400/500
       with error text.
 - DELETE /{path} — delete file and commit to selected branch/repo (branch via header or query `?branch=...`).
 - QUERY * — Custom method for YAML-driven query using the local PoloDB index built by hooks (no POST alias).
@@ -36,7 +37,7 @@ Env
 - RELAY_DB_PATH: optional path to the local PoloDB file (default `<gitdir>/relay_index.polodb`)
   // Tracker self-registration (optional)
 - RELAY_TRACKER_URL: tracker base URL (e.g., https://relaynet.online)
-- RELAY_SOCKET_URL: the public socket URL of this server (e.g., http://localhost:8088)
+- RELAY_SOCKET_URL: the public socket URL of this server (e.g., http://localhost:8080)
 - RELAY_REPOS: optional comma-separated list of repo subdirectories to report (if omitted, discovered from the current
   branch)
 - RELAY_REGISTER_BRANCH: which branch to scan for repo discovery (default: main)
@@ -49,15 +50,19 @@ Env
 
 Rules
 
-- Repository rules and validation are defined in `.relay/pre-commit.mjs` and `.relay/pre-receive.mjs` scripts within each repository.
-- `relay_index.json` is maintained by pre-commit/pre-receive scripts to track metadata changes and build queryable indexes.
-- Rules are enforced for new commits by the respective hook scripts. Repositories can customize validation by implementing these scripts.
+- Repository rules and validation are defined in `.relay/pre-commit.mjs` and `.relay/pre-receive.mjs` scripts within
+  each repository.
+- `relay_index.json` is maintained by pre-commit/pre-receive scripts to track metadata changes and build queryable
+  indexes.
+- Rules are enforced for new commits by the respective hook scripts. Repositories can customize validation by
+  implementing these scripts.
 
 Repository Scripts
 
 - `.relay/pre-commit.mjs` — executed by the server during PUT operations to validate file changes before committing.
 - `.relay/pre-receive.mjs` — executed during git push operations (if using git-based workflows) to validate commits.
-- `.relay/validation.mjs` — optional custom validation logic that can be invoked by pre-commit/pre-receive scripts in a sandboxed environment.
+- `.relay/validation.mjs` — optional custom validation logic that can be invoked by pre-commit/pre-receive scripts in a
+  sandboxed environment.
 - `.relay/lib/*.mjs` — shared utility modules for common validation and index management tasks.
 
 Testing policy
@@ -74,9 +79,9 @@ CLI & Run
    cargo run --manifest-path apps/server/Cargo.toml -- serve
 
    Options:
-     --repo <PATH>        Path to the bare Git repository (default from RELAY_REPO_PATH or ./data/repo.git)
-     --static <DIR>       Additional static directory to serve files from (can repeat)
-     --bind <HOST:PORT>   Bind address (default from RELAY_BIND or 0.0.0.0:8088)
+   --repo <PATH>        Path to the bare Git repository (default from RELAY_REPO_PATH or ./data/repo.git)
+   --static <DIR>       Additional static directory to serve files from (can repeat)
+   --bind <HOST:PORT>   Bind address (default from RELAY_BIND or 0.0.0.0:8088)
 
 3) Create an IPFS hash for a built UI directory and seed it locally
    # This runs `ipfs add -r <dir>` and prints the root CID
@@ -84,29 +89,32 @@ CLI & Run
 
 4) Try requests
     - Root listing with breadcrumbs:
-      curl -i "http://localhost:8088/?branch=main"
+      curl -i "http://localhost:8080/?branch=main"
     - Put a file (validates via .relay/pre-commit.mjs if present):
-      curl -i -X PUT "http://localhost:8088/README.md?branch=main" \
+      curl -i -X PUT "http://localhost:8080/README.md?branch=main" \
       -H "Content-Type: application/octet-stream" \
       --data-binary @-
       Hello Relay!
       [Ctrl+D]
     - Fetch it:
-      curl -i "http://localhost:8088/README.md?branch=main"
+      curl -i "http://localhost:8080/README.md?branch=main"
     - Query (POST):
-      curl -i -X POST "http://localhost:8088/query" -H "X-Relay-Branch: main" -H "Content-Type: application/json"
+      curl -i -X POST "http://localhost:8080/query" -H "X-Relay-Branch: main" -H "Content-Type: application/json"
       --data '{"filter":{"title":"Inception"}}'
     - Query (QUERY alias):
-      curl -i -X QUERY "http://localhost:8088" -H "X-Relay-Branch: main" -H "Content-Type: application/json" --data '{"
+      curl -i -X QUERY "http://localhost:8080" -H "X-Relay-Branch: main" -H "Content-Type: application/json" --data '{"
       filter":{"title":"Inception"}}'
 
 Serving order (GET requests)
 
-1. Static directories: if `--static` paths are provided, the server will first try to serve the file from these directories.
+1. Static directories: if `--static` paths are provided, the server will first try to serve the file from these
+   directories.
 2. Git repository: the server reads from the selected bare repo/branch.
 
 Notes:
-- The server never serves `.html`, `.htm`, or `.js` files from the Git repository. HTML/JS must come from static directories during development.
+
+- The server never serves `.html`, `.htm`, or `.js` files from the Git repository. HTML/JS must come from static
+  directories during development.
 
 Logs
 
@@ -139,5 +147,6 @@ Developing and deploying a UI for repositories
 
 A. Build/export all HTML/JS/asset files of your UI (e.g., into `template-ui/dist`).
 B. Test locally: run the server and add your UI folder as an additional static directory, then exercise the app.
-   - Example:
-     cargo run --manifest-path apps/server/Cargo.toml -- serve --repo ./data/repo.git --static ./template-ui/dist
+
+- Example:
+  cargo run --manifest-path apps/server/Cargo.toml -- serve --repo ./data/repo.git --static ./template-ui/dist

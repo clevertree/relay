@@ -13,19 +13,21 @@ This document outlines the end-to-end plan to:
 ## 1) Docker image publishing to GHCR
 
 - Registry: GHCR `ghcr.io`. Image name will follow the pattern `ghcr.io/<owner>/<repo>:<tag>`.
-- Source Dockerfile: `Dockerfile` at the repository root. It builds the Rust server binary and packages runtime dependencies (git, deluge, IPFS/kubo, tini). Ports exposed by the image: 8088 (HTTP), 9418 (git), plus IPFS and Deluge ports. See `docs/ipfs-plan.md` for the IPFS node design and serving/caching plan.
+- Source Dockerfile: `Dockerfile` at the repository root. It builds the Rust server binary and packages runtime
+  dependencies (git, deluge, IPFS/kubo, tini). Ports exposed by the image: 8088 (HTTP), 9418 (git), plus IPFS and Deluge
+  ports. See `docs/ipfs-plan.md` for the IPFS node design and serving/caching plan.
 - Authentication: Use `GHCR_PAT` within GitHub Actions to push to GHCR. The workflow will set appropriate permissions.
 - Tagging strategy:
-  - For branch builds on `main`: `ghcr.io/<owner>/<repo>:main` and `ghcr.io/<owner>/<repo>:sha-<shortsha>`.
-  - For tags: semantic tag `ghcr.io/<owner>/<repo>:<tag>` and `:latest` (on release tags only).
+    - For branch builds on `main`: `ghcr.io/<owner>/<repo>:main` and `ghcr.io/<owner>/<repo>:sha-<shortsha>`.
+    - For tags: semantic tag `ghcr.io/<owner>/<repo>:<tag>` and `:latest` (on release tags only).
 
 ## 2) CI/CD via GitHub Actions (GHCR publish)
 
 Create a workflow `.github/workflows/docker-publish.yml` that:
 
 - Triggers on:
-  - Push to `main` and
-  - Any Git tag.
+    - Push to `main` and
+    - Any Git tag.
 - Sets `packages: write` permission to allow pushing to GHCR.
 - Logs in to GHCR using `${{ github.actor }}` and `${{ secrets.GHCR_PAT }}`.
 - Uses `docker/metadata-action` to compute tags and labels.
@@ -67,7 +69,8 @@ Objectives:
 - Create a minimal Spot node pool using the smallest available class `gp.vs1.small-dfw`.
 - Create 1 server (desired_server_count = 1). No autoscaling initially.
 - Obtain kubeconfig via the `spot_kubeconfig` data source for future use with kubecfg.
-- Keep secrets out of VCS; read the token from repo root file `rackspace_token` by default, while allowing overrides via `terraform.tfvars`.
+- Keep secrets out of VCS; read the token from repo root file `rackspace_token` by default, while allowing overrides via
+  `terraform.tfvars`.
 
 Files to be created under `terraform/rackspace-spot/`:
 
@@ -93,24 +96,26 @@ terraform plan
 terraform apply
 ```
 
-Note: The Rackspace Spot provider will create the Kubernetes control plane and the worker(s) in the chosen region. Creation can take several minutes.
+Note: The Rackspace Spot provider will create the Kubernetes control plane and the worker(s) in the chosen region.
+Creation can take several minutes.
 
 ## 4) Validation on the remote server
 
 After the cloudspace is ready and once the application is deployed:
 
 - Validate HTTP:
-  - If you expose a Service with a LoadBalancer or Ingress, confirm you can `curl http://<external-ip>:8088/health` (adjust path if different).
-  - Alternatively, `kubectl port-forward` to a Pod/Service and test `localhost:8088`.
+    - If you expose a Service with a LoadBalancer or Ingress, confirm you can `curl http://<external-ip>:8088/health` (
+      adjust path if different).
+    - Alternatively, `kubectl port-forward` to a Pod/Service and test `localhost:8080`.
 - Validate Git socket:
-  - Ensure the Pod exposes port 9418 and the Service maps it.
-  - Test locally: `git ls-remote git://<external-ip>:9418/your/repo.git` (or via port-forward on 9418).
+    - Ensure the Pod exposes port 9418 and the Service maps it.
+    - Test locally: `git ls-remote git://<external-ip>:9418/your/repo.git` (or via port-forward on 9418).
 
 For bare-metal-style VM validation (if you run the container directly on a server):
 
 ```
 docker run --rm -p 8088:8088 -p 9418:9418 ghcr.io/<owner>/<repo>:<tag>
-curl -I http://localhost:8088/
+curl -I http://localhost:8080/
 git ls-remote git://localhost:9418/repo.git || true
 ```
 
@@ -118,9 +123,9 @@ git ls-remote git://localhost:9418/repo.git || true
 
 - We will use `kubecfg` to apply and manage Kubernetes manifests once the kubeconfig is available.
 - Action items once kubeconfig is provided:
-  1. Add kubecfg manifests/templates for the Relay server Deployment, Service, and any ConfigMaps/Secrets required.
-  2. Wire image reference to `ghcr.io/<owner>/<repo>:<tag>` via values or environment.
-  3. CI integration to deploy on successful image publish (optional, post‑MVP).
+    1. Add kubecfg manifests/templates for the Relay server Deployment, Service, and any ConfigMaps/Secrets required.
+    2. Wire image reference to `ghcr.io/<owner>/<repo>:<tag>` via values or environment.
+    3. CI integration to deploy on successful image publish (optional, post‑MVP).
 
 ---
 

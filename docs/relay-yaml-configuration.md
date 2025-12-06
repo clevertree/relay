@@ -2,7 +2,9 @@
 
 ## Overview
 
-The `.relay.yaml` file is a **required** configuration file that must exist at the root of your Git repository. It defines the capabilities and hook paths for the Relay server, enabling clients to discover and execute repository-specific functionality.
+The `.relay.yaml` file is a **required** configuration file that must exist at the root of your Git repository. It
+defines the capabilities and hook paths for the Relay server, enabling clients to discover and execute
+repository-specific functionality.
 
 ## Purpose
 
@@ -17,10 +19,11 @@ The `.relay.yaml` file serves as a manifest that:
 Clients discover repository capabilities by making an `OPTIONS` request to `/`:
 
 ```bash
-curl -X OPTIONS http://localhost:8088/
+curl -X OPTIONS http://localhost:8080/
 ```
 
 The server responds with a JSON object that includes:
+
 - Repository information (name, branches, repos)
 - **Client hooks paths** from `.relay.yaml` (critical for UI rendering)
 - Supported capabilities (GET, PUT, DELETE, etc.)
@@ -71,6 +74,7 @@ capabilities:
 **Purpose**: Renders repository content when the client requests a file or directory
 
 The hook receives a context object with:
+
 - `React` - React library for JSX
 - `params` - Query parameters and path information
 - `helpers.navigate(path)` - Function to navigate to a different path
@@ -79,6 +83,7 @@ The hook receives a context object with:
 - `buildPeerUrl(path)` - Function to construct URLs for peer requests
 
 **Example**:
+
 ```jsx
 // /hooks/get-client.jsx
 export default async function GetHook(ctx) {
@@ -100,6 +105,7 @@ export default async function GetHook(ctx) {
 ### Missing .relay.yaml
 
 If `.relay.yaml` does not exist in the repository:
+
 - Server will log a warning: `"Missing .relay.yaml in repository"`
 - OPTIONS request will still succeed, but `client.hooks` will be empty
 - Clients will display an error: **"Missing hook path in OPTIONS. Ensure .relay.yaml has client.hooks.get.path"**
@@ -107,6 +113,7 @@ If `.relay.yaml` does not exist in the repository:
 ### Missing hook paths
 
 If `client.hooks.get.path` or `client.hooks.query.path` are not defined:
+
 - Client will retry once to refresh the configuration
 - If still missing, client will display error with guidance to add paths to `.relay.yaml`
 
@@ -150,10 +157,11 @@ touch hooks/query-client.jsx
 Test the OPTIONS endpoint:
 
 ```bash
-curl -X OPTIONS http://localhost:8088/ | jq '.client.hooks'
+curl -X OPTIONS http://localhost:8080/ | jq '.client.hooks'
 ```
 
 Expected response:
+
 ```json
 {
   "hooks": {
@@ -171,7 +179,8 @@ Expected response:
 
 ### Web Client (client-web)
 
-The web client makes an OPTIONS request on initialization and extracts `client.hooks.get.path` and `client.hooks.query.path` to discover how to render content.
+The web client makes an OPTIONS request on initialization and extracts `client.hooks.get.path` and
+`client.hooks.query.path` to discover how to render content.
 
 ### React Native Client (client-react-native)
 

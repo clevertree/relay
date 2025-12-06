@@ -1,177 +1,246 @@
 {
-  "info": {
-    "name": "Relay - Server & Tracker",
-    "_postman_id": "",
-    "description": "Postman collection for Relay server APIs and Tracker endpoints.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "variable": [
-    {
-      "key": "relay_base_url",
-      "value": "http://localhost:8088",
-      "type": "string"
+    "info": {
+        "name": "Relay - Server & Tracker",
+        "_postman_id": "",
+        "description": "Postman collection for Relay server APIs and Tracker endpoints.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
-    {
-      "key": "tracker_base_url",
-      "value": "http://localhost:3000",
-      "type": "string"
-    },
-    {
-      "key": "branch",
-      "value": "main",
-      "type": "string"
-    },
-    {
-      "key": "path",
-      "value": "data/e2e/index.md",
-      "type": "string"
-    }
-  ],
-  "item": [
-    {
-      "name": "Server - System",
-      "description": "System endpoints for the Relay server",
-      "item": [
+    "variable": [
         {
-          "name": "POST /status",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": {
-              "raw": "{{relay_base_url}}/status",
-              "host": ["{{relay_base_url}}"],
-              "path": ["status"]
-            }
-          },
-          "response": []
+            "key": "relay_base_url",
+            "value": "http://localhost:8080",
+            "type": "string"
+        },
+        {
+            "key": "tracker_base_url",
+            "value": "http://localhost:3000",
+            "type": "string"
+        },
+        {
+            "key": "branch",
+            "value": "main",
+            "type": "string"
+        },
+        {
+            "key": "path",
+            "value": "data/e2e/index.md",
+            "type": "string"
         }
-      ]
-    },
-    {
-      "name": "Server - Files",
-      "description": "File CRUD and query endpoints",
-      "item": [
+    ],
+    "item": [
         {
-          "name": "GET /{path}",
-          "request": {
-            "method": "GET",
-            "header": [
-              { "key": "X-Relay-Branch", "value": "{{branch}}" }
-            ],
-            "url": {
-              "raw": "{{relay_base_url}}/{{path}}",
-              "host": ["{{relay_base_url}}"],
-              "path": ["{{path}}"]
-            }
-          },
-          "response": []
+            "name": "Server - System",
+            "description": "System endpoints for the Relay server",
+            "item": [
+                {
+                    "name": "POST /status",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{relay_base_url}}/status",
+                            "host": [
+                                "{{relay_base_url}}"
+                            ],
+                            "path": [
+                                "status"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
         },
         {
-          "name": "PUT /{path}",
-          "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "X-Relay-Branch", "value": "{{branch}}" },
-              { "key": "Content-Type", "value": "application/octet-stream" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "# E2E Test\n\nHello Relay!\n",
-              "options": { "raw": { "language": "text" } }
-            },
-            "url": {
-              "raw": "{{relay_base_url}}/{{path}}",
-              "host": ["{{relay_base_url}}"],
-              "path": ["{{path}}"]
-            }
-          },
-          "response": []
+            "name": "Server - Files",
+            "description": "File CRUD and query endpoints",
+            "item": [
+                {
+                    "name": "GET /{path}",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "X-Relay-Branch",
+                                "value": "{{branch}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{relay_base_url}}/{{path}}",
+                            "host": [
+                                "{{relay_base_url}}"
+                            ],
+                            "path": [
+                                "{{path}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PUT /{path}",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "X-Relay-Branch",
+                                "value": "{{branch}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/octet-stream"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "# E2E Test\n\nHello Relay!\n",
+                            "options": {
+                                "raw": {
+                                    "language": "text"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{relay_base_url}}/{{path}}",
+                            "host": [
+                                "{{relay_base_url}}"
+                            ],
+                            "path": [
+                                "{{path}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "DELETE /{path}",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "X-Relay-Branch",
+                                "value": "{{branch}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{relay_base_url}}/{{path}}",
+                            "host": [
+                                "{{relay_base_url}}"
+                            ],
+                            "path": [
+                                "{{path}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST /query/{path}",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "X-Relay-Branch",
+                                "value": "{{branch}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{ \"page\": 0, \"pageSize\": 25 }",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{relay_base_url}}/query/{{path}}",
+                            "host": [
+                                "{{relay_base_url}}"
+                            ],
+                            "path": [
+                                "query",
+                                "{{path}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
         },
         {
-          "name": "DELETE /{path}",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              { "key": "X-Relay-Branch", "value": "{{branch}}" }
-            ],
-            "url": {
-              "raw": "{{relay_base_url}}/{{path}}",
-              "host": ["{{relay_base_url}}"],
-              "path": ["{{path}}"]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /query/{path}",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-Relay-Branch", "value": "{{branch}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{ \"page\": 0, \"pageSize\": 25 }",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": {
-              "raw": "{{relay_base_url}}/query/{{path}}",
-              "host": ["{{relay_base_url}}"],
-              "path": ["query", "{{path}}"]
-            }
-          },
-          "response": []
+            "name": "Tracker",
+            "description": "Tracker endpoints used by the client",
+            "item": [
+                {
+                    "name": "GET /api/peers",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{tracker_base_url}}/api/peers",
+                            "host": [
+                                "{{tracker_base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "peers"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST /api/peers/upsert",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{ \"socket\": \"127.0.0.1:4001\", \"id\": \"peer-1\" }",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{tracker_base_url}}/api/peers/upsert",
+                            "host": [
+                                "{{tracker_base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "peers",
+                                "upsert"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
         }
-      ]
-    },
-    {
-      "name": "Tracker",
-      "description": "Tracker endpoints used by the client",
-      "item": [
-        {
-          "name": "GET /api/peers",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{tracker_base_url}}/api/peers",
-              "host": ["{{tracker_base_url}}"],
-              "path": ["api", "peers"]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/peers/upsert",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{ \"socket\": \"127.0.0.1:4001\", \"id\": \"peer-1\" }",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": {
-              "raw": "{{tracker_base_url}}/api/peers/upsert",
-              "host": ["{{tracker_base_url}}"],
-              "path": ["api", "peers", "upsert"]
-            }
-          },
-          "response": []
-        }
-      ]
-    }
-  ]
+    ]
 }

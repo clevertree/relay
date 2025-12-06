@@ -10,8 +10,10 @@ export default defineConfig({
     middlewareMode: false,
   },
   build: {
-    minify: false, // Disable minification for debugging
-    sourcemap: true, // Generate source maps
+    minify: false, // Keep bundles readable for debugging
+    // Disable sourcemaps by default to keep Docker/CI builds memory-light.
+    // Enable by setting VITE_SOURCEMAP=true when needed locally.
+    sourcemap: process.env.VITE_SOURCEMAP === 'true',
   },
   // Configure server to serve template folder
   resolve: {

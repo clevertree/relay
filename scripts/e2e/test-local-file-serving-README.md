@@ -1,20 +1,25 @@
 # Local File Serving E2E Test
 
-This end-to-end test validates that the relay server can properly serve files (like README.md, index.md, relay.yaml) from a cloned bare git repository. This test is designed to diagnose why deployed servers may not be serving files correctly.
+This end-to-end test validates that the relay server can properly serve files (like README.md, index.md, relay.yaml)
+from a cloned bare git repository. This test is designed to diagnose why deployed servers may not be serving files
+correctly.
 
 ## Test Coverage
 
 ### Setup Phase
+
 1. **Clean Test Environment** - Removes any previous test artifacts from `tmp/e2e-local-server-test/`
 2. **Clone Repository** - Clones `relay-template` as a bare git repository to simulate production setup
 3. **Verify Repository Contents** - Confirms key files (index.md, relay.yaml) exist in the bare repo
 
 ### Server Phase
+
 4. **Start Local Server** - Launches the relay server with `RELAY_REPO_PATH` pointing to the bare repo
 5. **Wait for Readiness** - Polls the server until it responds to OPTIONS requests
 6. **Capture Server Output** - Records all server output for debugging
 
 ### File Serving Tests
+
 7. **OPTIONS Request** - Verifies server responds to OPTIONS and exposes allowed methods
 8. **Root Path** - Tests GET / (should return repository index)
 9. **README.md** - **PRIMARY TEST** - Verifies GET /README.md returns 200 with content
@@ -26,11 +31,13 @@ This end-to-end test validates that the relay server can properly serve files (l
 ## Usage
 
 ### Run the test
+
 ```bash
 npm run test:e2e:local
 ```
 
 ### Or run directly
+
 ```bash
 node scripts/e2e/test-local-file-serving.mjs
 ```
@@ -50,7 +57,8 @@ The test uses these environment variables automatically:
 - `RUST_BACKTRACE=1` - Enables Rust panic backtraces for debugging
 
 Test parameters are hardcoded:
-- Server URL: `http://localhost:8088`
+
+- Server URL: `http://localhost:8080`
 - Server port: `8088`
 - Timeout: 30 seconds for server startup
 - Test directory: `tmp/e2e-local-server-test/`
@@ -60,20 +68,20 @@ Test parameters are hardcoded:
 ### If README.md test fails:
 
 1. **Check the repository was cloned correctly**
-   - Look in `tmp/e2e-local-server-test/relay-template.git/`
-   - Verify it has HEAD, objects/, refs/ directories (bare repo structure)
+    - Look in `tmp/e2e-local-server-test/relay-template.git/`
+    - Verify it has HEAD, objects/, refs/ directories (bare repo structure)
 
 2. **Check server startup logs**
-   - Look for `[server]` prefixed output in the test output
-   - Search for error messages or panic traces
+    - Look for `[server]` prefixed output in the test output
+    - Search for error messages or panic traces
 
 3. **Manual verification**
-   - While server is running, test manually:
-     ```bash
-     curl http://localhost:8088/README.md
-     curl http://localhost:8088/index.md
-     curl -X OPTIONS http://localhost:8088/ -v
-     ```
+    - While server is running, test manually:
+      ```bash
+      curl http://localhost:8080/README.md
+      curl http://localhost:8080/index.md
+      curl -X OPTIONS http://localhost:8080/ -v
+      ```
 
 4. **Check if git repository structure is correct**
    ```bash
@@ -170,7 +178,8 @@ Total: 9
 
 ## Key Issues This Test Helps Diagnose
 
-1. **File serving not working in production** - If this test passes locally but fails on deployed servers, the issue is likely configuration-specific
+1. **File serving not working in production** - If this test passes locally but fails on deployed servers, the issue is
+   likely configuration-specific
 2. **README.md not being served** - Indicates potential routing or git repository access issues
 3. **Git bare repository structure** - Ensures the repository is properly formatted
 4. **Server initialization** - Validates that the server can start with the expected repository path
@@ -186,6 +195,7 @@ Total: 9
 ## Notes
 
 - This test creates a completely fresh bare repository each run, ensuring clean state
-- The temporary test directory is NOT cleaned up after the test (for debugging); delete manually or it will be recreated on next run
+- The temporary test directory is NOT cleaned up after the test (for debugging); delete manually or it will be recreated
+  on next run
 - Server output is captured to help diagnose startup issues
 - All HTTP requests use fetch API with built-in timeout handling

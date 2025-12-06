@@ -15,12 +15,12 @@ struct Cli {
 enum Commands {
     /// Connect to a relay server and print status
     Connect {
-        /// Server socket, e.g. http://localhost:8088 or localhost:8088
+        /// Server socket, e.g. http://localhost:8080 or localhost:8080
         socket: String,
     },
     /// Download a file from the server
     Get {
-        /// e.g. localhost:8088
+        /// e.g. localhost:8080
         socket: String,
         /// file path inside repo (e.g. data/2024/Movie/meta.json)
         filepath: String,
@@ -33,7 +33,7 @@ enum Commands {
     },
     /// Upload a file to the server
     Put {
-        /// e.g. localhost:8088
+        /// e.g. localhost:8080
         socket: String,
         /// file path inside repo
         filepath: String,
@@ -46,7 +46,7 @@ enum Commands {
     },
     /// Execute a query against the server
     Query {
-        /// e.g. localhost:8088
+        /// e.g. localhost:8080
         socket: String,
         /// Optional path suffix after /query (rare)
         #[arg(long)]
