@@ -37,6 +37,8 @@ export interface AppState {
   setPeers: (hosts: string[]) => void
   updatePeer: (host: string, updater: (p: PeerInfo) => PeerInfo) => void
   setPeerProbing: (host: string, isProbing: boolean) => void
+  addPeer: (host: string) => void
+  removePeer: (host: string) => void
 
   // Tabs state
   tabs: TabInfo[]
@@ -62,6 +64,7 @@ function generateTabId(): string {
 // Storage keys
 const STORAGE_KEY_TABS = 'relay_tabs'
 const STORAGE_KEY_ACTIVE_TAB = 'relay_active_tab'
+const STORAGE_KEY_PEERS = 'relay_peers'
 
 // Load persisted state from localStorage
 function loadPersistedTabs() {
@@ -94,15 +97,22 @@ function loadPersistedActiveTab() {
   return 'home'
 }
 
-// Update URL path to reflect current active tab
-function updateUrlPath(tabs: TabInfo[], activeTabId: string) {
-  const activeTab = tabs.find((t) => t.id === activeTabId)
-  if (activeTab?.host) {
-    const path = `/?open=${encodeURIComponent(activeTab.host)}${activeTab.path || ''}`
-    window.history.pushState({ tabId: activeTabId }, '', path)
-  } else {
-    // Home tab
-    window.history.pushState({ tabId: 'home' }, '', '/')
+// Update localStorage to persist state
+function persistTabs(tabs: TabInfo[], activeTabId: string) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TABS, JSON.stringify(tabs))
+    localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, activeTabId)
+  } catch (e) {
+    console.error('Failed to persist state:', e)
+  }
+}
+
+function persistPeers(peers: PeerInfo[]) {
+  try {
+    const peerHosts = peers.map((p) => p.host)
+    localStorage.setItem(STORAGE_KEY_PEERS, JSON.stringify(peerHosts))
+  } catch (e) {
+    console.error('Failed to persist peers:', e)
   }
 }
 
@@ -110,8 +120,12 @@ export const useAppState = create<AppState>((set, get) => ({
   // Peers state
   peers: [],
   setPeers: (hosts) =>
-    set({
-      peers: hosts.map((h) => ({ host: h, probes: [] })),
+    set(() => {
+      const newPeers = hosts.map((h) => ({ host: h, probes: [] }))
+      persistPeers(newPeers)
+      return {
+        peers: newPeers,
+      }
     }),
   updatePeer: (host, updater) =>
     set((s) => ({
@@ -121,6 +135,34 @@ export const useAppState = create<AppState>((set, get) => ({
     set((s) => ({
       peers: s.peers.map((p) => (p.host === host ? { ...p, isProbing } : p)),
     })),
+  addPeer: (host) =>
+    set((s) => {
+      // Sanitize the host input - remove protocol prefixes
+      let cleanHost = host.trim()
+      if (cleanHost.startsWith('http://')) {
+        cleanHost = cleanHost.substring(7)
+      } else if (cleanHost.startsWith('https://')) {
+        cleanHost = cleanHost.substring(8)
+      }
+      
+      // Avoid adding duplicates
+      if (s.peers.some((p) => p.host === cleanHost)) {
+        return s
+      }
+      const newPeers = [...s.peers, { host: cleanHost, probes: [] }]
+      persistPeers(newPeers)
+      return {
+        peers: newPeers,
+      }
+    }),
+  removePeer: (host) =>
+    set((s) => {
+      const newPeers = s.peers.filter((p) => p.host !== host)
+      persistPeers(newPeers)
+      return {
+        peers: newPeers,
+      }
+    }),
 
   // Tabs state
   tabs: loadPersistedTabs(),
@@ -130,12 +172,7 @@ export const useAppState = create<AppState>((set, get) => ({
     const existingTab = get().tabs.find((t) => t.host === host && t.path === path)
     if (existingTab) {
       set({ activeTabId: existingTab.id })
-      try {
-        localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, existingTab.id)
-      } catch (e) {
-        console.error('Failed to save active tab:', e)
-      }
-      updateUrlPath(get().tabs, existingTab.id)
+      persistTabs(get().tabs, existingTab.id)
       return existingTab.id
     }
 
@@ -148,13 +185,7 @@ export const useAppState = create<AppState>((set, get) => ({
     }
     set((s) => {
       const newTabs = [...s.tabs, newTab]
-      try {
-        localStorage.setItem(STORAGE_KEY_TABS, JSON.stringify(newTabs))
-        localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, id)
-      } catch (e) {
-        console.error('Failed to save tabs:', e)
-      }
-      updateUrlPath(newTabs, id)
+      persistTabs(newTabs, id)
       return {
         tabs: newTabs,
         activeTabId: id,
@@ -168,37 +199,17 @@ export const useAppState = create<AppState>((set, get) => ({
       if (tabId === 'home') return s
       const tabs = s.tabs.filter((t) => t.id !== tabId)
       const activeTabId = s.activeTabId === tabId ? (tabs.find((t) => t.id === 'home') ?? tabs[0])?.id || 'home' : s.activeTabId
-      try {
-        localStorage.setItem(STORAGE_KEY_TABS, JSON.stringify(tabs))
-        if (activeTabId) {
-          localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, activeTabId)
-        }
-      } catch (e) {
-        console.error('Failed to save tabs:', e)
-      }
-      updateUrlPath(tabs, activeTabId || 'home')
+      persistTabs(tabs, activeTabId || 'home')
       return { tabs, activeTabId }
     }),
   setActiveTab: (tabId) => {
     set({ activeTabId: tabId })
-    try {
-      localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, tabId)
-    } catch (e) {
-      console.error('Failed to save active tab:', e)
-    }
-    updateUrlPath(get().tabs, tabId)
+    persistTabs(get().tabs, tabId)
   },
   updateTab: (tabId, updater) =>
     set((s) => {
       const newTabs = s.tabs.map((t) => (t.id === tabId ? updater(t) : t))
-      try {
-        localStorage.setItem(STORAGE_KEY_TABS, JSON.stringify(newTabs))
-      } catch (e) {
-        console.error('Failed to save tabs:', e)
-      }
-      if (s.activeTabId) {
-        updateUrlPath(newTabs, s.activeTabId)
-      }
+      persistTabs(newTabs, s.activeTabId || 'home')
       return {
         tabs: newTabs,
       }

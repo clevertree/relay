@@ -180,9 +180,6 @@ Relay includes a full modern Web3.0-capable tech stack directly in the client. U
 Below is an example of JSX/TSX code inside a Relay repo. It is clean, declarative, and expressive—and importantly, **different from HTML**:
 
 ```tsx
-/* @jsx h */
-import type { TMDBMovie } from '../../types'
-
 export function renderMovieView(
   h: typeof import('react').createElement,
   movie: TMDBMovie,
@@ -244,6 +241,25 @@ Relay fixes this by becoming the **first real Web3.0 client**:
 - Lets repos define their own logic
 
 In short, Web3.0 has lacked a coherent client—**Relay provides it.**
+
+Transparency Over Obfuscation: No Minification of Project Code
+Relay’s philosophy strongly discourages minification and code obfuscation in project-level client code. While minification is acceptable—and often desirable—for third‑party libraries, it has an unintended consequence for modern websites: almost **no visitor can read the client-side code**, because it has been compressed into an unreadable format.
+
+Relay believes this goes against the spirit of Web 3.0. A decentralized web must be:
+- **Inspectable**
+- **Understandable**
+- **Modifiable**
+- **Auditable by non-experts**
+
+If something goes wrong on a website, **every user should be able to pop the hood and inspect the engine**. Minification prevents this and hides the real logic of applications behind compressed gibberish.
+
+Relay ensures transparency by:
+- Encouraging readable, non‑minified project code
+- Providing strong performance without needing minification for core assets
+- Supporting JSX/TSX preprocessing directly, producing clean, understandable output
+- Ensuring that the decentralized network stores readable source, not “optimized blobs”
+
+This puts control and clarity back into the hands of the community, not just the developers.
 
 Final Summary
 Relay is not merely another web framework or hosting platform.  

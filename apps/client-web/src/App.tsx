@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useAppState } from './state/store'
 import { PeersView } from './components/PeersView'
 import { TabBar } from './components/TabBar'
@@ -12,24 +12,13 @@ function App() {
   const openTab = useAppState((s) => s.openTab)
   const [initialized, setInitialized] = useState(false)
 
-  // Handle URL params for opening peers
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const openParam = params.get('open')
-    if (openParam) {
-      const [host, ...pathParts] = openParam.split('/')
-      const path = '/' + pathParts.join('/')
-      openTab(host, path)
-    }
+  // Initialize state on mount (restores from localStorage)
+  if (!initialized) {
     setInitialized(true)
-  }, [openTab])
+  }
 
   const handlePeerPress = (host: string) => {
     openTab(host, '/README.md')
-  }
-
-  if (!initialized) {
-    return <div className="w-screen h-screen flex items-center justify-center">Loading...</div>
   }
 
   return (

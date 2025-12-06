@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { useAppState, type PeerInfo } from '../state/store'
 import { fullProbePeer } from '../services/probing'
 
@@ -8,12 +8,40 @@ interface PeersViewProps {
   onPeerPress?: (host: string) => void
 }
 
+/**
+ * Helper function to safely render array fields that might contain objects or strings
+ */
+function renderArrayField(items: any[]): string {
+  if (!Array.isArray(items)) {
+    return String(items)
+  }
+
+  return items
+    .map((item) => {
+      if (typeof item === 'string') {
+        return item
+      }
+      if (typeof item === 'object' && item !== null && 'name' in item) {
+        return item.name
+      }
+      if (typeof item === 'object' && item !== null && 'path' in item) {
+        return item.path
+      }
+      // Fallback: just use the string representation
+      return String(item)
+    })
+    .join(', ')
+}
+
 export function PeersView({ onPeerPress }: PeersViewProps) {
   const peers = useAppState((s) => s.peers)
   const setPeers = useAppState((s) => s.setPeers)
   const updatePeer = useAppState((s) => s.updatePeer)
   const setPeerProbing = useAppState((s) => s.setPeerProbing)
   const setLastRefreshTs = useAppState((s) => s.setLastRefreshTs)
+  const addPeer = useAppState((s) => s.addPeer)
+  const removePeer = useAppState((s) => s.removePeer)
+  const [newPeerInput, setNewPeerInput] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Probe a single peer
@@ -109,25 +137,58 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
     onPeerPress?.(host)
   }
 
+  const handleAddPeer = (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmedInput = newPeerInput.trim()
+    if (trimmedInput) {
+      addPeer(trimmedInput)
+      setNewPeerInput('')
+      // Probe the new peer immediately
+      probePeer(trimmedInput)
+    }
+  }
+
+  const handleRemovePeer = (e: React.MouseEvent, host: string) => {
+    e.stopPropagation()
+    removePeer(host)
+  }
+
   return (
     <div className="flex flex-col h-full bg-gray-50 border-r border-gray-200">
       <div className="p-4 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <img src="/relay.svg" alt="Relay" width="24" height="24" className="flex-shrink-0" />
+        <div className="flex items-center gap-3 mb-4">
+          <img src="/icon.png" alt="Relay" width="24" height="24" className="flex-shrink-0" />
           <h2 className="m-0 text-xl font-semibold">Relay</h2>
         </div>
+        
+        {/* Add peer input form */}
+        <form onSubmit={handleAddPeer} className="flex gap-2">
+          <input
+            type="text"
+            placeholder="host:port"
+            value={newPeerInput}
+            onChange={(e) => setNewPeerInput(e.target.value)}
+            className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500"
+          />
+          <button
+            type="submit"
+            className="px-3 py-2 bg-green-500 text-white rounded text-sm font-medium hover:bg-green-600 transition-colors"
+          >
+            Add
+          </button>
+        </form>
       </div>
 
       <div className="flex-1 overflow-y-auto flex flex-col gap-1 p-2">
         {peers.length === 0 ? (
           <div className="flex items-center justify-center h-full p-8 text-center text-gray-600">
-            <p className="m-0">No peers configured. Set RELAY_PEERS environment variable.</p>
+            <p className="m-0">No peers configured. Add one using the form above or set RELAY_PEERS environment variable.</p>
           </div>
         ) : (
           peers.map((peer) => (
             <div
               key={peer.host}
-              className="p-4 bg-white border border-gray-300 rounded-lg cursor-pointer transition-all hover:bg-gray-50 hover:border-blue-500 hover:shadow-lg"
+              className="p-4 bg-white border border-gray-300 rounded-lg cursor-pointer transition-all hover:bg-gray-50 hover:border-blue-500 hover:shadow-lg group"
               onClick={() => handlePeerPress(peer.host)}
             >
               <div className="flex justify-between items-center gap-4 mb-2">
@@ -137,20 +198,27 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
                 </div>
                 <div className="flex items-center gap-2">
                   {renderProbeStatus(peer)}
+                  <button
+                    onClick={(e) => handleRemovePeer(e, peer.host)}
+                    className="px-2 py-1 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600 transition-all"
+                    title="Remove peer"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
 
               {peer.branches && peer.branches.length > 0 && (
                 <div className="flex gap-2 mb-1 text-sm">
                   <span className="font-semibold text-gray-600">Branches:</span>
-                  <span className="text-gray-500">{peer.branches.join(', ')}</span>
+                  <span className="text-gray-500">{renderArrayField(peer.branches)}</span>
                 </div>
               )}
 
               {peer.repos && peer.repos.length > 0 && (
                 <div className="flex gap-2 mb-1 text-sm">
                   <span className="font-semibold text-gray-600">Repos:</span>
-                  <span className="text-gray-500">{peer.repos.join(', ')}</span>
+                  <span className="text-gray-500">{renderArrayField(peer.repos)}</span>
                 </div>
               )}
 
@@ -177,7 +245,28 @@ export function PeersView({ onPeerPress }: PeersViewProps) {
 async function getPeersFromEnvironment(): Promise<string[]> {
   console.log('[getPeersFromEnvironment] Starting peer resolution...')
   
-  // Check URL params first
+  // Check localStorage first (user-customized peer list)
+  try {
+    const stored = localStorage.getItem('relay_peers')
+    if (stored) {
+      const peers = JSON.parse(stored) as string[]
+      if (Array.isArray(peers) && peers.length > 0) {
+        // Sanitize: remove protocol prefixes from stored peers
+        const cleanPeers = peers.map(p => {
+          let clean = p.trim()
+          if (clean.startsWith('http://')) clean = clean.substring(7)
+          if (clean.startsWith('https://')) clean = clean.substring(8)
+          return clean
+        })
+        console.log('[getPeersFromEnvironment] Loaded from localStorage (overrides env):', cleanPeers)
+        return cleanPeers
+      }
+    }
+  } catch (e) {
+    console.log('[getPeersFromEnvironment] Failed to load from localStorage:', e)
+  }
+  
+  // Check URL params
   const params = new URLSearchParams(window.location.search)
   const urlPeers = params.get('peers')
   if (urlPeers) {

@@ -12,6 +12,7 @@ logs/
 tests/
 pnpm-lock.yaml
 ipfs/
+*.core
 
 # Storybook static output
 storybook-static/

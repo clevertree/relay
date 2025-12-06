@@ -33,18 +33,18 @@ type OptionsInfo = {
   [k: string]: unknown
 }
 
-// Parse a full URL (scheme://host:port) and extract host:port and protocol
-function parseHostUrl(fullUrl: string): { host: string; protocol: 'http' | 'https' } {
-  try {
-    const url = new URL(fullUrl);
-    const host = url.port ? `${url.hostname}:${url.port}` : url.hostname;
-    const protocol = url.protocol.replace(':', '') as 'http' | 'https';
-    return { host, protocol };
-  } catch {
-    // Fallback for backward compatibility: assume http if localhost/10.0.2.2, else https
-    const protocol = (fullUrl.includes(':') || fullUrl.includes('localhost') || fullUrl.includes('10.0.2.2')) ? 'http' : 'https';
-    return { host: fullUrl, protocol };
+/**
+ * Helper to normalize host URL - ensures proper protocol is added if missing
+ * Matches client-web's implementation for consistency
+ */
+function normalizeHostUrl(host: string): string {
+  if (host.startsWith('http://') || host.startsWith('https://')) {
+    return host
   }
+  if (host.includes(':')) {
+    return `http://${host}` // Has port, assume http
+  }
+  return `https://${host}` // No port, assume https
 }
 
 function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
@@ -56,7 +56,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
   const optionsRef = useRef<OptionsInfo | null>(null)
   const hookLoaderRef = useRef<HookLoader | null>(null)
 
-  const { host: parsedHost, protocol } = parseHostUrl(host)
+  const normalizedHost = normalizeHostUrl(host)
 
   // Initialize hook loader with RN module executor
   useEffect(() => {
@@ -65,19 +65,19 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
       return {}
     }
     hookLoaderRef.current = new HookLoader({
-      host: parsedHost,
-      protocol: protocol,
+      host: normalizedHost,
+      protocol: 'http', // Placeholder - HookLoader expects protocol separately
       moduleLoader: new RNModuleLoader(requireShim),
       onDiagnostics: (diag) => {
         console.debug('[HookLoader] Diagnostics:', diag)
       },
     })
-  }, [host, protocol])
+  }, [normalizedHost])
 
   const loadOptions = useCallback(async (): Promise<OptionsInfo | null> => {
     try {
-      const resp = await fetch(`${protocol}://${parsedHost}/`, { method: 'OPTIONS' })
-      if (!resp.ok) throw new Error(`OPTIONS failed: ${resp.status}`)
+      const resp = await fetch(`${normalizedHost}/`, { method: 'OPTIONS' })
+      if (!resp.ok) throw new Error(`OPTIONS / failed: ${resp.status}`)
       const json = (await resp.json()) as OptionsInfo
       optionsRef.current = json
       return json
@@ -86,11 +86,11 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
       setDetails({ phase: 'options', message: e?.message || String(e) })
       return null
     }
-  }, [parsedHost, protocol])
+  }, [normalizedHost])
 
   const createHookContext = useCallback(
     (hookPath: string): HookContext => {
-      const buildPeerUrl = (p: string) => `${protocol}://${parsedHost}${p}`
+      const buildPeerUrl = (p: string) => `${normalizedHost}${p}`
 
       const FileRendererAdapter = ({ path: filePath }: { path: string }) => {
         const [content, setContent] = useState<string>('')
@@ -145,7 +145,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
         },
       }
     },
-    [parsedHost, path, protocol]
+    [normalizedHost, path]
   )
 
   const tryRender = useCallback(async () => {
@@ -225,8 +225,8 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
   initialPath = '/',
   onNavigate,
 }) => {
-  // Parse the host URL to extract protocol and host:port
-  const { host: parsedHost, protocol } = parseHostUrl(host);
+  // Normalize the host URL to ensure proper protocol
+  const normalizedHost = normalizeHostUrl(host);
 
   // State management
   const [path, setPath] = useState(initialPath);
@@ -245,8 +245,8 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
   const cacheRef = useRef(new Map<string, CacheEntry>());
 
   const getBaseUrl = useCallback(() => {
-    return `${protocol}://${parsedHost}`;
-  }, [parsedHost, protocol]);
+    return normalizedHost;
+  }, [normalizedHost]);
 
   /**
    * Get cached results if still fresh

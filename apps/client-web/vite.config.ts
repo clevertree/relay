@@ -9,6 +9,10 @@ export default defineConfig({
     // Serve /template folder as static assets
     middlewareMode: false,
   },
+  build: {
+    minify: false, // Disable minification for debugging
+    sourcemap: true, // Generate source maps
+  },
   // Configure server to serve template folder
   resolve: {
     alias: {

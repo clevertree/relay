@@ -20,6 +20,19 @@ interface OptionsInfo {
   [key: string]: any
 }
 
+/**
+ * Helper to normalize host URL - ensures proper protocol is added if missing
+ */
+function normalizeHostUrl(host: string): string {
+  if (host.startsWith('http://') || host.startsWith('https://')) {
+    return host
+  }
+  if (host.includes(':')) {
+    return `http://${host}` // Has port, assume http
+  }
+  return `https://${host}` // No port, assume https
+}
+
 export function RepoBrowser({ tabId }: RepoBrowserProps) {
   const tab = useAppState((s) => s.tabs.find((t) => t.id === tabId))
   const updateTab = useAppState((s) => s.updateTab)
@@ -46,9 +59,10 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
   const loadOptions = async (): Promise<OptionsInfo | null> => {
     if (!tab || !tab.host) return null
     try {
-      const protocol = tab.host.includes(':') ? 'http' : 'https'
-      const resp = await fetch(`${protocol}://${tab.host}/`, { method: 'OPTIONS' })
-      if (!resp.ok) throw new Error(`OPTIONS failed: ${resp.status} ${resp.statusText}`)
+      const baseUrl = normalizeHostUrl(tab.host)
+      
+  const resp = await fetch(`${baseUrl}/`, { method: 'OPTIONS' })
+  if (!resp.ok) throw new Error(`OPTIONS / failed: ${resp.status} ${resp.statusText}`)
       const options = (await resp.json()) as OptionsInfo
       setOptionsInfo(options)
       const branches = options.repos?.[0]?.branches ? Object.keys(options.repos[0].branches) : undefined
@@ -58,7 +72,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
         reposList: options.repos?.map((r) => r.name),
       }))
       if (!options?.client?.hooks?.get?.path || !options?.client?.hooks?.query?.path) {
-        console.error('[RepoBrowser] OPTIONS missing client hook paths', options)
+        console.error('[RepoBrowser] OPTIONS / missing client hook paths', options)
       }
       return options
     } catch (err) {
@@ -114,7 +128,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
       setErrorDetails({ ...diagnostics, reason: 'no-host' })
       return false
     }
-    const protocol = tab.host.includes(':') ? 'http' : 'https'
+    const baseUrl = normalizeHostUrl(tab.host)
     // Resolve hook path strictly from OPTIONS
     const info = optsOverride ?? optionsInfo
     const getPath = info?.client?.hooks?.get?.path
@@ -135,7 +149,7 @@ export function RepoBrowser({ tabId }: RepoBrowserProps) {
       }
       return tryRenderWithHook(kind, extraParams, retryInfo)
     }
-    const hookUrl = `${protocol}://${tab.host}${hookPath}`
+    const hookUrl = `${baseUrl}${hookPath}`
     console.debug(`[Hook ${kind}] Loading: ${hookUrl}`)
 
     // Fetch hook source and dynamic import
@@ -367,8 +381,8 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
         normalizedPath = `/hooks/${modulePath}`
       }
       
-      const protocol = tab.host.includes(':') ? 'http' : 'https'
-      const moduleUrl = `${protocol}://${tab.host}${normalizedPath}`
+      const baseUrl = normalizeHostUrl(tab.host)
+      const moduleUrl = `${baseUrl}${normalizedPath}`
       console.debug('[loadModule] Loading:', { modulePath, normalizedPath, moduleUrl })
       
       try {

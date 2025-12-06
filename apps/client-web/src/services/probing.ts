@@ -21,13 +21,27 @@ export interface ProbeResult {
  */
 function extractHostPort(input: string): string {
   try {
-    // Try to parse as a full URL
-    const url = new URL(input.startsWith('http') ? input : `https://${input}`)
+    // Remove any protocol prefix if present
+    let cleanInput = input
+    if (input.startsWith('http://')) {
+      cleanInput = input.substring(7)
+    } else if (input.startsWith('https://')) {
+      cleanInput = input.substring(8)
+    }
+    
+    // Try to parse as a full URL with a protocol prefix added
+    const url = new URL(cleanInput.startsWith('http') ? cleanInput : `https://${cleanInput}`)
     // Return host:port or just host
     return url.port ? `${url.hostname}:${url.port}` : url.hostname
   } catch {
-    // If parsing fails, return as-is (might be just hostname or hostname:port)
-    return input
+    // If parsing fails, remove protocol prefix and return as-is (might be just hostname or hostname:port)
+    let cleanInput = input
+    if (input.startsWith('http://')) {
+      cleanInput = input.substring(7)
+    } else if (input.startsWith('https://')) {
+      cleanInput = input.substring(8)
+    }
+    return cleanInput
   }
 }
 

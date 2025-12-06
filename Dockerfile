@@ -58,15 +58,15 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Expose ports:
-# 80, 443 - HTTP/HTTPS (nginx proxy)
+# 80, 443 - HTTP/HTTPS (nginx proxy serving client-web)
 # 8088 - Relay server direct access
 # 9418 - Git daemon
 # 4001 - IPFS swarm (TCP)
 # 4001/udp - IPFS swarm (QUIC)
 # 5001 - IPFS API
-# 8080 - IPFS gateway
+# 8082 - IPFS gateway
 # 58846, 58946 - Deluge daemon and web UI
-EXPOSE 80 443 8088 9418 4001 4001/udp 5001 8080 58846 58946 58946/udp
+EXPOSE 80 443 8088 9418 4001 4001/udp 5001 8082 58846 58946 58946/udp
 
 # Core configuration
 ENV RELAY_REPO_PATH=/srv/relay/data/repo.git \

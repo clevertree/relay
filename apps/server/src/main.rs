@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, path::{Path as FsPath, PathBuf}, str::FromStr};
+use std::{
+    net::SocketAddr,
+    path::{Path as FsPath, PathBuf},
+    str::FromStr,
+};
 
 use axum::{
     body::Bytes,
@@ -8,22 +12,22 @@ use axum::{
     routing::{get, options},
     Json, Router,
 };
+use base64::{engine::general_purpose, Engine as _};
+use clap::{Args, Parser, Subcommand};
 use git2::{ObjectType, Oid, Repository, Signature};
 use percent_encoding::percent_decode_str as url_decode;
-use tokio::net::TcpListener;
-use base64::{engine::general_purpose, Engine as _};
 use pulldown_cmark::{html, Parser as MdParser};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tokio::time::{Duration};
+use tokio::net::TcpListener;
+use tokio::time::Duration;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tower_http::cors::{CorsLayer, Any};
 use tracing::{debug, error, info, warn};
 use tracing_appender::rolling;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use clap::{Parser, Subcommand, Args};
 
 #[derive(Clone)]
 struct AppState {
@@ -44,7 +48,12 @@ const DEFAULT_IPFS_CACHE_ROOT: &str = "/srv/relay/ipfs-cache";
 // IPFS fetch deduplication removed; IPFS resolution is delegated to repo script
 
 #[derive(Parser, Debug)]
-#[command(name = "relay-server", version, about = "Relay Server and CLI utilities", propagate_version = true)]
+#[command(
+    name = "relay-server",
+    version,
+    about = "Relay Server and CLI utilities",
+    propagate_version = true
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -97,25 +106,29 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Determine serve args from CLI/env
-    let (repo_path, static_paths, bind_cli): (PathBuf, Vec<PathBuf>, Option<String>) = match cli.command {
-        Some(Commands::Serve(sa)) => {
-            let rp = sa
-                .repo
-                .or_else(|| std::env::var("RELAY_REPO_PATH").ok().map(PathBuf::from))
-                .unwrap_or_else(|| PathBuf::from("data/repo.git"));
-            (rp, sa.static_paths, sa.bind)
-        }
-        _ => {
-            let rp = std::env::var("RELAY_REPO_PATH")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("data/repo.git"));
-            (rp, Vec::new(), None)
-        }
-    };
+    let (repo_path, static_paths, bind_cli): (PathBuf, Vec<PathBuf>, Option<String>) =
+        match cli.command {
+            Some(Commands::Serve(sa)) => {
+                let rp = sa
+                    .repo
+                    .or_else(|| std::env::var("RELAY_REPO_PATH").ok().map(PathBuf::from))
+                    .unwrap_or_else(|| PathBuf::from("data/repo.git"));
+                (rp, sa.static_paths, sa.bind)
+            }
+            _ => {
+                let rp = std::env::var("RELAY_REPO_PATH")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| PathBuf::from("data/repo.git"));
+                (rp, Vec::new(), None)
+            }
+        };
     info!(repo_path = %repo_path.display(), "Repository path resolved");
     ensure_bare_repo(&repo_path)?;
 
-    let state = AppState { repo_path, static_paths };
+    let state = AppState {
+        repo_path,
+        static_paths,
+    };
 
     // Build getClient (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
     let cors = CorsLayer::permissive();
@@ -241,8 +254,6 @@ fn parse_dotenv(s: &str) -> std::collections::HashMap<String, String> {
     map
 }
 
-
-
 fn ensure_bare_repo(path: &PathBuf) -> anyhow::Result<()> {
     if path.exists() {
         let _ = Repository::open_bare(path)?;
@@ -275,6 +286,53 @@ fn ensure_bare_repo(path: &PathBuf) -> anyhow::Result<()> {
 struct RulesDoc {
     #[serde(default, rename = "indexFile")]
     index_file: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct RelayConfig {
+    #[serde(default)]
+    client: ClientConfig,
+    #[serde(default)]
+    server: Option<serde_json::Value>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct ClientConfig {
+    #[serde(default)]
+    hooks: HooksConfig,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct HooksConfig {
+    #[serde(default)]
+    get: Option<HookPath>,
+    #[serde(default)]
+    query: Option<HookPath>,
+}
+
+#[derive(Deserialize, Debug)]
+struct HookPath {
+    path: String,
+}
+
+/// Read .relay.yaml configuration from git tree for the given branch
+fn read_relay_config(repo: &Repository, branch: &str) -> Option<RelayConfig> {
+    let branch_ref = format!("refs/heads/{}", branch);
+    let obj = repo.revparse_single(&branch_ref).ok()?;
+    let commit = obj.as_commit()?;
+    let tree = commit.tree().ok()?;
+
+    let entry = tree.get_name(".relay.yaml")?;
+    let obj = entry.to_object(repo).ok()?;
+    let blob = obj.as_blob()?;
+    let content = std::str::from_utf8(blob.content()).ok()?;
+    serde_yaml::from_str(content).ok()
 }
 
 // Removed legacy /status endpoint handler
@@ -348,23 +406,86 @@ async fn options_capabilities(
             });
         }
     }
-    let capabilities = vec!["git", "torrent", "ipfs", "http"];
+    let capabilities = serde_json::json!({
+        "supports": ["GET", "PUT", "DELETE", "OPTIONS", "QUERY"],
+    });
+
+    let relay_config = Repository::open_bare(&state.repo_path)
+        .ok()
+        .and_then(|repo| read_relay_config(&repo, &branch));
+
+    let mut client = serde_json::json!({});
+    if let Some(config) = &relay_config {
+        let mut hooks = serde_json::Map::new();
+        if let Some(get_hook) = &config.client.hooks.get {
+            hooks.insert(
+                "get".to_string(),
+                serde_json::json!({ "path": get_hook.path }),
+            );
+        }
+        if let Some(query_hook) = &config.client.hooks.query {
+            hooks.insert(
+                "query".to_string(),
+                serde_json::json!({ "path": query_hook.path }),
+            );
+        }
+        if !hooks.is_empty() {
+            client = serde_json::json!({ "hooks": serde_json::Value::Object(hooks) });
+        }
+    }
+
+    let repos_with_branches: Vec<serde_json::Value> = repos
+        .iter()
+        .map(|repo_name| {
+            let mut repo_branches = serde_json::Map::new();
+            for (branch_name, commit) in &branch_heads {
+                if let Ok(list) = list_repos(&state.repo_path, branch_name) {
+                    if list.iter().any(|r| r == repo_name) {
+                        repo_branches.insert(
+                            branch_name.clone(),
+                            serde_json::Value::String(commit.clone()),
+                        );
+                    }
+                }
+            }
+            serde_json::json!({
+                "name": repo_name,
+                "branches": repo_branches,
+            })
+        })
+        .collect();
+
     let allow = "GET, PUT, DELETE, OPTIONS, QUERY";
     let body = serde_json::json!({
         "ok": true,
         "repoInitialized": true,
+        "client": client,
         "capabilities": capabilities,
         "branches": branches,
-        "repos": repos,
+        "repos": repos_with_branches,
         "currentBranch": branch,
         "currentRepo": repo_name.clone().unwrap_or_default(),
-        "branchHeads": branch_heads.into_iter().map(|(b,c)| serde_json::json!({"branch": b, "commit": c})).collect::<Vec<_>>(),
+        "branchHeads": serde_json::Value::Object(
+            branch_heads
+                .into_iter()
+                .fold(serde_json::Map::new(), |mut map, (b, c)| {
+                    map.insert(b, serde_json::Value::String(c));
+                    map
+                }),
+        ),
         "samplePaths": {"index": "index.md"},
     });
     (
         StatusCode::OK,
         [
             ("Allow", allow.to_string()),
+            ("Access-Control-Allow-Origin", "*".to_string()),
+            (
+                "Access-Control-Allow-Methods",
+                "GET, PUT, DELETE, OPTIONS, QUERY".to_string(),
+            ),
+            ("Access-Control-Allow-Headers", "*".to_string()),
+            ("Content-Type", "application/json".to_string()),
             (HEADER_BRANCH, branch),
             (HEADER_REPO, repo_name.clone().unwrap_or_default()),
         ],
@@ -460,7 +581,10 @@ async fn post_query(
                 match serde_json::from_slice::<serde_json::Value>(&output.stdout) {
                     Ok(v) => (
                         StatusCode::OK,
-                        [("Content-Type", "application/json".to_string()), (HEADER_BRANCH, branch)],
+                        [
+                            ("Content-Type", "application/json".to_string()),
+                            (HEADER_BRANCH, branch),
+                        ],
                         Json(v),
                     )
                         .into_response(),
@@ -1233,10 +1357,7 @@ async fn run_get_script_or_404(
                 .get("contentType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("application/octet-stream");
-            let b64 = val
-                .get("bodyBase64")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let b64 = val.get("bodyBase64").and_then(|v| v.as_str()).unwrap_or("");
             match general_purpose::STANDARD.decode(b64.as_bytes()) {
                 Ok(bytes) => (
                     StatusCode::OK,
@@ -1254,18 +1375,16 @@ async fn run_get_script_or_404(
                 }
             }
         }
-        "dir" => {
-            (
-                StatusCode::OK,
-                [
-                    ("Content-Type", "application/json".to_string()),
-                    (HEADER_BRANCH, branch.to_string()),
-                    (HEADER_REPO, repo_name.to_string()),
-                ],
-                Json(val),
-            )
-                .into_response()
-        }
+        "dir" => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json".to_string()),
+                (HEADER_BRANCH, branch.to_string()),
+                (HEADER_REPO, repo_name.to_string()),
+            ],
+            Json(val),
+        )
+            .into_response(),
         _ => (StatusCode::NOT_FOUND, "Not Found").into_response(),
     }
 }
@@ -1304,12 +1423,7 @@ async fn try_static(state: &AppState, decoded: &str) -> Option<Response> {
                         .first_or_octet_stream()
                         .essence_str()
                         .to_string();
-                    let resp = (
-                        StatusCode::OK,
-                        [("Content-Type", ct)],
-                        bytes,
-                    )
-                        .into_response();
+                    let resp = (StatusCode::OK, [("Content-Type", ct)], bytes).into_response();
                     return Some(resp);
                 }
                 Err(e) => {
@@ -1458,31 +1572,7 @@ async fn get_root(
     headers: HeaderMap,
     query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
-    // Explicitly implement root directory listing to avoid extractor mismatch
-    let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
-    let repo_name = match repo_from(
-        &state.repo_path,
-        &headers,
-        &query.as_ref().map(|q| q.0.clone()),
-        &branch,
-    ) {
-        Some(r) => r,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                [
-                    ("Content-Type", "text/plain".to_string()),
-                    (HEADER_BRANCH, branch.clone()),
-                    (HEADER_REPO, "".to_string()),
-                ],
-                "Repository not found".to_string(),
-            )
-                .into_response();
-        }
-    };
-    info!(%branch, "get_root resolved branch");
-    // Defer directory listing logic to hooks/get.mjs
-    run_get_script_or_404(&state, &branch, &repo_name, "").await
+    options_capabilities(State(state), headers, query).await
 }
 
 async fn put_file(
@@ -1809,14 +1899,18 @@ fn write_file_to_repo(
                         let tmp_path = std::env::temp_dir()
                             .join(format!("relay-pre-commit-{}-{}.mjs", branch, commit_oid));
                         let content = blob.content();
-                        
+
                         // Find the node binary location first
-                        let node_bin_path = if let Ok(output) = std::process::Command::new("/usr/bin/which").arg("node").output() {
+                        let node_bin_path = if let Ok(output) =
+                            std::process::Command::new("/usr/bin/which")
+                                .arg("node")
+                                .output()
+                        {
                             String::from_utf8_lossy(&output.stdout).trim().to_string()
                         } else {
                             "node".to_string()
                         };
-                        
+
                         // Strip shebang since we'll invoke node explicitly
                         let content_to_write = if content.starts_with(b"#!") {
                             if let Some(newline_pos) = content.iter().position(|&b| b == b'\n') {
@@ -1827,23 +1921,31 @@ fn write_file_to_repo(
                         } else {
                             content
                         };
-                        
+
                         if let Ok(_) = std::fs::write(&tmp_path, content_to_write) {
                             // Execute via node with full path
                             let mut cmd = std::process::Command::new(&node_bin_path);
                             cmd.arg(&tmp_path)
                                 .env("GIT_DIR", repo.path())
-                                .env("OLD_COMMIT", parent_commit.as_ref().map(|c| c.id().to_string()).unwrap_or_else(|| String::from("0000000000000000000000000000000000000000")))
+                                .env(
+                                    "OLD_COMMIT",
+                                    parent_commit
+                                        .as_ref()
+                                        .map(|c| c.id().to_string())
+                                        .unwrap_or_else(|| {
+                                            String::from("0000000000000000000000000000000000000000")
+                                        }),
+                                )
                                 .env("NEW_COMMIT", commit_oid.to_string())
                                 .env("REFNAME", &refname)
                                 .env("BRANCH", branch)
                                 .stdout(std::process::Stdio::piped())
                                 .stderr(std::process::Stdio::piped());
-                            
+
                             match cmd.output() {
                                 Ok(output) => {
                                     let stderr = String::from_utf8_lossy(&output.stderr);
-                                    
+
                                     if !output.status.success() {
                                         error!(%stderr, "pre-commit.mjs rejected commit");
                                         // For now, log the error but don't fail the commit
