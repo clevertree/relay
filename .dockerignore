@@ -11,26 +11,46 @@ node_modules
 storybook-static
 dist
 
-# Rust build output
+# Rust build output (rebuild fresh in container)
+# BUT keep release binaries for fast Docker builds
 target
 !target/release/relay-server
+cargo-manifest
 
 # pnpm/npm lock and caches
 pnpm-lock.yaml
 package-lock.json
 yarn.lock
 .pnpm-store
+.npm
 
 # Docker and OS artifacts
 .DS_Store
-Dockerfile*
 docker-compose*.yml
 
 # Logs and temp
 logs
 *.log
 tmp
+temp
 
 # Built site and static assets
 site
 build
+storybook-static
+
+# Large media and release artifacts
+media/
+releases/
+screenshots/
+
+# Test and coverage
+coverage
+.nyc_output
+__tests__
+
+# Android/iOS build artifacts (not needed for Docker)
+apps/client-react-native/android/.gradle
+apps/client-react-native/android/build
+apps/client-react-native/ios/build
+apps/client-react-native/ios/Pods

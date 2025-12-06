@@ -4,7 +4,7 @@ FROM rust:1.83-slim as builder
 WORKDIR /work
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# Cache deps
+# Copy source code
 COPY . /work
 WORKDIR /work/apps/server
 RUN cargo build --release
@@ -37,11 +37,14 @@ ENV IPFS_VERSION=v0.28.0
 RUN curl -L https://dist.ipfs.tech/kubo/${IPFS_VERSION}/kubo_${IPFS_VERSION}_linux-${TARGETARCH}.tar.gz \
     | tar -xz && cp -v kubo/ipfs /usr/local/bin/ && rm -rf kubo
 
-# Copy server binary
+# Copy server binary from builder stage
 COPY --from=builder /work/target/release/relay-server /usr/local/bin/relay-server
 
 # Copy client-web build
 COPY --from=client-builder /work/apps/client-web/dist /srv/relay/www
+
+# Copy local repo.git if available (for faster startup, especially in offline environments)
+COPY data/repo.git /srv/relay/data/repo.git/
 
 # Create dirs
 RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay
