@@ -1587,10 +1587,12 @@ async fn cors_headers(
         axum::http::header::ACCESS_CONTROL_EXPOSE_HEADERS,
         axum::http::HeaderValue::from_static("*"),
     );
-    headers.insert(
-        axum::http::header::HeaderName::from_static(HEADER_VERSION),
-        axum::http::HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
-    );
+    // Insert version header safely
+    if let Ok(version_value) = axum::http::HeaderValue::from_str(env!("CARGO_PKG_VERSION")) {
+        if let Ok(version_name) = axum::http::header::HeaderName::from_bytes(b"x-relay-version") {
+            headers.insert(version_name, version_value);
+        }
+    }
     res
 }
 
