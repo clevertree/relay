@@ -285,6 +285,16 @@ server {
 
     # Explicitly proxy API requests (for dynamic content)
     location ~ ^/(api|branches|repos|files|search|options)/ {
+        # CORS headers to allow cross-origin requests
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
+        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
+        
+        # Handle preflight OPTIONS requests
+        if ($request_method = 'OPTIONS') {
+            return 204;
+        }
+        
         proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -338,6 +348,24 @@ server {
     ssl_certificate_key /etc/ssl/private/relay-selfsigned.key;
 
     location / {
+        proxy_pass http://127.0.0.1:${RELAY_PORT};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location ~ ^/(api|branches|repos|files|search|options)/ {
+        # CORS headers to allow cross-origin requests
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
+        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
+        
+        # Handle preflight OPTIONS requests
+        if ($request_method = 'OPTIONS') {
+            return 204;
+        }
+        
         proxy_pass http://127.0.0.1:${RELAY_PORT};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -419,6 +447,16 @@ server {
 
     # Explicitly proxy API requests (for dynamic content)
     location ~ ^/(api|branches|repos|files|search|options)/ {
+        # CORS headers to allow cross-origin requests
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
+        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
+        
+        # Handle preflight OPTIONS requests
+        if ($request_method = 'OPTIONS') {
+            return 204;
+        }
+        
         proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
