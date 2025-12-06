@@ -291,7 +291,7 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
         
         # Handle preflight OPTIONS requests
-        if ($request_method = 'OPTIONS') {
+        if ($request_method = OPTIONS) {
             return 204;
         }
         
@@ -362,7 +362,7 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
         
         # Handle preflight OPTIONS requests
-        if ($request_method = 'OPTIONS') {
+        if ($request_method = OPTIONS) {
             return 204;
         }
         
@@ -453,7 +453,7 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
         
         # Handle preflight OPTIONS requests
-        if ($request_method = 'OPTIONS') {
+        if ($request_method = OPTIONS) {
             return 204;
         }
         
