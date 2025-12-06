@@ -19,7 +19,7 @@ import { useAppUpdate } from './hooks/useAppUpdate';
 import { UpdateModal } from './components/UpdateModal';
 
 type RootStackParamList = {
-  Home: undefined;
+  Main: undefined;
   RepoTab: {tabId: string};
 };
 
@@ -30,19 +30,25 @@ const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
   const activeTabId = useAppState((s) => s.activeTabId);
   const setActiveTab = useAppState((s) => s.setActiveTab);
   const closeTab = useAppState((s) => s.closeTab);
+  const homeTabId = useAppState((s) => s.homeTabId);
 
-  if (tabs.length === 0) return null;
+  // Include home tab
+  const allTabs = [{id: homeTabId, title: 'Home', isHome: true}, ...tabs];
 
   return (
     <View style={styles.tabBar}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        {tabs.map((tab) => (
+        {allTabs.map((tab) => (
           <View key={tab.id} style={styles.tabContainer}>
             <TouchableOpacity
               style={[styles.tab, activeTabId === tab.id && styles.tabActive]}
               onPress={() => {
                 setActiveTab(tab.id);
-                navigation.navigate('RepoTab', {tabId: tab.id});
+                if (tab.id === homeTabId) {
+                  navigation.navigate('Main');
+                } else {
+                  navigation.navigate('RepoTab', {tabId: tab.id});
+                }
               }}>
               <Text
                 style={[
@@ -53,16 +59,18 @@ const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
                 {tab.title}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => {
-                closeTab(tab.id);
-                if (tabs.length === 1) {
-                  navigation.navigate('Home');
-                }
-              }}>
-              <Text style={styles.closeButtonText}>×</Text>
-            </TouchableOpacity>
+            {!tab.isHome && (
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  closeTab(tab.id);
+                  if (activeTabId === tab.id) {
+                    navigation.navigate('Main');
+                  }
+                }}>
+                <Text style={styles.closeButtonText}>×</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ))}
       </ScrollView>
@@ -70,8 +78,10 @@ const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
   );
 };
 
-const HomeScreen: React.FC<{navigation: any}> = ({navigation}) => {
+const MainScreen: React.FC<{navigation: any}> = ({navigation}) => {
   const openTab = useAppState((s) => s.openTab);
+  const activeTabId = useAppState((s) => s.activeTabId);
+  const homeTabId = useAppState((s) => s.homeTabId);
   const {width} = useWindowDimensions();
   const isTablet = width >= 768;
   const { showUpdateModal, setShowUpdateModal, checkForUpdate } = useAppUpdate();
@@ -101,7 +111,11 @@ const HomeScreen: React.FC<{navigation: any}> = ({navigation}) => {
       <TabBar navigation={navigation} />
       <View style={isTablet ? styles.splitContainer : styles.fullContainer}>
         <View style={isTablet ? styles.sidePanel : styles.fullPanel}>
-          <PeersView onPeerPress={handlePeerPress} />
+          {activeTabId === homeTabId ? (
+            <PeersView onPeerPress={handlePeerPress} />
+          ) : (
+            <RepoTab tabId={activeTabId!} />
+          )}
         </View>
       </View>
       <UpdateModal
@@ -160,7 +174,7 @@ const App: React.FC = () => {
   // Debug: log component availability to help diagnose undefined SceneView errors
   // (SceneView will throw if a screen's component is undefined)
   // eslint-disable-next-line no-console
-  console.log('HomeScreen type:', typeof HomeScreen);
+  console.log('MainScreen type:', typeof MainScreen);
   // eslint-disable-next-line no-console
   console.log('RepoTabScreen type:', typeof RepoTabScreen);
   // eslint-disable-next-line no-console
@@ -171,18 +185,18 @@ const App: React.FC = () => {
       <NavigationContainer>
         <Stack.Navigator id="RootNavigator" screenOptions={{headerShown: false}}>
           <Stack.Screen
-            name="Home">
+            name="Main">
             {(props) => {
               try {
                 // eslint-disable-next-line no-console
-                console.log('Rendering HomeScreen, PeersView type:', typeof PeersView);
-                return <HomeScreen {...props} />;
+                console.log('Rendering MainScreen, PeersView type:', typeof PeersView);
+                return <MainScreen {...props} />;
               } catch (err) {
                 // eslint-disable-next-line no-console
-                console.error('HomeScreen render failed', err);
+                console.error('MainScreen render failed', err);
                 return (
                   <SafeAreaView style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
-                    <Text>Home render error</Text>
+                    <Text>Main render error</Text>
                   </SafeAreaView>
                 );
               }

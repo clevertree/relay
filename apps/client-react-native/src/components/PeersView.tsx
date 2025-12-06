@@ -1,11 +1,11 @@
-import React, {useCallback, useEffect, useRef} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
   RefreshControl,
   StyleSheet,
-  Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -19,15 +19,40 @@ interface PeersViewProps {
   onPeerPress?: (host: string) => void;
 }
 
+/**
+ * Helper function to safely render array fields that might contain objects or strings
+ */
+function renderArrayField(items: any[]): string {
+  if (!Array.isArray(items)) {
+    return String(items);
+  }
+
+  return items
+    .map((item) => {
+      if (typeof item === 'string') {
+        return item;
+      }
+      if (typeof item === 'object' && item !== null && 'name' in item) {
+        return item.name;
+      }
+      if (typeof item === 'object' && item !== null && 'path' in item) {
+        return item.path;
+      }
+      // Fallback: just use the string representation
+      return String(item);
+    })
+    .join(', ');
+}
+
 const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
   const peers = useAppState((s) => s.peers);
   const setPeers = useAppState((s) => s.setPeers);
   const updatePeer = useAppState((s) => s.updatePeer);
   const setPeerProbing = useAppState((s) => s.setPeerProbing);
-  const autoRefreshEnabled = useAppState((s) => s.autoRefreshEnabled);
-  const setAutoRefresh = useAppState((s) => s.setAutoRefresh);
   const setLastRefreshTs = useAppState((s) => s.setLastRefreshTs);
-  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const addPeer = useAppState((s) => s.addPeer);
+  const removePeer = useAppState((s) => s.removePeer);
+  const [newPeerInput, setNewPeerInput] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Probe a single peer
@@ -41,6 +66,7 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
           probes: result.probes,
           lastUpdateTs: result.lastUpdateTs,
           branches: result.branches,
+          repos: result.repos,
           isProbing: false,
         }));
       } catch (e) {
@@ -60,14 +86,13 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
     setLastRefreshTs(Date.now());
   }, [probePeer, setLastRefreshTs]);
 
-  // Initial load
+  // Load peers from RelayCore (simulate fetching from tracker)
   const loadAndProbePeers = useCallback(async () => {
-    setIsRefreshing(true);
+    console.log('[PeersView] Loading peers from RelayCore');
     try {
-      console.log('[PeersView] Loading peers from RelayCore');
       const envPeers = await RelayCore.getMasterPeerList();
       console.log('[PeersView] Got peers:', envPeers);
-      setPeers(envPeers);
+      await setPeers(envPeers);
       // Probe all peers after setting them
       if (envPeers.length > 0) {
         console.log('[PeersView] Probing all peers');
@@ -77,14 +102,12 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
       console.log('[PeersView] Load complete');
     } catch (err) {
       console.error('[PeersView] Error loading peers:', err);
-    } finally {
-      setIsRefreshing(false);
     }
   }, [setPeers, probePeer, setLastRefreshTs]);
 
   // Setup auto-refresh interval
   useEffect(() => {
-    if (autoRefreshEnabled) {
+    if (false) { // Disabled for now
       intervalRef.current = setInterval(() => {
         probeAllPeers();
       }, AUTO_REFRESH_INTERVAL_MS);
@@ -95,125 +118,137 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
         intervalRef.current = null;
       }
     };
-  }, [autoRefreshEnabled, probeAllPeers]);
+  }, [probeAllPeers]);
 
   // Initial load
   useEffect(() => {
     loadAndProbePeers();
   }, []);
 
-  const getStatusColor = (ok: boolean): string => (ok ? '#28a745' : '#dc3545');
+  // Get status and probe info
+  const renderProbeStatus = (peer: PeerInfo) => {
+    if (!peer.probes || peer.probes.length === 0) {
+      return <Text style={styles.statusText}>Not probed</Text>;
+    }
 
-  const renderProbeStatus = (probe: PeerProbe) => {
-    const label =
-      probe.protocol === 'https'
-        ? 'HTTPS'
-        : probe.protocol === 'ipfs-api'
-          ? 'IPFS API'
-          : probe.protocol === 'ipfs-gateway'
-            ? 'Gateway'
-            : probe.protocol === 'git'
-              ? 'Git'
-              : probe.protocol === 'ipfs-swarm'
-                ? 'Swarm'
-                : probe.protocol.toUpperCase();
+    const okProbes = peer.probes.filter((p) => p.ok);
+    if (okProbes.length === 0) {
+      return <Text style={[styles.statusText, styles.statusOffline]}>Offline</Text>;
+    }
 
+    const latency = okProbes[0].latencyMs;
     return (
-      <View key={probe.protocol} style={styles.probeChip}>
-        <View
-          style={[styles.statusDot, {backgroundColor: getStatusColor(probe.ok)}]}
-        />
-        <Text style={styles.probeLabel}>{label}</Text>
-        {probe.ok && probe.latencyMs !== undefined && (
-          <Text style={styles.latencyText}>{probe.latencyMs}ms</Text>
-        )}
-      </View>
+      <Text style={[styles.statusText, styles.statusOnline]}>
+        Online {latency ? `(${latency}ms)` : ''}
+      </Text>
     );
   };
 
-  const renderItem = ({item}: {item: PeerInfo}) => {
-    const httpsProbe = item.probes.find((p) => p.protocol === 'https');
-    const anyUp = item.probes.some((p) => p.ok);
+  const handlePeerPress = (host: string) => {
+    onPeerPress?.(host);
+  };
 
-    return (
-      <TouchableOpacity
-        style={styles.peerItem}
-        onPress={() => onPeerPress?.(item.host)}
-        disabled={!onPeerPress}>
-        <View style={styles.peerHeader}>
-          <View
-            style={[
-              styles.overallStatus,
-              {backgroundColor: anyUp ? '#28a745' : '#dc3545'},
-            ]}
-          />
+  const handleAddPeer = async (e: any) => {
+    e.preventDefault();
+    const trimmedInput = newPeerInput.trim();
+    if (trimmedInput) {
+      await addPeer(trimmedInput);
+      setNewPeerInput('');
+      // Probe the new peer immediately
+      probePeer(trimmedInput);
+    }
+  };
+
+  const handleRemovePeer = async (e: any, host: string) => {
+    e.stopPropagation();
+    await removePeer(host);
+  };
+
+  const renderItem = ({item}: {item: PeerInfo}) => (
+    <TouchableOpacity
+      style={styles.peerItem}
+      onPress={() => handlePeerPress(item.host)}
+      disabled={!onPeerPress}>
+      <View style={styles.peerHeader}>
+        <View style={styles.peerInfo}>
           <Text style={styles.hostText}>{item.host}</Text>
           {item.isProbing && (
             <ActivityIndicator size="small" color="#007AFF" style={styles.probingIndicator} />
           )}
         </View>
-
-        {/* Probe status chips */}
-        <View style={styles.probesContainer}>
-          {item.probes.length > 0 ? (
-            item.probes
-              .filter((p) => p.ok || !p.error) // Show successful or actual failures
-              .map(renderProbeStatus)
-          ) : (
-            <Text style={styles.noProbsText}>
-              {item.isProbing ? 'Probing...' : 'No probes yet'}
-            </Text>
-          )}
+        <View style={styles.peerActions}>
+          {renderProbeStatus(item)}
+          <TouchableOpacity
+            style={styles.removeButton}
+            onPress={(e) => handleRemovePeer(e, item.host)}>
+            <Text style={styles.removeButtonText}>✕</Text>
+          </TouchableOpacity>
         </View>
+      </View>
 
-        {/* Last update info */}
-        {item.lastUpdateTs && (
-          <Text style={styles.lastUpdateText}>
-            Last update: {new Date(item.lastUpdateTs).toLocaleString()}
-          </Text>
-        )}
+      {item.branches && item.branches.length > 0 && (
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Branches:</Text>
+          <Text style={styles.infoText}>{renderArrayField(item.branches)}</Text>
+        </View>
+      )}
+
+      {item.repos && item.repos.length > 0 && (
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Repos:</Text>
+          <Text style={styles.infoText}>{renderArrayField(item.repos)}</Text>
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={styles.openButton}
+        onPress={(e) => {
+          e.stopPropagation();
+          handlePeerPress(item.host);
+        }}>
+        <Text style={styles.openButtonText}>Open →</Text>
       </TouchableOpacity>
-    );
-  };
+    </TouchableOpacity>
+  );
 
   return (
     <View style={styles.container}>
-      {/* Auto-refresh toggle */}
-      <View style={styles.controlsBar}>
-        <View style={styles.autoRefreshControl}>
-          <Text style={styles.controlLabel}>Auto-refresh (10s)</Text>
-          <Switch
-            value={autoRefreshEnabled}
-            onValueChange={setAutoRefresh}
-            trackColor={{false: '#ccc', true: '#81b0ff'}}
-            thumbColor={autoRefreshEnabled ? '#007AFF' : '#f4f3f4'}
-          />
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <Text style={styles.logo}>⚡</Text>
+          <Text style={styles.title}>Relay</Text>
         </View>
-        <TouchableOpacity
-          style={styles.refreshButton}
-          onPress={loadAndProbePeers}
-          disabled={isRefreshing}>
-          <Text style={styles.refreshButtonText}>
-            {isRefreshing ? 'Refreshing...' : 'Refresh Now'}
-          </Text>
-        </TouchableOpacity>
+
+        {/* Add peer input form */}
+        <View style={styles.addPeerForm}>
+          <TextInput
+            style={styles.peerInput}
+            placeholder="host:port"
+            value={newPeerInput}
+            onChangeText={setNewPeerInput}
+            onSubmitEditing={handleAddPeer}
+          />
+          <TouchableOpacity style={styles.addButton} onPress={handleAddPeer}>
+            <Text style={styles.addButtonText}>Add</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
         data={peers}
-        keyExtractor={(p) => p.host}
+        keyExtractor={(item) => item.host}
         renderItem={renderItem}
+        contentContainerStyle={styles.listContainer}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={loadAndProbePeers} />
+          <RefreshControl refreshing={false} onRefresh={loadAndProbePeers} />
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              No peers configured. Set RELAY_MASTER_PEER_LIST or add manually.
+              No peers configured. Add one using the form above or set RELAY_PEERS environment variable.
             </Text>
           </View>
         }
-        contentContainerStyle={peers.length === 0 ? styles.emptyList : undefined}
       />
     </View>
   );
@@ -222,119 +257,160 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
-  controlsBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
+  header: {
     backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#e9ecef',
+    padding: 16,
   },
-  autoRefreshControl: {
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 16,
+  },
+  logo: {
+    fontSize: 24,
+    marginRight: 8,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  addPeerForm: {
+    flexDirection: 'row',
     gap: 8,
   },
-  controlLabel: {
+  peerInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     fontSize: 14,
-    color: '#666',
   },
-  refreshButton: {
-    backgroundColor: '#007AFF',
+  addButton: {
+    backgroundColor: '#28a745',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 6,
+    justifyContent: 'center',
   },
-  refreshButtonText: {
+  addButtonText: {
     color: '#fff',
-    fontWeight: '600',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  listContainer: {
+    padding: 16,
+    gap: 12,
   },
   peerItem: {
     backgroundColor: '#fff',
-    marginHorizontal: 12,
-    marginTop: 12,
     borderRadius: 8,
-    padding: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 1},
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
   },
   peerHeader: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  overallStatus: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
+  peerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   hostText: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#333',
     flex: 1,
   },
   probingIndicator: {
     marginLeft: 8,
   },
-  probesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  probeChip: {
+  peerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0f0f0',
+    gap: 8,
+  },
+  statusText: {
+    fontSize: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    gap: 4,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  probeLabel: {
-    fontSize: 12,
-    color: '#333',
-  },
-  latencyText: {
-    fontSize: 11,
-    color: '#666',
     fontWeight: '500',
+    textAlign: 'center',
+    minWidth: 60,
   },
-  noProbsText: {
-    fontSize: 12,
-    color: '#999',
-    fontStyle: 'italic',
+  statusOffline: {
+    backgroundColor: '#f8d7da',
+    color: '#721c24',
   },
-  lastUpdateText: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 8,
+  statusOnline: {
+    backgroundColor: '#d4edda',
+    color: '#155724',
+  },
+  removeButton: {
+    padding: 4,
+  },
+  removeButtonText: {
+    fontSize: 16,
+    color: '#dc3545',
+    fontWeight: 'bold',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    alignItems: 'flex-start',
+  },
+  infoLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginRight: 8,
+    minWidth: 70,
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+  },
+  openButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  openButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   emptyContainer: {
-    padding: 20,
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    padding: 32,
   },
   emptyText: {
+    fontSize: 16,
     color: '#666',
     textAlign: 'center',
   },
-  emptyList: {
-    flex: 1,
-    justifyContent: 'center',
-  },
 });
 
-export const PeersView = PeersViewComponent;
 export default PeersViewComponent;
