@@ -322,8 +322,9 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    # Cache static assets
+    # Cache static assets; if not found in /srv/relay/www, proxy to relay-server (Git-backed)
     location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        try_files \$uri @proxy;
         expires 1h;
         add_header Cache-Control "public, immutable";
     }
@@ -478,8 +479,9 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    # Cache static assets
+    # Cache static assets; if not found in /srv/relay/www, proxy to relay-server (Git-backed)
     location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        try_files \$uri @proxy;
         expires 1h;
         add_header Cache-Control "public, immutable";
     }

@@ -39,9 +39,7 @@ struct AppState {
 const HEADER_BRANCH: &str = "X-Relay-Branch";
 const HEADER_REPO: &str = "X-Relay-Repo";
 const DEFAULT_BRANCH: &str = "main";
-// Disallowed extensions for general access; JavaScript is now allowed to be loaded (GET)
-// but remains blocked for writes via PUT/DELETE.
-const DISALLOWED: &[&str] = &[".html", ".htm"];
+// All repository files are now allowed for read and write operations.
 
 const DEFAULT_IPFS_CACHE_ROOT: &str = "/srv/relay/ipfs-cache";
 
@@ -1120,16 +1118,7 @@ mod tests {
     }
 }
 
-fn disallowed(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    DISALLOWED.iter().any(|ext| lower.ends_with(ext))
-}
-
-// For write operations we continue to disallow JavaScript in addition to HTML
-fn write_disallowed(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    lower.ends_with(".js") || DISALLOWED.iter().any(|ext| lower.ends_with(ext))
-}
+// No disallowed file types — reads and writes are permitted for all paths.
 
 fn branch_from(headers: &HeaderMap, query: &Option<HashMap<String, String>>) -> String {
     // Priority: query ?branch= -> header X-Relay-Branch -> cookie relay-branch -> default
@@ -1261,16 +1250,14 @@ async fn get_file(
     };
     info!(%branch, "resolved branch");
 
-    // For html/js we skip Git (never serve from repo); otherwise resolve via Git first
-    let is_html_js = {
-        let l = decoded.to_ascii_lowercase();
-        l.ends_with(".html") || l.ends_with(".htm") || l.ends_with(".js")
-    };
-    let git_result = if is_html_js {
-        GitResolveResult::NotFound(decoded.trim_matches('/').to_string())
-    } else {
-        git_resolve_and_respond(&state.repo_path, &headers, &branch, &repo_name, &decoded)
-    };
+    // Resolve via Git first for all file types
+    let git_result = git_resolve_and_respond(
+        &state.repo_path,
+        &headers,
+        &branch,
+        &repo_name,
+        &decoded,
+    );
     match git_result {
         GitResolveResult::Respond(resp) => return resp,
         GitResolveResult::NotFound(rel_missing) => {
@@ -1610,13 +1597,7 @@ async fn put_file(
     body: Bytes,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
-    if write_disallowed(&decoded) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Disallowed file type"})),
-        )
-            .into_response();
-    }
+    // All file types allowed for writes
     // Allow branch from query string too
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
     let repo_name = match repo_from(
@@ -1678,13 +1659,7 @@ async fn delete_file(
     query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
-    if write_disallowed(&decoded) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Disallowed file type"})),
-        )
-            .into_response();
-    }
+    // All file types allowed for deletes
     let branch = branch_from(&headers, &query.as_ref().map(|q| q.0.clone()));
     match delete_file_in_repo(&state.repo_path, &branch, &decoded) {
         Ok((commit, branch)) => {
