@@ -1,14 +1,14 @@
 /**
- * Advanced Markdown Renderer for React Native
+ * Advanced Markdown Renderer for React Native / Web
  * Converts markdown text to React Native components.
  * Supports formatting, media tags (<video>, <audio>), and custom component renderers.
+ * Uses Tailwind CSS via NativeWind for cross-platform styling.
  */
 
 import React from 'react';
 import {
   Image,
   Linking,
-  StyleSheet,
   Text,
   TouchableOpacity,
   View,
@@ -276,7 +276,7 @@ function parseInline(text: string): MarkdownNode[] {
 }
 
 /**
- * Render a single markdown node
+ * Render a single markdown node using Tailwind/NativeWind classes
  */
 const RenderNode: React.FC<{
   node: MarkdownNode;
@@ -312,48 +312,46 @@ const RenderNode: React.FC<{
 
   switch (node.type) {
     case 'text':
-      return <Text>{node.content}</Text>;
+      return <Text className="text-primary">{node.content}</Text>;
 
     case 'heading':
-      const headingStyle = [
-        styles.heading,
-        node.level === 1 && styles.h1,
-        node.level === 2 && styles.h2,
-        node.level === 3 && styles.h3,
-        node.level >= 4 && styles.h4,
-      ];
-      return <Text style={headingStyle}>{node.content}</Text>;
+      const headingClassName =
+        node.level === 1 ? 'text-4xl font-bold mt-6 mb-2' :
+        node.level === 2 ? 'text-3xl font-bold mt-5 mb-2' :
+        node.level === 3 ? 'text-2xl font-bold mt-4 mb-2' :
+        'text-xl font-bold mt-3 mb-2';
+      return <Text className={`${headingClassName} text-textPrimary`}>{node.content}</Text>;
 
     case 'paragraph':
       return (
-        <Text style={styles.paragraph}>
+        <Text className="text-base leading-6 mb-3 text-textSecondary">
           {node.children.map((child, i) => (
-            <RenderNode key={i} node={child} baseUrl={baseUrl} onLinkPress={onLinkPress} />
+            <RenderNode key={i} node={child} baseUrl={baseUrl} branch={branch} onLinkPress={onLinkPress} customRenderers={customRenderers} />
           ))}
         </Text>
       );
 
     case 'bold':
-      return <Text style={styles.bold}>{node.content}</Text>;
+      return <Text className="font-bold text-textPrimary">{node.content}</Text>;
 
     case 'italic':
-      return <Text style={styles.italic}>{node.content}</Text>;
+      return <Text className="italic text-textSecondary">{node.content}</Text>;
 
     case 'code':
-      return <Text style={styles.inlineCode}>{node.content}</Text>;
+      return <Text className="font-mono text-sm bg-bgTertiary text-error px-1 py-0.5 rounded">{node.content}</Text>;
 
     case 'codeblock':
       return (
-        <View style={styles.codeBlock}>
-          {node.language && <Text style={styles.codeLanguage}>{node.language}</Text>}
-          <Text style={styles.codeBlockText}>{node.content}</Text>
+        <View className="bg-gray-900 rounded-lg p-3 my-2 border border-gray-700">
+          {node.language && <Text className="text-gray-400 text-xs mb-2">{node.language}</Text>}
+          <Text className="font-mono text-gray-300 text-sm leading-5">{node.content}</Text>
         </View>
       );
 
     case 'link':
       return (
         <TouchableOpacity onPress={() => handleLinkPress(node.href)}>
-          <Text style={styles.link}>{node.content}</Text>
+          <Text className="text-info underline">{node.content}</Text>
         </TouchableOpacity>
       );
 
@@ -361,19 +359,19 @@ const RenderNode: React.FC<{
       return (
         <Image
           source={{uri: resolveUrl(node.src)}}
-          style={styles.image}
+          className="w-full h-52 my-2 rounded-lg"
           resizeMode="contain"
         />
       );
 
     case 'video':
       return (
-        <View style={styles.mediaContainer}>
-          <View style={styles.videoPlaceholder}>
-            <Text style={styles.videoText}>🎬</Text>
-            <Text style={styles.mediaTitle}>{node.title || 'Video'}</Text>
+        <View className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg my-2 border border-blue-200 dark:border-blue-800">
+          <View className="bg-blue-100 dark:bg-blue-900 p-4 rounded-lg items-center mb-2">
+            <Text className="text-4xl mb-1">🎬</Text>
+            <Text className="text-sm font-semibold text-textPrimary">{node.title || 'Video'}</Text>
           </View>
-          <Text style={styles.mediaUrl} numberOfLines={1}>
+          <Text className="text-xs text-textMuted font-mono truncate">
             {resolveUrl(node.url)}
           </Text>
         </View>
@@ -381,12 +379,12 @@ const RenderNode: React.FC<{
 
     case 'audio':
       return (
-        <View style={styles.mediaContainer}>
-          <View style={styles.audioPlaceholder}>
-            <Text style={styles.audioText}>🎵</Text>
-            <Text style={styles.mediaTitle}>{node.title || 'Audio'}</Text>
+        <View className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg my-2 border border-purple-200 dark:border-purple-800">
+          <View className="bg-purple-100 dark:bg-purple-900 p-4 rounded-lg items-center mb-2">
+            <Text className="text-4xl mb-1">🎵</Text>
+            <Text className="text-sm font-semibold text-textPrimary">{node.title || 'Audio'}</Text>
           </View>
-          <Text style={styles.mediaUrl} numberOfLines={1}>
+          <Text className="text-xs text-textMuted font-mono truncate">
             {resolveUrl(node.url)}
           </Text>
         </View>
@@ -403,10 +401,10 @@ const RenderNode: React.FC<{
       }
       // Fallback to generic custom tag display
       return (
-        <View style={styles.customTag}>
-          <Text style={styles.customTagName}>&lt;{node.tagName}&gt;</Text>
+        <View className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg my-2 border border-amber-200 dark:border-amber-800">
+          <Text className="text-xs font-semibold text-amber-900 dark:text-amber-200 mb-1">&lt;{node.tagName}&gt;</Text>
           {Object.entries(node.attrs).length > 0 && (
-            <Text style={styles.customTagAttrs}>
+            <Text className="text-xs text-amber-700 dark:text-amber-400 font-mono">
               {Object.entries(node.attrs)
                 .map(([k, v]) => `${k}="${v}"`)
                 .join(' ')}
@@ -417,15 +415,15 @@ const RenderNode: React.FC<{
 
     case 'list':
       return (
-        <View style={styles.list}>
+        <View className="my-2">
           {node.items.map((item, i) => (
-            <View key={i} style={styles.listItem}>
-              <Text style={styles.listBullet}>
+            <View key={i} className="flex-row mb-1">
+              <Text className="w-6 text-base text-textMuted">
                 {node.ordered ? `${i + 1}.` : '•'}
               </Text>
-              <Text style={styles.listItemText}>
+              <Text className="flex-1 text-base leading-6 text-textSecondary">
                 {item.map((child, j) => (
-                  <RenderNode key={j} node={child} baseUrl={baseUrl} onLinkPress={onLinkPress} />
+                  <RenderNode key={j} node={child} baseUrl={baseUrl} branch={branch} onLinkPress={onLinkPress} customRenderers={customRenderers} />
                 ))}
               </Text>
             </View>
@@ -435,15 +433,15 @@ const RenderNode: React.FC<{
 
     case 'blockquote':
       return (
-        <View style={styles.blockquote}>
+        <View className="border-l-4 border-gray-400 dark:border-gray-600 pl-4 my-2">
           {node.children.map((child, i) => (
-            <RenderNode key={i} node={child} baseUrl={baseUrl} onLinkPress={onLinkPress} />
+            <RenderNode key={i} node={child} baseUrl={baseUrl} branch={branch} onLinkPress={onLinkPress} customRenderers={customRenderers} />
           ))}
         </View>
       );
 
     case 'hr':
-      return <View style={styles.hr} />;
+      return <View className="h-px bg-gray-300 dark:bg-gray-600 my-4" />;
 
     default:
       return null;
@@ -460,7 +458,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
   const nodes = parseMarkdown(content);
 
   return (
-    <View style={styles.container}>
+    <View className="p-4">
       {nodes.map((node, i) => (
         <RenderNode
           key={i}
@@ -474,162 +472,5 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    padding: 16,
-  },
-  heading: {
-    fontWeight: '700',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  h1: {
-    fontSize: 28,
-  },
-  h2: {
-    fontSize: 24,
-  },
-  h3: {
-    fontSize: 20,
-  },
-  h4: {
-    fontSize: 16,
-  },
-  paragraph: {
-    fontSize: 16,
-    lineHeight: 24,
-    marginBottom: 12,
-    color: '#333',
-  },
-  bold: {
-    fontWeight: '700',
-  },
-  italic: {
-    fontStyle: 'italic',
-  },
-  inlineCode: {
-    fontFamily: 'monospace',
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 3,
-    fontSize: 14,
-  },
-  codeBlock: {
-    backgroundColor: '#1e1e1e',
-    padding: 12,
-    borderRadius: 6,
-    marginVertical: 8,
-  },
-  codeLanguage: {
-    color: '#888',
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  codeBlockText: {
-    fontFamily: 'monospace',
-    color: '#d4d4d4',
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  link: {
-    color: '#007AFF',
-    textDecorationLine: 'underline',
-  },
-  image: {
-    width: '100%',
-    height: 200,
-    marginVertical: 8,
-    borderRadius: 6,
-  },
-  mediaContainer: {
-    backgroundColor: '#f8f9fa',
-    padding: 12,
-    borderRadius: 6,
-    marginVertical: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  videoPlaceholder: {
-    backgroundColor: '#e3f2fd',
-    padding: 16,
-    borderRadius: 6,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  videoText: {
-    fontSize: 32,
-    marginBottom: 4,
-  },
-  audioPlaceholder: {
-    backgroundColor: '#f3e5f5',
-    padding: 16,
-    borderRadius: 6,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  audioText: {
-    fontSize: 32,
-    marginBottom: 4,
-  },
-  mediaTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  mediaUrl: {
-    fontSize: 12,
-    color: '#666',
-    fontFamily: 'monospace',
-  },
-  customTag: {
-    backgroundColor: '#fff3e0',
-    padding: 12,
-    borderRadius: 6,
-    marginVertical: 8,
-    borderWidth: 1,
-    borderColor: '#ffe0b2',
-  },
-  customTagName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#e65100',
-    marginBottom: 4,
-  },
-  customTagAttrs: {
-    fontSize: 11,
-    color: '#bf360c',
-    fontFamily: 'monospace',
-  },
-  list: {
-    marginVertical: 8,
-  },
-  listItem: {
-    flexDirection: 'row',
-    marginBottom: 4,
-  },
-  listBullet: {
-    width: 24,
-    fontSize: 16,
-    color: '#666',
-  },
-  listItemText: {
-    flex: 1,
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  blockquote: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#ddd',
-    paddingLeft: 16,
-    marginVertical: 8,
-  },
-  hr: {
-    height: 1,
-    backgroundColor: '#ddd',
-    marginVertical: 16,
-  },
-});
 
 export default MarkdownView;

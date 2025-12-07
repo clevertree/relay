@@ -1,5 +1,6 @@
 import Markdown from 'markdown-to-jsx'
 import { useEffect, useRef } from 'react'
+import { VideoPlayer } from './VideoPlayer'
 
 interface MarkdownRendererProps {
   content: string
@@ -29,10 +30,10 @@ function preprocessHtmlForMarkdown(content: string): string {
  */
 function SafeVideoComponent({ children, ...props }: any) {
   console.log('SafeVideoComponent props:', props)
-  
+
   const allowedAttrs = ['id', 'src', 'width', 'height', 'controls', 'autoplay', 'loop', 'muted', 'preload', 'poster']
   const safeProps: Record<string, any> = {}
-  
+
   for (const [key, value] of Object.entries(props)) {
     if (typeof value === 'function' || key.startsWith('on')) continue
     if (['dangerouslySetInnerHTML', 'innerHTML'].includes(key)) continue
@@ -40,7 +41,7 @@ function SafeVideoComponent({ children, ...props }: any) {
       safeProps[key] = value
     }
   }
-  
+
   // Handle boolean attributes
   const booleanAttrs = ['controls', 'autoplay', 'loop', 'muted']
   for (const attr of booleanAttrs) {
@@ -48,7 +49,7 @@ function SafeVideoComponent({ children, ...props }: any) {
       safeProps[attr] = true
     }
   }
-  
+
   return (
     <video {...safeProps} style={{ maxWidth: '100%' }}>
       {children}
@@ -61,7 +62,7 @@ function SafeVideoComponent({ children, ...props }: any) {
  */
 function SafeSourceComponent(props: any) {
   console.log('SafeSourceComponent props:', props)
-  
+
   const allowedAttrs = ['src', 'type']
   const safeProps: Record<string, any> = {}
 
@@ -82,7 +83,7 @@ function SafeSourceComponent(props: any) {
  */
 function SafeTrackComponent(props: any) {
   console.log('SafeTrackComponent props:', props)
-  
+
   const allowedAttrs = ['src', 'kind', 'srclang', 'label', 'default']
   const safeProps: Record<string, any> = {}
 
@@ -104,7 +105,7 @@ function SafeTrackComponent(props: any) {
 
 /**
  * Markdown Renderer
- * 
+ *
  * Renders markdown content with security-first HTML filtering.
  * Uses markdown-to-jsx for native JSX component support.
  */
@@ -119,7 +120,7 @@ export function MarkdownRenderer({ content, navigate }: MarkdownRendererProps) {
     const handleAnchorClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement
       const anchor = target.closest('a')
-      
+
       if (!anchor) return
 
       const href = anchor.getAttribute('href')
@@ -131,7 +132,7 @@ export function MarkdownRenderer({ content, navigate }: MarkdownRendererProps) {
 
       if (isInternal) {
         e.preventDefault()
-        
+
         // Resolve relative paths
         let resolvedPath = href
         if (href.startsWith('.')) {
@@ -139,7 +140,7 @@ export function MarkdownRenderer({ content, navigate }: MarkdownRendererProps) {
           const basePath = currentPath.substring(0, currentPath.lastIndexOf('/'))
           resolvedPath = new URL(href, `http://localhost${basePath}/`).pathname
         }
-        
+
         navigate(resolvedPath)
       }
     }
@@ -161,6 +162,7 @@ export function MarkdownRenderer({ content, navigate }: MarkdownRendererProps) {
     video: SafeVideoComponent,
     source: SafeSourceComponent,
     track: SafeTrackComponent,
+    VideoPlayer: VideoPlayer as any,
   }
 
   return (

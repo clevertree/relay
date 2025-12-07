@@ -151,8 +151,6 @@ setTimeout(() => {
     const parsedUrl = new URL(req.url, 'http://localhost');
     const pathname = parsedUrl.pathname;
 
-      // No special proxies - serve local files from template as-is
-
     // Handle /template/* paths by stripping /template prefix
     let resolvedPath = pathname;
     if (pathname.startsWith('/template/')) {
@@ -174,12 +172,20 @@ setTimeout(() => {
         return;
       }
     } catch (e) {
-      // File doesn't exist in template, fall through to Vite
+      // File doesn't exist in template, fall through
     }
 
-    // Route everything else to Vite
-    const targetUrl = `http://localhost:${VITE_PORT}${req.url}`;
-    forwardRequest(req, res, targetUrl);
+    // For GET requests to potential files (not API endpoints), check if Vite has it
+    // Otherwise return 404 so client can show missing.mjs
+    if (req.method === 'GET' && !pathname.startsWith('/@') && !pathname.includes('node_modules')) {
+      // Try to fetch from Vite and check response status
+      const targetUrl = `http://localhost:${VITE_PORT}${req.url}`;
+      forwardRequestWithStatusCheck(req, res, targetUrl);
+    } else {
+      // Route other requests (API calls, etc.) to Vite
+      const targetUrl = `http://localhost:${VITE_PORT}${req.url}`;
+      forwardRequest(req, res, targetUrl);
+    }
   });
 
   mainServer.listen(MAIN_PORT, () => {
@@ -201,6 +207,40 @@ setTimeout(() => {
     };
 
     const proxyReq = client.request(options, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+
+    proxyReq.on('error', (err) => {
+      console.error(`\n⚠️  Proxy error for ${targetUrl}:`, err.message);
+      res.writeHead(503);
+      res.end('Service unavailable');
+    });
+
+    req.pipe(proxyReq);
+  }
+
+  // Forward function that checks response status and returns 404 if needed
+  function forwardRequestWithStatusCheck(req, res, targetUrl) {
+    const parsedUrl = new URL(targetUrl);
+    const isHttps = parsedUrl.protocol === 'https:';
+    const client = isHttps ? require('https') : http;
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: req.method,
+      headers: req.headers,
+    };
+
+    const proxyReq = client.request(options, (proxyRes) => {
+      // If we get a 404 from Vite, return 404 to client so it can show missing.mjs
+      if (proxyRes.statusCode === 404) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not found', path: req.url }));
+        return;
+      }
+      
       res.writeHead(proxyRes.statusCode, proxyRes.headers);
       proxyRes.pipe(res);
     });
