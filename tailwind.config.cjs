@@ -1,6 +1,10 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  darkMode: 'media',
+  // Use 'class' for class-based dark mode (allows manual control)
+  // Clients set 'dark' class on root element to enable dark theme
+  // See apps/client-web/src/utils/themeManager.ts and
+  // apps/client-react-native/src/utils/themeManager.ts for implementation
+  darkMode: 'class',
   content: [
     // Template and root files
     './template/**/*.{html,md,js,jsx,tsx,ts}',
