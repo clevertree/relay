@@ -42,8 +42,64 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
     const [errorDetails, setErrorDetails] = useState<any>(null)
     const [optionsInfo, setOptionsInfo] = useState<OptionsInfo>({})
     const [hookElement, setHookElement] = useState<React.ReactNode | null>(null)
+    // Server version and git pull state
+    const [serverHeadCommit, setServerHeadCommit] = useState<string | null>(null)
+    const [isPulling, setIsPulling] = useState(false)
+    const [pullResult, setPullResult] = useState<any>(null)
+    const [showUpdateModal, setShowUpdateModal] = useState(false)
     // Client is now dumb: search and navigation UI are moved into repo layout
     // Keep minimal state only for hook/file rendering
+
+    // Fetch server version and HEAD commit
+    const fetchServerVersion = async () => {
+        if (!tab || !tab.host) return
+        try {
+            const baseUrl = normalizeHostUrl(tab.host)
+            // Try to get HEAD commit by accessing a HEAD reference if available
+            try {
+                const headResp = await fetch(`${baseUrl}/.git/refs/heads/main`)
+                if (headResp.ok) {
+                    const commitHash = (await headResp.text()).trim()
+                    setServerHeadCommit(commitHash.substring(0, 7)) // Short hash
+                }
+            } catch {
+                // Fallback: version fetch failed
+                console.debug('Could not fetch HEAD commit')
+            }
+        } catch (e) {
+            console.error('[RepoBrowser] Failed to fetch server version:', e)
+        }
+    }
+
+    // Handle git pull from server
+    const handleGitPull = async () => {
+        if (!tab || !tab.host) return
+        setIsPulling(true)
+        try {
+            const baseUrl = normalizeHostUrl(tab.host)
+            const resp = await fetch(`${baseUrl}/git-pull`, {method: 'POST'})
+            const result = await resp.json()
+            setPullResult(result)
+
+            if (result.updated) {
+                setShowUpdateModal(true)
+            }
+        } catch (e) {
+            console.error('[RepoBrowser] Git pull failed:', e)
+            setPullResult({
+                success: false,
+                message: 'Failed to pull from server',
+                error: e instanceof Error ? e.message : String(e),
+            })
+        } finally {
+            setIsPulling(false)
+        }
+    }
+
+    // Refresh page after update
+    const handleRefresh = () => {
+        window.location.reload()
+    }
 
     useEffect(() => {
         if (!tab || !tab.host) return
@@ -52,6 +108,8 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
             try {
                 const opts = await loadOptions()
                 await loadContent(opts)
+                // Fetch server version after loading content
+                await fetchServerVersion()
             } catch (e) {
                 console.error('[RepoBrowser] init failed:', e)
             }
@@ -577,6 +635,82 @@ if (!React) throw new Error('React not available in loadModule preamble');
                     </div>
                 )}
             </div>
+
+            {/* Footer with version and git pull button */}
+            <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between">
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                    {serverHeadCommit ? (
+                        <span>
+                            Version: <code className="bg-gray-200 dark:bg-gray-800 px-2 py-1 rounded text-xs">{serverHeadCommit}</code>
+                        </span>
+                    ) : (
+                        <span>Version: loading...</span>
+                    )}
+                </div>
+                <button
+                    onClick={handleGitPull}
+                    disabled={isPulling}
+                    className={`px-4 py-2 rounded text-sm font-medium transition ${
+                        isPulling
+                            ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                    }`}
+                    title={isPulling ? 'Pulling updates...' : 'Pull latest updates from origin'}
+                >
+                    {isPulling ? '⟳ Pulling...' : `⟳ Pull${serverHeadCommit ? ` (${serverHeadCommit})` : ''}`}
+                </button>
+            </div>
+
+            {/* Update modal */}
+            {showUpdateModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                        <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">
+                            Update Available
+                        </h2>
+                        {pullResult && (
+                            <div className="space-y-3 text-gray-700 dark:text-gray-300">
+                                <p>
+                                    <strong>Status:</strong> {pullResult.success ? '✓ Success' : '✗ Failed'}
+                                </p>
+                                <p>
+                                    <strong>Message:</strong> {pullResult.message}
+                                </p>
+                                {pullResult.before_commit && (
+                                    <p>
+                                        <strong>Before:</strong>{' '}
+                                        <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
+                                            {pullResult.before_commit.substring(0, 7)}
+                                        </code>
+                                    </p>
+                                )}
+                                {pullResult.after_commit && (
+                                    <p>
+                                        <strong>After:</strong>{' '}
+                                        <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
+                                            {pullResult.after_commit.substring(0, 7)}
+                                        </code>
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                        <div className="flex gap-3 mt-6">
+                            <button
+                                onClick={() => setShowUpdateModal(false)}
+                                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                            >
+                                Close
+                            </button>
+                            <button
+                                onClick={handleRefresh}
+                                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
+                            >
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

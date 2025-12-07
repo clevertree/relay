@@ -10,7 +10,7 @@ use axum::{
     http::{HeaderMap, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -133,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/openapi.yaml", get(get_openapi_yaml))
         .route("/swagger-ui", get(get_swagger_ui))
         .route("/api/config", get(get_api_config))
+        .route("/git-pull", post(post_git_pull))
         .route("/", get(get_root).options(options_capabilities))
         .route(
             "/*path",
@@ -223,6 +224,154 @@ async fn get_api_config() -> impl IntoResponse {
 
     let config = Config { peers: peer_list };
     (StatusCode::OK, Json(config))
+}
+
+/// POST /git-pull — performs git pull from origin on the bare repository
+async fn post_git_pull(State(state): State<AppState>) -> impl IntoResponse {
+    #[derive(Serialize)]
+    struct GitPullResponse {
+        success: bool,
+        message: String,
+        updated: bool,
+        before_commit: Option<String>,
+        after_commit: Option<String>,
+        error: Option<String>,
+    }
+
+    let repo_path = &state.repo_path;
+
+    match Repository::open(repo_path) {
+        Ok(repo) => {
+            // Get current HEAD commit before pulling
+            let before_commit = repo
+                .head()
+                .ok()
+                .and_then(|h| h.target())
+                .map(|oid| oid.to_string());
+
+            // Perform git fetch from origin
+            match repo.find_remote("origin") {
+                Ok(mut remote) => {
+                    match remote.fetch(&["main"], None, None) {
+                        Ok(_) => {
+                            // Fast-forward merge FETCH_HEAD to current branch
+                            let fetch_head = repo.find_reference("FETCH_HEAD");
+                            let updated = if let Ok(fetch_ref) = fetch_head {
+                                match fetch_ref.target() {
+                                    Some(fetch_oid) => {
+                                        // Get current branch reference
+                                        match repo.head() {
+                                            Ok(head_ref) => {
+                                                if let Some(head_oid) = head_ref.target() {
+                                                    // Compare commits
+                                                    if fetch_oid != head_oid {
+                                                        // Fast-forward update
+                                                        match repo.set_head_detached(fetch_oid) {
+                                                            Ok(_) => {
+                                                                // Update working directory
+                                                                match repo.checkout_head(None) {
+                                                                    Ok(_) => true,
+                                                                    Err(_) => false,
+                                                                }
+                                                            }
+                                                            Err(_) => false,
+                                                        }
+                                                    } else {
+                                                        false // No update needed
+                                                    }
+                                                } else {
+                                                    false
+                                                }
+                                            }
+                                            Err(_) => false,
+                                        }
+                                    }
+                                    None => false,
+                                }
+                            } else {
+                                false
+                            };
+
+                            // Get current HEAD commit after pulling
+                            let after_commit = repo
+                                .head()
+                                .ok()
+                                .and_then(|h| h.target())
+                                .map(|oid| oid.to_string());
+
+                            let message = if updated {
+                                format!(
+                                    "Repository updated from origin. Before: {}, After: {}",
+                                    before_commit.clone().unwrap_or_default(),
+                                    after_commit.clone().unwrap_or_default()
+                                )
+                            } else {
+                                "Repository is already up to date with origin".to_string()
+                            };
+
+                            info!("git-pull: {}", message);
+                            (
+                                StatusCode::OK,
+                                Json(GitPullResponse {
+                                    success: true,
+                                    message,
+                                    updated,
+                                    before_commit,
+                                    after_commit,
+                                    error: None,
+                                }),
+                            )
+                        }
+                        Err(e) => {
+                            let error_msg = format!("Failed to fetch from origin: {}", e);
+                            warn!("git-pull error: {}", error_msg);
+                            (
+                                StatusCode::OK,
+                                Json(GitPullResponse {
+                                    success: false,
+                                    message: error_msg.clone(),
+                                    updated: false,
+                                    before_commit,
+                                    after_commit: None,
+                                    error: Some(error_msg),
+                                }),
+                            )
+                        }
+                    }
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to find remote 'origin': {}", e);
+                    warn!("git-pull error: {}", error_msg);
+                    (
+                        StatusCode::OK,
+                        Json(GitPullResponse {
+                            success: false,
+                            message: error_msg.clone(),
+                            updated: false,
+                            before_commit,
+                            after_commit: None,
+                            error: Some(error_msg),
+                        }),
+                    )
+                }
+            }
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to open repository at {:?}: {}", repo_path, e);
+            error!("git-pull error: {}", error_msg);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(GitPullResponse {
+                    success: false,
+                    message: error_msg.clone(),
+                    updated: false,
+                    before_commit: None,
+                    after_commit: None,
+                    error: Some(error_msg),
+                }),
+            )
+        }
+    }
 }
 
 /// Parse simple KEY=VALUE lines from a .env-like string. Ignores comments and blank lines.

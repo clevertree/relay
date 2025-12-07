@@ -114,6 +114,17 @@ PY
   /usr/local/bin/relay-server serve --repo "$RELAY_REPO_PATH" --static /srv/relay/www --bind "$RELAY_BIND" &
   RELAY_PID=$!
 
+  # Start git-pull timer (triggers every hour)
+  start_git_pull_timer() {
+    while true; do
+      sleep 3600  # Wait 1 hour
+      echo "$(date): Triggering git-pull..."
+      curl -s -X POST "http://localhost:${PORT_FOR_ADVERTISE}/git-pull" 2>/dev/null | jq '.' || echo "git-pull request failed"
+    done
+  }
+  start_git_pull_timer &
+  GIT_PULL_TIMER_PID=$!
+
   # Determine socket URL (was previously advertised to tracker; tracker removed)
   if [ -n "${RELAY_SOCKET_URL:-}" ]; then
     SOCKET_URL=${RELAY_SOCKET_URL}
@@ -506,6 +517,13 @@ EOF
       echo "RELAY_CERTBOT_EMAIL not set; skipping SSL certificate provisioning"
     fi
   fi
+
+  # Clean up background processes on exit
+  cleanup() {
+    echo "Cleaning up background processes..."
+    [ -n "${GIT_PULL_TIMER_PID:-}" ] && kill $GIT_PULL_TIMER_PID 2>/dev/null || true
+  }
+  trap cleanup EXIT
 
   # Wait for relay-server to exit (foreground)
   wait ${RELAY_PID}
