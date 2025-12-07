@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { DistributedFileLoader, type LoadingStatus, type FileLoadResult } from './DistributedFileLoader'
 
 type Subtitle = {
   src: string
@@ -18,130 +19,204 @@ interface VideoPlayerProps {
 }
 
 /**
- * VideoPlayer - minimal cross-platform friendly video player wrapper.
- * - Accepts torrent:// and ipfs:// URIs; will lazy-load client libs on demand.
- * - Shows a simple status UI: locating peers → downloading → ready.
- * - Autoplays when enough data is buffered.
- *
- * NOTE: This implementation stubs torrent/ipfs fetching with a basic fallback.
- * Replace `loadTorrentLib`/`loadIpfsLib` with real dynamic imports when integrating.
+ * StatusDisplay - Shows detailed loading status with progress indicator
  */
-export function VideoPlayer({ src, subtitles, poster, autoPlay = true, controls = true, className, style }: VideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const [status, setStatus] = useState<'idle' | 'locating' | 'downloading' | 'ready' | 'error'>('idle')
-  const [error, setError] = useState<string | null>(null)
-  const [resolvedSrc, setResolvedSrc] = useState<string | null>(null)
-
-  const scheme = useMemo(() => {
-    try {
-      const u = new URL(src)
-      return u.protocol.replace(':', '')
-    } catch {
-      // allow plain http/https
-      if (src.startsWith('torrent://')) return 'torrent'
-      if (src.startsWith('ipfs://')) return 'ipfs'
-      if (src.startsWith('magnet:')) return 'magnet'
-      return 'http'
+function StatusDisplay({ status, message, progress }: { status: LoadingStatus; message: string; progress?: number }) {
+  const getStatusIcon = (s: LoadingStatus) => {
+    switch (s) {
+      case 'idle':
+        return '⏸'
+      case 'parsing':
+        return '🔍'
+      case 'loading-lib':
+        return '📥'
+      case 'connecting':
+        return '🔗'
+      case 'locating':
+        return '🌐'
+      case 'downloading':
+        return '⬇️'
+      case 'ready':
+        return '✅'
+      case 'error':
+        return '❌'
+      default:
+        return '⏳'
     }
-  }, [src])
+  }
 
-  useEffect(() => {
-    let cancelled = false
-    async function run() {
-      setError(null)
-      if (scheme === 'http' || scheme === 'https') {
-        setResolvedSrc(src)
-        setStatus('ready')
-        return
-      }
-      try {
-        setStatus('locating')
-        if (scheme === 'torrent' || scheme === 'magnet') {
-          const url = await loadTorrentMediaUrl(src)
-          if (cancelled) return
-          setResolvedSrc(url)
-          setStatus('ready')
-        } else if (scheme === 'ipfs') {
-          const url = await loadIpfsGatewayUrl(src)
-          if (cancelled) return
-          setResolvedSrc(url)
-          setStatus('ready')
-        } else {
-          setResolvedSrc(src)
-          setStatus('ready')
-        }
-      } catch (e) {
-        if (cancelled) return
-        setStatus('error')
-        setError(e instanceof Error ? e.message : String(e))
-      }
-    }
-    run()
-    return () => { cancelled = true }
-  }, [scheme, src])
-
-  useEffect(() => {
-    const v = videoRef.current
-    if (!v) return
-    if (status === 'ready' && autoPlay) {
-      const play = async () => {
-        try { await v.play() } catch {}
-      }
-      // slight delay to allow src to attach
-      const t = setTimeout(play, 50)
-      return () => clearTimeout(t)
-    }
-  }, [status, autoPlay])
+  const statusLabel = status.replace('-', ' ').toUpperCase()
 
   return (
-    <div className={"w-full max-w-4xl " + (className || '')} style={style}>
-      <div className="mb-2 text-sm text-gray-300">
-        {status === 'idle' && 'Waiting...'}
-        {status === 'locating' && 'Locating peers...'}
-        {status === 'downloading' && 'Downloading data...'}
-        {status === 'ready' && 'Ready'}
-        {status === 'error' && (
-          <span className="text-red-400">Error: {error || 'Unable to play this source'}</span>
+    <div className="mb-3 space-y-2">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-lg">{getStatusIcon(status)}</span>
+        <span className="font-semibold">{statusLabel}</span>
+        {progress !== undefined && progress < 100 && (
+          <span className="text-xs text-gray-400">({progress}%)</span>
         )}
       </div>
-      <video ref={videoRef} src={resolvedSrc || undefined} poster={poster} controls={controls} style={{ width: '100%', maxHeight: 480 }}>
-        {(subtitles || []).map((t, i) => (
-          // eslint-disable-next-line react/jsx-key
-          <track key={i} src={t.src} label={t.label} srcLang={t.lang} kind="subtitles" default={t.default} />
-        ))}
-      </video>
+      <div className="text-xs text-gray-400">{message}</div>
+      {progress !== undefined && progress < 100 && (
+        <div className="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
+          <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${progress}%` }} />
+        </div>
+      )}
     </div>
   )
 }
 
-async function loadTorrentMediaUrl(src: string): Promise<string> {
-  // Placeholder logic. Integrate WebTorrent/hybrid client here.
-  // For now, route through a hypothetical gateway that can stream by infohash.
-  // Example: /gateway/torrent/{infoHash}
-  const infoHash = extractInfoHash(src)
-  if (!infoHash) throw new Error('Invalid torrent URI')
-  return `/gateway/torrent/${infoHash}`
+/**
+ * ErrorDisplay - Shows detailed error information for troubleshooting
+ */
+function ErrorDisplay({ error, message }: { error: string; message: string }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="mb-3 space-y-2">
+      <div className="text-sm text-red-400 font-semibold">Error loading media</div>
+      <div className="text-xs text-red-300 bg-red-900 bg-opacity-20 p-2 rounded">{error}</div>
+      {message && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs text-red-300 hover:text-red-200 underline"
+        >
+          {expanded ? '▼ Hide details' : '▶ Show details'}
+        </button>
+      )}
+      {expanded && message && (
+        <pre className="text-xs text-red-300 bg-red-900 bg-opacity-20 p-2 rounded max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">
+          {message}
+        </pre>
+      )}
+    </div>
+  )
 }
 
-async function loadIpfsGatewayUrl(src: string): Promise<string> {
-  // Replace with actual IPFS client/gateway resolution. For now, use public gateway.
-  const cid = src.replace(/^ipfs:\/\//, '')
-  return `https://ipfs.io/ipfs/${cid}`
-}
+/**
+ * VideoPlayer - Cross-platform video player with support for torrent, IPFS, and HTTP sources.
+ *
+ * Features:
+ * - Supports torrent://, ipfs://, magnet:, and http(s):// URIs
+ * - Lazy-loads required libraries on demand
+ * - Shows detailed loading status at each step
+ * - Provides expanded error messages for troubleshooting
+ * - Auto-plays when ready (configurable)
+ *
+ * The component uses DistributedFileLoader to handle all media source loading
+ * and provides a polished UI for status feedback and error handling.
+ */
+export function VideoPlayer({
+  src,
+  subtitles,
+  poster,
+  autoPlay = true,
+  controls = true,
+  className,
+  style,
+}: VideoPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [loadingStatus, setLoadingStatus] = useState<LoadingStatus>('idle')
+  const [statusMessage, setStatusMessage] = useState<string>('')
+  const [progress, setProgress] = useState<number>(0)
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [detailedError, setDetailedError] = useState<string | null>(null)
 
-function extractInfoHash(uri: string): string | null {
-  try {
-    if (uri.startsWith('torrent://')) return uri.replace('torrent://', '').trim()
-    if (uri.startsWith('magnet:')) {
-      const u = new URL(uri)
-      const xt = u.searchParams.get('xt') || ''
-      const m = xt.match(/urn:btih:([^&]+)/i)
-      return m ? m[1] : null
-    }
-    return null
-  } catch {
-    return null
+  // Handle successful media load
+  const handleSuccess = (result: FileLoadResult) => {
+    setResolvedSrc(result.url)
+    setErrorMessage(null)
+    setDetailedError(null)
   }
+
+  // Handle loading errors with detailed messages
+  const handleError = (error: Error, detailedMessage: string) => {
+    setErrorMessage(error.message)
+    setDetailedError(detailedMessage)
+    setResolvedSrc(null)
+  }
+
+  // Update status and message from loader
+  const handleStatusChange = (status: LoadingStatus, message: string, newProgress?: number) => {
+    setLoadingStatus(status)
+    setStatusMessage(message)
+    if (newProgress !== undefined) {
+      setProgress(newProgress)
+    }
+  }
+
+  // Auto-play when ready
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    if (loadingStatus === 'ready' && autoPlay && resolvedSrc) {
+      const play = async () => {
+        try {
+          await v.play()
+        } catch (e) {
+          // Auto-play may fail due to browser policies
+          console.debug('Auto-play prevented by browser policy', e)
+        }
+      }
+      // Slight delay to allow src to attach
+      const timer = setTimeout(play, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [loadingStatus, autoPlay, resolvedSrc])
+
+  const isError = loadingStatus === 'error'
+  const isReady = loadingStatus === 'ready'
+
+  return (
+    <div className={`w-full max-w-4xl space-y-3 ${className || ''}`} style={style}>
+      {/* Use DistributedFileLoader to manage all media loading */}
+      <DistributedFileLoader
+        src={src}
+        onStatusChange={handleStatusChange}
+        onSuccess={handleSuccess}
+        onError={handleError}
+        enabled={true}
+      />
+
+      {/* Status indicator */}
+      {!isError && (
+        <StatusDisplay status={loadingStatus} message={statusMessage} progress={progress} />
+      )}
+
+      {/* Error indicator */}
+      {isError && errorMessage && (
+        <ErrorDisplay error={errorMessage} message={detailedError || ''} />
+      )}
+
+      {/* Video element - shown when ready */}
+      {isReady && resolvedSrc ? (
+        <video
+          ref={videoRef}
+          src={resolvedSrc}
+          poster={poster}
+          controls={controls}
+          style={{ width: '100%', maxHeight: 480 }}
+        >
+          {(subtitles || []).map((t, i) => (
+            <track
+              key={i}
+              src={t.src}
+              label={t.label}
+              srcLang={t.lang}
+              kind="subtitles"
+              default={t.default}
+            />
+          ))}
+        </video>
+      ) : (
+        <div className="w-full bg-gray-800 rounded aspect-video flex items-center justify-center">
+          {!isError && <div className="text-gray-400 text-sm">Loading media...</div>}
+          {isError && <div className="text-red-400 text-sm">Unable to load media</div>}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default VideoPlayer
