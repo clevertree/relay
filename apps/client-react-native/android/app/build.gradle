@@ -84,6 +84,10 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        
+        // Build config for relay peer list - read from environment or use default
+        def relayPeerList = System.getenv("RELAY_MASTER_PEER_LIST") ?: "http://10.0.2.2:3000"
+        buildConfigField "String", "DEBUG_PEER_LIST", "\"${relayPeerList}\""
     }
     signingConfigs {
         debug {

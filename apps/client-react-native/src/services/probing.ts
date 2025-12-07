@@ -74,14 +74,18 @@ async function fetchWithTimeout(
   const id = setTimeout(() => controller.abort(), timeout);
 
   try {
+    console.debug(`[Probing] Fetching ${options.method || 'GET'} ${url} (timeout: ${timeout}ms)`);
     const response = await fetch(url, {
       ...fetchOptions,
       signal: controller.signal,
     });
     clearTimeout(id);
+    console.debug(`[Probing] Response: ${response.status} ${response.statusText}`);
     return response;
   } catch (error) {
     clearTimeout(id);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.debug(`[Probing] Error fetching ${url}: ${errorMsg}`);
     throw error;
   }
 }
@@ -278,6 +282,7 @@ export async function fullProbePeer(host: string): Promise<{
   probes: PeerProbe[];
   lastUpdateTs?: number;
   branches?: string[];
+  repos?: string[];
 }> {
   const [probes, options] = await Promise.all([probePeer(host), fetchPeerOptions(host)]);
 
@@ -285,5 +290,6 @@ export async function fullProbePeer(host: string): Promise<{
     probes,
     lastUpdateTs: options.lastUpdateTs,
     branches: options.branches,
+    repos: options.repos,
   };
 }

@@ -44,7 +44,7 @@ export type AppState = {
   // Tabs state
   tabs: TabInfo[];
   activeTabId: string | null;
-  openTab: (host: string, path?: string) => string; // Returns tab ID
+  openTab: (host: string, path?: string) => Promise<string>; // Returns tab ID
   closeTab: (tabId: string) => void; // Won't close home tab
   setActiveTab: (tabId: string) => void;
   updateTab: (tabId: string, updater: (t: TabInfo) => TabInfo) => void;
