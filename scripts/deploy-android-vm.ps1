@@ -8,7 +8,7 @@ param(
     [switch]$Logs
 )
 
-$APK_FILE = "releases\android\relay-release-20251203-095202.apk"
+$APK_FILE = "apps\client-react-native\android\app\build\outputs\apk\release\app-release.apk"
 $PACKAGE_NAME = "com.relay.client"
 $ACTIVITY_NAME = ".MainActivity"
 
