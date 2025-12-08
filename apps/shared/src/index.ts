@@ -17,3 +17,5 @@ export {
   looksLikeTsOrJsx,
   HookLoader,
 } from './runtimeLoader'
+
+export { buildPeerUrl, buildRepoHeaders } from './urlBuilder'

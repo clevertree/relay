@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import MarkdownRenderer from './MarkdownRenderer';
 import { HookLoader, RNModuleLoader, transpileCode, looksLikeTsOrJsx, type HookContext } from '@relay/shared/runtime-loader';
+import { buildPeerUrl, buildRepoHeaders } from '@relay/shared';
 
 /**
  * New lightweight path: render the repository-owned UI by loading the get-hook module
@@ -90,7 +91,8 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
 
   const createHookContext = useCallback(
     (hookPath: string): HookContext => {
-      const buildPeerUrl = (p: string) => `${normalizedHost}${p}`
+      // Use the shared buildPeerUrl utility that handles proper slash joining
+      const buildUrl = (p: string) => buildPeerUrl(normalizedHost, p)
 
       const FileRendererAdapter = ({ path: filePath }: { path: string }) => {
         const [content, setContent] = useState<string>('')
@@ -104,7 +106,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
           }
           ;(async () => {
             try {
-              const url = buildPeerUrl(filePath)
+              const url = buildUrl(filePath)
               const resp = await fetch(url)
               if (!resp.ok) throw new Error(`Failed to fetch file: ${resp.status}`)
               const text = await resp.text()
@@ -140,7 +142,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
         helpers: {
           navigate: (p: string) => setPath(p),
           setBranch: (_: string) => {},
-          buildPeerUrl,
+          buildPeerUrl: buildUrl,
           loadModule,
         },
       }

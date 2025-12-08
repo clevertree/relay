@@ -2,6 +2,7 @@ import React, {useEffect, useState} from 'react'
 import {useAppState} from '../state/store'
 import {TemplateLayout} from './TemplateLayout'
 import {FileRenderer} from './FileRenderer'
+import { buildPeerUrl, buildRepoHeaders } from '@relay/shared'
 
 interface RepoBrowserProps {
     tabId: string
@@ -825,24 +826,5 @@ if (!React) throw new Error('React not available in loadModule preamble');
 
 /**
  * Build a URL to fetch content from a peer
+ * (imported from @relay/shared for consistency with React Native client)
  */
-function buildPeerUrl(host: string, path: string): string {
-    // Prefer HTTPS, fallback to HTTP
-    // const protocol = host.includes(':') ? 'http' : 'https'
-
-    return `${host}${host.endsWith('/') || path.startsWith('/') ? '' : '/'}${path}`
-
-    // If path doesn't have extension, assume markdown
-    // if (!path.includes('.') || path.endsWith('/')) {
-    //     if (!path.endsWith('/')) url += '/'
-    //     url += 'index.md'
-    // }
-
-}
-
-function buildRepoHeaders(branch?: string, repo?: string): HeadersInit {
-    const headers: Record<string, string> = {}
-    if (branch) headers['x-relay-branch'] = branch
-    if (repo) headers['x-relay-repo'] = repo
-    return headers
-}
