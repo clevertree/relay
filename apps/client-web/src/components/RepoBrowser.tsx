@@ -50,24 +50,17 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
     // Client is now dumb: search and navigation UI are moved into repo layout
     // Keep minimal state only for hook/file rendering
 
-    // Fetch server version and HEAD commit
-    const fetchServerVersion = async () => {
-        if (!tab || !tab.host) return
+    // Get server version from OPTIONS response (already includes branch commit hash)
+    const fetchServerVersion = async (opts: OptionsInfo) => {
+        if (!opts?.repos?.[0]?.branches) return
         try {
-            const baseUrl = normalizeHostUrl(tab.host)
-            // Try to get HEAD commit by accessing a HEAD reference if available
-            try {
-                const headResp = await fetch(`${baseUrl}/.git/refs/heads/main`)
-                if (headResp.ok) {
-                    const commitHash = (await headResp.text()).trim()
-                    setServerHeadCommit(commitHash.substring(0, 7)) // Short hash
-                }
-            } catch {
-                // Fallback: version fetch failed
-                console.debug('Could not fetch HEAD commit')
+            const currentBranch = tab?.currentBranch || 'main'
+            const commitHash = opts.repos[0].branches[currentBranch]
+            if (commitHash) {
+                setServerHeadCommit(commitHash.substring(0, 7)) // Short hash
             }
         } catch (e) {
-            console.error('[RepoBrowser] Failed to fetch server version:', e)
+            console.debug('[RepoBrowser] Could not extract commit hash from OPTIONS:', e)
         }
     }
 
@@ -108,8 +101,10 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
             try {
                 const opts = await loadOptions()
                 await loadContent(opts)
-                // Fetch server version after loading content
-                await fetchServerVersion()
+                // Extract server version from OPTIONS response
+                if (opts) {
+                    await fetchServerVersion(opts)
+                }
             } catch (e) {
                 console.error('[RepoBrowser] init failed:', e)
             }

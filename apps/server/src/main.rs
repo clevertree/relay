@@ -478,7 +478,7 @@ struct RulesDoc {
     index_file: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 struct RelayConfig {
     #[serde(default)]
     client: ClientConfig,
@@ -492,13 +492,13 @@ struct RelayConfig {
     description: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, Serialize)]
 struct ClientConfig {
     #[serde(default)]
     hooks: HooksConfig,
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, Serialize)]
 struct HooksConfig {
     #[serde(default)]
     get: Option<HookPath>,
@@ -506,7 +506,7 @@ struct HooksConfig {
     query: Option<HookPath>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 struct HookPath {
     path: String,
 }
@@ -527,7 +527,7 @@ fn read_relay_config(repo: &Repository, branch: &str) -> Option<RelayConfig> {
 
 // Removed legacy /status endpoint handler
 
-/// OPTIONS handler — discovery: capabilities, branches, repos, current selections
+/// OPTIONS handler — discovery: capabilities, branches, repos, current selections, client hooks
 async fn options_capabilities(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -541,6 +541,8 @@ async fn options_capabilities(
     let repo_names = bare_repo_names(&state.repo_path);
     let mut repos_json: Vec<serde_json::Value> = Vec::new();
     let mut branches_for_current: Vec<String> = Vec::new();
+    let mut relay_config: Option<RelayConfig> = None;
+    
     for name in &repo_names {
         if let Some(repo) = open_repo(&state.repo_path, name) {
             let mut heads_map = serde_json::Map::new();
@@ -554,6 +556,10 @@ async fn options_capabilities(
             }
             if Some(name) == repo_name.as_ref() {
                 branches_for_current = branches.clone();
+                // Load .relay.yaml from the current repo/branch for client hooks
+                if relay_config.is_none() {
+                    relay_config = read_relay_config(&repo, &branch);
+                }
             }
             repos_json.push(serde_json::json!({
                 "name": name,
@@ -563,13 +569,27 @@ async fn options_capabilities(
     }
 
     let allow = "GET, PUT, DELETE, OPTIONS, QUERY";
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "ok": true,
         "capabilities": {"supports": ["GET","PUT","DELETE","OPTIONS","QUERY"]},
         "repos": repos_json,
         "currentBranch": branch,
         "currentRepo": repo_name.clone().unwrap_or_default(),
     });
+
+    // Merge relay configuration (client hooks, etc.) if available
+    if let Some(config) = relay_config {
+        if let Ok(config_json) = serde_json::to_value(&config) {
+            if let Some(obj) = body.as_object_mut() {
+                if let Some(config_obj) = config_json.as_object() {
+                    for (key, value) in config_obj {
+                        obj.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+    }
+
     (
         StatusCode::OK,
         [
