@@ -474,7 +474,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
 
         const params = {
             socket: tab?.host,
-            path: tab?.path ?? '/README.md',
+            path: tab?.path ?? '/',
             branch: tab?.currentBranch,
             repo: tab?.repo,
             kind,

@@ -18,7 +18,7 @@ function App() {
   }
 
   const handlePeerPress = (host: string) => {
-    openTab(host, '/README.md')
+    openTab(host, '/')
   }
 
   return (

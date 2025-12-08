@@ -164,7 +164,7 @@ export const useAppState = create<AppState>((set, get) => ({
     tabs: loadPersistedTabs(),
     activeTabId: loadPersistedActiveTab(),
     homeTabId: 'home',
-    openTab: (host, path = '/README.md') => {
+    openTab: (host, path = '/') => {
         const existingTab = get().tabs.find((t) => t.host === host && t.path === path)
         if (existingTab) {
             set({activeTabId: existingTab.id})
