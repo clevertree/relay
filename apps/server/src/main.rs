@@ -10,7 +10,7 @@ use axum::{
     http::{HeaderMap, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, head, post},
     Json, Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -125,6 +125,46 @@ async fn main() -> anyhow::Result<()> {
     // Treat path as repository ROOT directory
     let _ = std::fs::create_dir_all(&repo_path);
 
+    // Initialize repos from RELAY_MASTER_REPO_LIST if provided
+    if let Ok(repo_list_str) = std::env::var("RELAY_MASTER_REPO_LIST") {
+        let repos: Vec<&str> = repo_list_str.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        for repo_url in repos {
+            let repo_name = repo_url
+                .split('/')
+                .last()
+                .and_then(|s| s.strip_suffix(".git"))
+                .unwrap_or(repo_url);
+            let bare_repo_path = repo_path.join(format!("{}.git", repo_name));
+            
+            // Skip if already cloned
+            if bare_repo_path.exists() {
+                info!(repo = %repo_name, "Repository already exists, skipping clone");
+                continue;
+            }
+            
+            info!(repo = %repo_name, url = %repo_url, "Cloning repository");
+            match std::process::Command::new("git")
+                .arg("clone")
+                .arg("--bare")
+                .arg(repo_url)
+                .arg(&bare_repo_path)
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        info!(repo = %repo_name, "Successfully cloned repository");
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        warn!(repo = %repo_name, error = %stderr, "Failed to clone repository");
+                    }
+                }
+                Err(e) => {
+                    warn!(repo = %repo_name, error = %e, "Failed to execute git clone");
+                }
+            }
+        }
+    }
+
     let state = AppState {
         repo_path,
         static_paths,
@@ -136,10 +176,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/swagger-ui", get(get_swagger_ui))
         .route("/api/config", get(get_api_config))
         .route("/git-pull", post(post_git_pull))
-        .route("/", get(get_root).options(options_capabilities))
+        .route("/", get(get_root).head(head_root).options(options_capabilities))
         .route(
             "/*path",
             get(get_file)
+                .head(head_file)
                 .put(put_file)
                 .delete(delete_file)
                 .options(options_capabilities),
@@ -743,7 +784,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_row_to_json_basic_types_removed() {}
 
     #[cfg(all(not(target_os = "windows"), feature = "ipfs_tests"))]
@@ -1202,6 +1242,409 @@ mod tests {
             .into_response();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
+
+    // ==== Unit tests for HEAD, GET, OPTIONS methods ====
+
+    /// Test OPTIONS returns repository list with branches and commit heads
+    #[tokio::test]
+    async fn test_options_returns_repo_list() {
+        let repo_dir = tempdir().unwrap();
+        
+        // Create a bare repo named "repo.git" inside the temp directory
+        let repo_path = repo_dir.path().join("repo.git");
+        let repo = Repository::init_bare(&repo_path).unwrap();
+
+        // Create initial commit on main branch
+        let sig = Signature::now("relay", "relay@local").unwrap();
+        let tb = repo.treebuilder(None).unwrap();
+        let tree_id = tb.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _commit_oid = repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let headers = HeaderMap::new();
+        let query = None;
+        let response = options_capabilities(State(state), headers, query).await;
+        let (parts, body) = response.into_response().into_parts();
+
+        assert_eq!(parts.status, StatusCode::OK);
+        // Parse body to verify structure
+        let body_bytes = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .unwrap()
+            .to_vec();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(json["ok"], true);
+        assert!(json["capabilities"]["supports"].is_array());
+    }
+
+    /// Test GET returns 200 when repo exists with a file
+    #[tokio::test]
+    async fn test_get_file_success() {
+        let repo_dir = tempdir().unwrap();
+        
+        // Create a bare repo named "repo.git" inside the temp directory
+        let repo_path = repo_dir.path().join("repo.git");
+        let repo = Repository::init_bare(&repo_path).unwrap();
+
+        // Create initial commit with a file
+        let sig = Signature::now("relay", "relay@local").unwrap();
+        let file_content = b"Hello, World!";
+        let blob_oid = repo.blob(file_content).unwrap();
+        let mut tb = repo.treebuilder(None).unwrap();
+        tb.insert("hello.txt", blob_oid, 0o100644).unwrap();
+        let tree_id = tb.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _commit_oid = repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "add file", &tree, &[])
+            .unwrap();
+
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_BRANCH, "main".parse().unwrap());
+        headers.insert(HEADER_REPO, "repo".parse().unwrap());
+
+        let response = get_file(
+            State(state),
+            headers,
+            AxPath("hello.txt".to_string()),
+            None,
+        )
+        .await;
+        let (parts, body) = response.into_response().into_parts();
+
+        assert_eq!(parts.status, StatusCode::OK);
+        let body_bytes = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .unwrap()
+            .to_vec();
+        assert_eq!(body_bytes, file_content);
+    }
+
+    /// Test GET returns 404 when file doesn't exist
+    #[tokio::test]
+    async fn test_get_file_not_found() {
+        let repo_dir = tempdir().unwrap();
+        
+        // Create a bare repo named "repo.git" inside the temp directory
+        let repo_path = repo_dir.path().join("repo.git");
+        let repo = Repository::init_bare(&repo_path).unwrap();
+
+        // Create initial empty commit
+        let sig = Signature::now("relay", "relay@local").unwrap();
+        let tb = repo.treebuilder(None).unwrap();
+        let tree_id = tb.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _commit_oid = repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_BRANCH, "main".parse().unwrap());
+        headers.insert(HEADER_REPO, "repo".parse().unwrap());
+
+        let response = get_file(
+            State(state),
+            headers,
+            AxPath("missing.txt".to_string()),
+            None,
+        )
+        .await;
+        let (parts, _body) = response.into_response().into_parts();
+
+        assert_eq!(parts.status, StatusCode::NOT_FOUND);
+    }
+
+    /// Test GET returns 404 when repo doesn't exist
+    #[tokio::test]
+    async fn test_get_repo_not_found() {
+        let repo_dir = tempdir().unwrap();
+        // Create empty data directory with no repos
+        let _ = std::fs::create_dir_all(repo_dir.path());
+
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_BRANCH, "main".parse().unwrap());
+        headers.insert(HEADER_REPO, "nonexistent".parse().unwrap());
+
+        let response = get_file(
+            State(state),
+            headers,
+            AxPath("file.txt".to_string()),
+            None,
+        )
+        .await;
+        let (parts, _body) = response.into_response().into_parts();
+
+        assert_eq!(parts.status, StatusCode::NOT_FOUND);
+    }
+
+    /// Test OPTIONS returns proper headers
+    #[tokio::test]
+    async fn test_options_headers() {
+        let repo_dir = tempdir().unwrap();
+        
+        // Create a bare repo named "repo.git" inside the temp directory
+        let repo_path = repo_dir.path().join("repo.git");
+        let repo = Repository::init_bare(&repo_path).unwrap();
+
+        // Create initial commit
+        let sig = Signature::now("relay", "relay@local").unwrap();
+        let tb = repo.treebuilder(None).unwrap();
+        let tree_id = tb.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _commit_oid = repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let headers = HeaderMap::new();
+        let (parts, _body) = options_capabilities(State(state), headers, None)
+            .await
+            .into_response()
+            .into_parts();
+
+        assert_eq!(parts.status, StatusCode::OK);
+
+        // Verify Allow header contains expected methods
+        let allow_header = parts.headers.get("Allow");
+        assert!(allow_header.is_some());
+        let allow_str = allow_header
+            .unwrap()
+            .to_str()
+            .unwrap_or("")
+            .to_uppercase();
+        assert!(allow_str.contains("GET"));
+        assert!(allow_str.contains("OPTIONS"));
+
+        // Verify CORS headers
+        assert!(parts.headers.contains_key("Access-Control-Allow-Origin"));
+        assert!(parts.headers.contains_key("Access-Control-Allow-Methods"));
+    }
+
+    /// Test branch_from correctly extracts branch from header
+    #[test]
+    fn test_branch_from_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_BRANCH, "develop".parse().unwrap());
+
+        let branch = branch_from(&headers);
+        assert_eq!(branch, "develop");
+    }
+
+    /// Test branch_from defaults to main when header is missing
+    #[test]
+    fn test_branch_from_default() {
+        let headers = HeaderMap::new();
+
+        let branch = branch_from(&headers);
+        assert_eq!(branch, DEFAULT_BRANCH);
+    }
+
+    /// Test strict_repo_from selects first repo when none specified
+    #[tokio::test]
+    async fn test_strict_repo_from_default() {
+        let repo_dir = tempdir().unwrap();
+        
+        // Create a bare repo named "repo"
+        let repo_path = repo_dir.path().join("repo.git");
+        let repo = Repository::init_bare(&repo_path).unwrap();
+        
+        let sig = Signature::now("relay", "relay@local").unwrap();
+        let tb = repo.treebuilder(None).unwrap();
+        let tree_id = tb.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _commit_oid = repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        
+        let headers = HeaderMap::new();
+        let selected = strict_repo_from(&repo_dir.path().to_path_buf(), &headers);
+
+        assert_eq!(selected, Some("repo".to_string()));
+    }
+
+    /// Test strict_repo_from returns None when no repos exist
+    #[test]
+    fn test_strict_repo_from_no_repos() {
+        let repo_dir = tempdir().unwrap();
+        let _ = std::fs::create_dir_all(repo_dir.path());
+
+        let headers = HeaderMap::new();
+        let selected = strict_repo_from(&repo_dir.path().to_path_buf(), &headers);
+
+        assert_eq!(selected, None);
+    }
+
+    /// Test bare_repo_names correctly lists repos
+    #[tokio::test]
+    async fn test_bare_repo_names() {
+        let repo_dir = tempdir().unwrap();
+        
+        // Create two bare repos
+        Repository::init_bare(repo_dir.path().join("repo1.git")).unwrap();
+        Repository::init_bare(repo_dir.path().join("repo2.git")).unwrap();
+        // Create a non-bare directory (should be ignored)
+        std::fs::create_dir(repo_dir.path().join("not_a_repo")).unwrap();
+
+        let names = bare_repo_names(&repo_dir.path().to_path_buf());
+
+        assert_eq!(names, vec!["repo1".to_string(), "repo2".to_string()]);
+    }
+
+    /// Test HEAD / returns 204 No Content like GET
+    #[tokio::test]
+    async fn test_head_root() {
+        let repo_dir = tempdir().unwrap();
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let headers = HeaderMap::new();
+        let response = head_root(State(state), headers, None).await;
+        let (parts, _body) = response.into_response().into_parts();
+
+        assert_eq!(parts.status, StatusCode::NO_CONTENT);
+    }
+
+    /// Test HEAD returns 200 when file exists
+    #[tokio::test]
+    async fn test_head_file_success() {
+        let repo_dir = tempdir().unwrap();
+        
+        // Create a bare repo named "repo.git"
+        let repo_path = repo_dir.path().join("repo.git");
+        let repo = Repository::init_bare(&repo_path).unwrap();
+
+        // Create initial commit with a file
+        let sig = Signature::now("relay", "relay@local").unwrap();
+        let file_content = b"Hello, World!";
+        let blob_oid = repo.blob(file_content).unwrap();
+        let mut tb = repo.treebuilder(None).unwrap();
+        tb.insert("hello.txt", blob_oid, 0o100644).unwrap();
+        let tree_id = tb.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _commit_oid = repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "add file", &tree, &[])
+            .unwrap();
+
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_BRANCH, "main".parse().unwrap());
+        headers.insert(HEADER_REPO, "repo".parse().unwrap());
+
+        let response = head_file(
+            State(state),
+            headers,
+            AxPath("hello.txt".to_string()),
+            None,
+        )
+        .await;
+        let (parts, body) = response.into_response().into_parts();
+
+        assert_eq!(parts.status, StatusCode::OK);
+        // Verify body is empty for HEAD
+        let body_bytes = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .unwrap()
+            .to_vec();
+        assert_eq!(body_bytes.len(), 0);
+    }
+
+    /// Test HEAD returns 404 when file doesn't exist
+    #[tokio::test]
+    async fn test_head_file_not_found() {
+        let repo_dir = tempdir().unwrap();
+        
+        // Create a bare repo named "repo.git"
+        let repo_path = repo_dir.path().join("repo.git");
+        let repo = Repository::init_bare(&repo_path).unwrap();
+
+        // Create initial empty commit
+        let sig = Signature::now("relay", "relay@local").unwrap();
+        let tb = repo.treebuilder(None).unwrap();
+        let tree_id = tb.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _commit_oid = repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_BRANCH, "main".parse().unwrap());
+        headers.insert(HEADER_REPO, "repo".parse().unwrap());
+
+        let response = head_file(
+            State(state),
+            headers,
+            AxPath("missing.txt".to_string()),
+            None,
+        )
+        .await;
+        let (parts, _body) = response.into_response().into_parts();
+
+        assert_eq!(parts.status, StatusCode::NOT_FOUND);
+    }
+
+    /// Test HEAD returns 404 when repo doesn't exist
+    #[tokio::test]
+    async fn test_head_repo_not_found() {
+        let repo_dir = tempdir().unwrap();
+        let _ = std::fs::create_dir_all(repo_dir.path());
+
+        let state = AppState {
+            repo_path: repo_dir.path().to_path_buf(),
+            static_paths: Vec::new(),
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_BRANCH, "main".parse().unwrap());
+        headers.insert(HEADER_REPO, "nonexistent".parse().unwrap());
+
+        let response = head_file(
+            State(state),
+            headers,
+            AxPath("file.txt".to_string()),
+            None,
+        )
+        .await;
+        let (parts, _body) = response.into_response().into_parts();
+
+        assert_eq!(parts.status, StatusCode::NOT_FOUND);
+    }
 }
 
 // No disallowed file types — reads and writes are permitted for all paths.
@@ -1286,8 +1729,8 @@ async fn run_get_script_or_404(
 ) -> Response {
     // Load hooks/get.mjs from branch
     let repo = match open_repo(&state.repo_path, repo_name) {
-        Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Some(r) => r,
+        None => return (StatusCode::INTERNAL_SERVER_ERROR, "Repository not found").into_response(),
     };
     let refname = format!("refs/heads/{}", branch);
     let commit = match repo
@@ -1446,9 +1889,9 @@ fn git_resolve_and_respond(
     decoded: &str,
 ) -> GitResolveResult {
     let repo = match open_repo(repo_root, repo_name) {
-        Ok(r) => r,
-        Err(e) => {
-            error!(?e, "open repo error");
+        Some(r) => r,
+        None => {
+            error!("open repo error: repo not found");
             return GitResolveResult::Respond(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
@@ -1562,6 +2005,87 @@ async fn get_root(
 ) -> impl IntoResponse {
     // GET / should not return discovery; serve no content here.
     StatusCode::NO_CONTENT
+}
+
+/// HEAD / - returns same headers as GET but no body. Returns 204 No Content.
+async fn head_root(
+    _state: State<AppState>,
+    _headers: HeaderMap,
+    _query: Option<Query<HashMap<String, String>>>,
+) -> impl IntoResponse {
+    // HEAD / should return same response as GET but without body
+    StatusCode::NO_CONTENT
+}
+
+/// HEAD handler for files. Returns same headers as GET but no body.
+/// Returns 200 if file exists, 404 if not found or repo doesn't exist.
+async fn head_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(path): AxPath<String>,
+    _query: Option<Query<HashMap<String, String>>>,
+) -> impl IntoResponse {
+    let decoded = url_decode(&path).decode_utf8_lossy().to_string();
+    
+    let branch = branch_from(&headers);
+    let repo_name = match strict_repo_from(&state.repo_path, &headers) {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                [
+                    ("Content-Type", "text/plain".to_string()),
+                    (HEADER_BRANCH, branch.clone()),
+                    (HEADER_REPO, "".to_string()),
+                ],
+            )
+                .into_response();
+        }
+    };
+
+    // Resolve via Git - if found, return headers without body
+    match git_resolve_and_respond(
+        &state.repo_path,
+        &headers,
+        &branch,
+        &repo_name,
+        &decoded,
+    ) {
+        GitResolveResult::Respond(resp) => {
+            // If GET would have succeeded, return 200 with same headers but no body
+            let (parts, _body) = resp.into_parts();
+            if parts.status == StatusCode::OK {
+                (
+                    StatusCode::OK,
+                    [
+                        ("Content-Type", 
+                            parts.headers.get("Content-Type")
+                                .and_then(|h| h.to_str().ok())
+                                .unwrap_or("application/octet-stream")
+                                .to_string()),
+                        (HEADER_BRANCH, branch),
+                        (HEADER_REPO, repo_name),
+                    ],
+                )
+                    .into_response()
+            } else {
+                // Return same status as GET would
+                StatusCode::NOT_FOUND.into_response()
+            }
+        }
+        GitResolveResult::NotFound(_) => {
+            // File not found in Git - return 404 without checking hooks
+            (
+                StatusCode::NOT_FOUND,
+                [
+                    ("Content-Type", "text/plain".to_string()),
+                    (HEADER_BRANCH, branch),
+                    (HEADER_REPO, repo_name),
+                ],
+            )
+                .into_response()
+        }
+    }
 }
 
 /// Append permissive CORS headers to all responses without short-circuiting OPTIONS.
@@ -1792,9 +2316,9 @@ fn write_file_to_repo(
     content: &[u8],
 ) -> anyhow::Result<(String, String)> {
     let repo = match open_repo(repo_root, repo_name) {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(e.into());
+        Some(r) => r,
+        None => {
+            return Err(anyhow::anyhow!("Repository not found"));
         }
     };
     let refname = format!("refs/heads/{}", branch);

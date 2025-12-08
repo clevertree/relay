@@ -67,6 +67,7 @@ EXPOSE 80 443 8080 8088 9418 4001 4001/udp 5001 8082 58846 58946 58946/udp
 # Core configuration (server treats RELAY_REPO_PATH as a repository ROOT directory now)
 ENV RELAY_REPO_PATH=/srv/relay/data \
     RELAY_BIND=0.0.0.0:8088 \
-    RELAY_TEMPLATE_URL=https://github.com/clevertree/relay-template
+    RELAY_TEMPLATE_URL=https://github.com/clevertree/relay-template \
+    RELAY_MASTER_REPO_LIST=""
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

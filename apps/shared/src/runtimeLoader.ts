@@ -1,6 +1,6 @@
 /**
  * Unified Runtime Loader for Relay Hooks
- * 
+ *
  * Provides a shared interface for loading and transpiling TS/TSX/JSX hooks
  * across both web and React Native clients. Abstracts away platform-specific
  * module execution (browser import vs RN eval).
@@ -171,7 +171,7 @@ try {
 
 /**
  * Transpile TypeScript/JSX to JavaScript (using @babel/standalone)
- * 
+ *
  * @param code Source code to transpile
  * @param options Transform configuration
  * @param toCommonJs If true, also transform ESM imports/exports to CommonJS (for RN)
@@ -277,16 +277,27 @@ export class HookLoader {
    */
   async loadModule(
     modulePath: string,
-    fromPath: string = '/hooks/get-client.jsx',
+    fromPath: string = '/hooks/client/get-client.jsx',
     context: HookContext
   ): Promise<any> {
-    // Resolve path
+    // Resolve path robustly relative to the current hook file path
     let normalizedPath = modulePath
-    if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
-      const baseDir = fromPath.split('/').slice(0, -1).join('/') || '/hooks'
+    try {
+      if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
+        // Ensure the base includes the 'client' segment by default
+        const base = fromPath && fromPath.startsWith('/') ? fromPath : '/hooks/client/get-client.jsx'
+        const baseUrl = new URL(base, 'http://resolver.local')
+        const resolved = new URL(modulePath, baseUrl)
+        normalizedPath = resolved.pathname
+      } else if (!modulePath.startsWith('/')) {
+        normalizedPath = `/hooks/client/${modulePath}`
+      }
+      // Collapse any '/../' leftovers defensively
+      normalizedPath = normalizedPath.replace(/\/+/, '/').replace(/\/\.\//g, '/').replace(/(?:\/(?!\.\.)[^/]+\/\.\.)+/g, '/')
+    } catch (_) {
+      // Fallback to previous logic if URL API not available for some reason
+      const baseDir = (fromPath || '/hooks/client/get-client.jsx').split('/').slice(0, -1).join('/') || '/hooks/client'
       normalizedPath = `${baseDir}/${modulePath}`.replace(/\/\.\//g, '/').replace(/\/[^/]+\/\.\.\//g, '/')
-    } else if (!modulePath.startsWith('/')) {
-      normalizedPath = `/hooks/${modulePath}`
     }
 
     // Check cache
@@ -300,7 +311,12 @@ export class HookLoader {
     try {
       const response = await fetch(moduleUrl)
       if (!response.ok) {
-        throw new Error(`Failed to fetch module: ${response.status} ${response.statusText}`)
+        throw new Error(`ModuleLoadError: ${moduleUrl} → ${response.status} ${response.statusText}`)
+      }
+      const ct = (response.headers.get('content-type') || '').toLowerCase()
+      if (ct.includes('text/html')) {
+        // Server likely returned an HTML error page; don't try to execute it
+        throw new Error(`ModuleLoadError: ${moduleUrl} returned HTML (content-type=${ct})`)
       }
 
       const code = await response.text()
@@ -342,7 +358,7 @@ export class HookLoader {
       diag.phase = 'fetch'
       const hookUrl = `${this.protocol}://${this.host}${hookPath}`
       console.debug(`[HookLoader] Fetching hook from: ${hookUrl}`)
-      
+
       const response = await fetch(hookUrl)
 
       diag.fetch = {
@@ -352,7 +368,11 @@ export class HookLoader {
       }
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch hook: ${response.status} ${response.statusText}`)
+        throw new Error(`ModuleLoadError: ${hookUrl} → ${response.status} ${response.statusText}`)
+      }
+      const ct = (response.headers.get('content-type') || '').toLowerCase()
+      if (ct.includes('text/html')) {
+        throw new Error(`ModuleLoadError: ${hookUrl} returned HTML (content-type=${ct})`)
       }
 
       const code = await response.text()
@@ -380,7 +400,7 @@ export class HookLoader {
       // Execute
       diag.phase = 'import'
       console.debug(`[HookLoader] Executing hook module`)
-      
+
       try {
         const mod = await this.moduleLoader.executeModule(finalCode, hookPath, context)
 

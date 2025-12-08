@@ -229,7 +229,6 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
             setErrorDetails({...diagnostics, reason: 'no-host'})
             return false
         }
-        const baseUrl = normalizeHostUrl(tab.host)
         // Resolve hook path strictly from OPTIONS
         const info = optsOverride ?? optionsInfo
         const getPath = info?.client?.hooks?.get?.path
@@ -255,13 +254,15 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
             }
             return tryRenderWithHook(kind, extraParams, retryInfo)
         }
-        const hookUrl = `${baseUrl}${hookPath}`
+        // Use resolvePath to properly join baseUrl and hookPath without double slashes
+        const hookUrl = resolvePath(hookPath)
         console.debug(`[Hook ${kind}] Loading: ${hookUrl}`)
 
         // Fetch hook source and dynamic import
         try {
             console.debug(`[Hook ${kind}] Fetching source: ${hookUrl}`)
             const srcResp = await fetch(hookUrl)
+            diagnostics.hookUrl = hookUrl
             diagnostics.fetch = {
                 status: srcResp.status,
                 ok: srcResp.ok,
@@ -342,7 +343,15 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
                 }
             } catch (jsxErr) {
                 console.warn(`[Hook ${kind}] JSX transform failed, will attempt raw import`, jsxErr)
+                // Capture detailed JSX error info for debugging
                 diagnostics.jsxError = jsxErr instanceof Error ? jsxErr.message : String(jsxErr)
+                diagnostics.jsxErrorFull = jsxErr instanceof Error ? {
+                    message: jsxErr.message,
+                    name: jsxErr.name,
+                    stack: jsxErr.stack,
+                    ...(jsxErr as any).pos && { pos: (jsxErr as any).pos },
+                    ...(jsxErr as any).loc && { loc: (jsxErr as any).loc },
+                } : jsxErr
             }
 
             const blob = new Blob([finalCode], {type: 'text/javascript'})
@@ -428,6 +437,37 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
         }
     }
 
+    /**
+     * Resolves paths within /template context
+     * Handles both relative paths (./foo, ../foo) and absolute paths (/hooks/foo)
+     * Returns properly formatted URL without double slashes
+     */
+    const resolvePath = (modulePath: string, fromHookPath?: string): string => {
+        if (!tab?.host) {
+            throw new Error('[resolvePath] No host available')
+        }
+
+        let resolvedPath = modulePath
+        
+        if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
+            // Relative to current hook path
+            const basePath = fromHookPath && fromHookPath.startsWith('/')
+                ? fromHookPath
+                : '/hooks/get-client.jsx'
+            const currentDir = basePath.split('/').slice(0, -1).join('/')
+            resolvedPath = `${currentDir}/${modulePath}`
+                .replace(/\/\.\//g, '/')
+                .replace(/\/[^/]+\/\.\.\//g, '/')
+        } else if (!modulePath.startsWith('/')) {
+            // Assume absolute from /template root
+            resolvedPath = `/${modulePath}`
+        }
+
+        const baseUrl = normalizeHostUrl(tab.host)
+        // Use URL constructor to properly join paths without double slashes
+        return new URL(resolvedPath.startsWith('/') ? resolvedPath.slice(1) : resolvedPath, baseUrl).toString()
+    }
+
     const buildHookContext = (
         kind: 'get' | 'query' | 'put',
         extraParams?: Record<string, unknown>,
@@ -449,7 +489,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
                 }
                 ;(async () => {
                     try {
-                        const url = buildPeerUrl(tab!.host!, filePath)
+                        const url = resolvePath(filePath)
                         const resp = await fetch(url, {
                             headers: buildRepoHeaders(tab?.currentBranch, tab?.repo),
                         })
@@ -494,25 +534,34 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
             // Normalize path - handle both relative and absolute
             let normalizedPath = modulePath
             if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
-                // Relative to current hook path, not the content path
+                // Resolve relative to the current hook path (defaults to client hook)
                 const basePath = hookBasePath && hookBasePath.startsWith('/')
                     ? hookBasePath
-                    : '/hooks/get-client.jsx'
-                const currentDir = basePath.split('/').slice(0, -1).join('/')
-                normalizedPath = `${currentDir}/${modulePath}`.replace(/\/\.\//g, '/').replace(/\/[^/]+\/\.\.\//g, '/')
+                    : '/hooks/client/get-client.jsx'
+                try {
+                    const resolved = new URL(modulePath, new URL(basePath, 'http://resolver.local'))
+                    normalizedPath = resolved.pathname
+                } catch {
+                    const currentDir = basePath.split('/').slice(0, -1).join('/')
+                    normalizedPath = `${currentDir}/${modulePath}`.replace(/\/\.\//g, '/').replace(/\/[^/]+\/\.\.\//g, '/')
+                }
             } else if (!modulePath.startsWith('/')) {
-                // Assume it's relative to /hooks/
-                normalizedPath = `/hooks/${modulePath}`
+                // Assume it's relative to /hooks/client/
+                normalizedPath = `/hooks/client/${modulePath}`
             }
 
-            const baseUrl = normalizeHostUrl(tab.host)
-            const moduleUrl = `${baseUrl}${normalizedPath}`
+            // Use resolvePath to properly join baseUrl and path without double slashes
+            const moduleUrl = resolvePath(normalizedPath, hookBasePath)
             console.debug('[loadModule] Loading:', {modulePath, normalizedPath, moduleUrl})
 
             try {
                 const response = await fetch(moduleUrl)
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch module: ${response.status} ${response.statusText}`)
+                    throw new Error(`ModuleLoadError: ${moduleUrl} → ${response.status} ${response.statusText}`)
+                }
+                const ct = (response.headers.get('content-type') || '').toLowerCase()
+                if (ct.includes('text/html')) {
+                    throw new Error(`ModuleLoadError: ${moduleUrl} returned HTML (content-type=${ct})`)
                 }
 
                 const code = await response.text()
@@ -587,6 +636,7 @@ if (!React) throw new Error('React not available in loadModule preamble');
                 navigate: handleNavigate,
                 setBranch: (br: string) => updateTab(tab!.id, (t) => ({...t, currentBranch: br})),
                 loadModule,
+                resolvePath: (modulePath: string) => resolvePath(modulePath, hookBasePath),
             },
         }
     }
@@ -604,13 +654,65 @@ if (!React) throw new Error('React not available in loadModule preamble');
                     <div
                         className="p-8 bg-red-500/20 dark:bg-red-900/30 border border-red-400 dark:border-red-700 rounded-lg text-red-700 dark:text-red-300">
                         <h3 className="mt-0">Error</h3>
-                        <p>{error}</p>
+                        <p className="font-semibold">{error}</p>
+
                         {errorDetails && (
-                            <pre className="text-xs mt-3 overflow-auto max-h-64 whitespace-pre-wrap opacity-80">
-{JSON.stringify(errorDetails, null, 2)}
-              </pre>
+                            <div className="mt-4 space-y-3 text-sm">
+                                {/* Show hook path and HTTP request info */}
+                                {errorDetails.kind && (
+                                    <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
+                                        <div className="font-mono text-xs space-y-1">
+                                            <div><strong>Hook Type:</strong> {errorDetails.kind}</div>
+                                            {errorDetails.hookUrl && (
+                                                <div className="break-all"><strong>GET URL:</strong> <code className="bg-black/20 px-1 py-0.5 rounded">{errorDetails.hookUrl}</code></div>
+                                            )}
+                                            {errorDetails.fetch && (
+                                                <>
+                                                    <div><strong>HTTP Status:</strong> {errorDetails.fetch.status} {errorDetails.fetch.ok ? '✓' : '✗'}</div>
+                                                    <div><strong>Content-Type:</strong> {errorDetails.fetch.contentType || 'not specified'}</div>
+                                                </>
+                                            )}
+                                            {errorDetails.codeLength && (
+                                                <div><strong>Code Length:</strong> {errorDetails.codeLength} bytes</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Show JSX transpilation errors */}
+                                {errorDetails.jsxError && (
+                                    <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
+                                        <div className="font-semibold text-xs mb-2">JSX Transpilation Error:</div>
+                                        <pre className="text-xs overflow-auto max-h-32 whitespace-pre-wrap font-mono bg-black/20 p-2 rounded">
+{errorDetails.jsxError}
+                                        </pre>
+                                    </div>
+                                )}
+
+                                {/* Show execution errors */}
+                                {errorDetails.reason === 'execution-failed' && errorDetails.error && (
+                                    <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
+                                        <div className="font-semibold text-xs mb-2">Execution Error:</div>
+                                        <div className="font-mono text-xs">{errorDetails.error}</div>
+                                        {errorDetails.stack && Array.isArray(errorDetails.stack) && (
+                                            <pre className="text-xs mt-2 overflow-auto max-h-16 whitespace-pre-wrap opacity-80">
+{errorDetails.stack.join('\n')}
+                                            </pre>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Show general diagnostics */}
+                                {errorDetails.reason && (
+                                    <div className="text-xs opacity-80">
+                                        <strong>Phase:</strong> {errorDetails.phase || 'unknown'} | <strong>Reason:</strong> {errorDetails.reason}
+                                    </div>
+                                )}
+                            </div>
                         )}
+
                         <div className="mt-4 text-sm opacity-80">
+                            <div className="font-semibold mb-2">Troubleshooting:</div>
                             <ul className="list-disc pl-5 space-y-1">
                                 <li>Verify <code>.relay.yaml</code> contains <code>client.hooks.get.path</code> and <code>client.hooks.query.path</code>.
                                 </li>
@@ -619,8 +721,19 @@ if (!React) throw new Error('React not available in loadModule preamble');
                                 <li>If using JSX, add a top-of-file comment <code>// @use-jsx</code> or
                                     use <code>.jsx</code>/<code>.tsx</code> extension.
                                 </li>
+                                <li>Check browser console (F12) for detailed logs starting with <code>[Hook]</code> or <code>[RepoBrowser]</code>.
+                                </li>
                             </ul>
                         </div>
+
+                        {/* Show full JSON for debugging */}
+                        <details className="mt-4 text-xs opacity-70">
+                            <summary className="cursor-pointer font-semibold">Full Diagnostics (JSON)</summary>
+                            <pre className="mt-2 overflow-auto max-h-64 whitespace-pre-wrap bg-black/20 p-2 rounded">
+{JSON.stringify(errorDetails, null, 2)}
+                            </pre>
+                        </details>
+
                         <button onClick={loadContent}
                                 className="px-4 py-2 bg-red-600 text-white border-none rounded cursor-pointer mt-4 hover:bg-red-700">Try
                             Again

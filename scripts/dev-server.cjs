@@ -58,6 +58,7 @@ const templateServer = http.createServer((req, res) => {
   // Try to serve the file
   fs.readFile(filePath, (err, content) => {
     if (err) {
+      console.log(`❌ [Template] 404 for ${req.url} (file not found at ${filePath})`);
       res.writeHead(404);
       res.end('Not found: ' + req.url);
       return;
@@ -67,6 +68,7 @@ const templateServer = http.createServer((req, res) => {
     const contentTypeMap = {
       '.html': 'text/html',
       '.js': 'application/javascript',
+      '.jsx': 'application/javascript',
       '.mjs': 'application/javascript',
       '.ts': 'application/javascript',
       '.tsx': 'application/javascript',
@@ -83,6 +85,8 @@ const templateServer = http.createServer((req, res) => {
     };
 
     const contentType = contentTypeMap[ext] || 'application/octet-stream';
+    const size = content.length;
+    console.log(`✓ [Template] 200 ${req.url} (${ext || 'no-ext'}, ${size} bytes, type: ${contentType})`);
     res.writeHead(200, { 'Content-Type': contentType });
     res.end(content);
   });
@@ -168,11 +172,13 @@ setTimeout(() => {
       if (templateFilePath.startsWith(templateDir) && stat.isFile()) {
         // Serve from template server without query params in path
         const targetUrl = `http://localhost:${TEMPLATE_PORT}${resolvedPath}`;
+        console.log(`📤 [Proxy] GET ${pathname} → ${targetUrl} (template file)`);
         forwardRequest(req, res, targetUrl);
         return;
       }
     } catch (e) {
       // File doesn't exist in template, fall through
+      console.log(`📭 [Proxy] GET ${pathname} not in template (${e.message}), checking Vite...`);
     }
 
     // For GET requests to potential files (not API endpoints), check if Vite has it
@@ -195,6 +201,7 @@ setTimeout(() => {
 
   // Forward function for proxying
   function forwardRequest(req, res, targetUrl) {
+    console.log(`  [DEBUG] Starting forward to ${targetUrl}`);
     const parsedUrl = new URL(targetUrl);
     const isHttps = parsedUrl.protocol === 'https:';
     const client = isHttps ? require('https') : http;
@@ -204,9 +211,12 @@ setTimeout(() => {
       path: parsedUrl.pathname + parsedUrl.search,
       method: req.method,
       headers: req.headers,
+      timeout: 5000, // 5 second timeout
     };
 
     const proxyReq = client.request(options, (proxyRes) => {
+      console.log(`  [DEBUG] Got response [${proxyRes.statusCode}] from ${targetUrl}`);
+      console.log(`  ← [${proxyRes.statusCode}] ${targetUrl}`);
       res.writeHead(proxyRes.statusCode, proxyRes.headers);
       proxyRes.pipe(res);
     });
@@ -217,11 +227,20 @@ setTimeout(() => {
       res.end('Service unavailable');
     });
 
+    proxyReq.on('timeout', () => {
+      console.error(`\n⚠️  Proxy timeout for ${targetUrl}`);
+      proxyReq.destroy();
+      res.writeHead(504);
+      res.end('Gateway timeout');
+    });
+
+    console.log(`  [DEBUG] Piping request to ${targetUrl}`);
     req.pipe(proxyReq);
   }
 
   // Forward function that checks response status and returns 404 if needed
   function forwardRequestWithStatusCheck(req, res, targetUrl) {
+    console.log(`  [DEBUG] Starting status-check forward to ${targetUrl}`);
     const parsedUrl = new URL(targetUrl);
     const isHttps = parsedUrl.protocol === 'https:';
     const client = isHttps ? require('https') : http;
@@ -231,9 +250,12 @@ setTimeout(() => {
       path: parsedUrl.pathname + parsedUrl.search,
       method: req.method,
       headers: req.headers,
+      timeout: 5000, // 5 second timeout
     };
 
     const proxyReq = client.request(options, (proxyRes) => {
+      console.log(`  [DEBUG] Got response [${proxyRes.statusCode}] from ${targetUrl}`);
+      console.log(`  ← [${proxyRes.statusCode}] ${targetUrl}`);
       // If we get a 404 from Vite, return 404 to client so it can show missing.mjs
       if (proxyRes.statusCode === 404) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -251,6 +273,14 @@ setTimeout(() => {
       res.end('Service unavailable');
     });
 
+    proxyReq.on('timeout', () => {
+      console.error(`\n⚠️  Proxy timeout for ${targetUrl}`);
+      proxyReq.destroy();
+      res.writeHead(504);
+      res.end('Gateway timeout');
+    });
+
+    console.log(`  [DEBUG] Piping request to ${targetUrl}`);
     req.pipe(proxyReq);
   }
 
