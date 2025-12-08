@@ -118,10 +118,16 @@ export function PeersView({onPeerPress}: PeersViewProps) {
         e.preventDefault()
         const trimmedInput = newPeerInput.trim()
         if (trimmedInput) {
-            addPeer(trimmedInput)
-            setNewPeerInput('')
-            // Probe the new peer immediately
-            probePeer(trimmedInput)
+            // Validate URL format
+            try {
+                new URL(trimmedInput)
+                addPeer(trimmedInput)
+                setNewPeerInput('')
+                // Probe the new peer immediately
+                probePeer(trimmedInput)
+            } catch {
+                alert('Please enter a valid URL (e.g., http://localhost:3000 or https://example.com)')
+            }
         }
     }
 
@@ -142,7 +148,7 @@ export function PeersView({onPeerPress}: PeersViewProps) {
                 <form onSubmit={handleAddPeer} className="flex gap-2">
                     <input
                         type="text"
-                        placeholder="host:port"
+                        placeholder="https://example.com"
                         value={newPeerInput}
                         onChange={(e) => setNewPeerInput(e.target.value)}
                         className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500"
@@ -240,13 +246,8 @@ async function getPeersFromEnvironment(): Promise<string[]> {
         if (stored) {
             const peers = JSON.parse(stored) as string[]
             if (Array.isArray(peers) && peers.length > 0) {
-                // Sanitize: remove protocol prefixes from stored peers
-                const cleanPeers = peers.map(p => {
-                    let clean = p.trim()
-                    if (clean.startsWith('http://')) clean = clean.substring(7)
-                    if (clean.startsWith('https://')) clean = clean.substring(8)
-                    return clean
-                })
+                // Keep peers as-is with their full URLs
+                const cleanPeers = peers.map(p => p.trim()).filter(p => p.length > 0)
                 console.log('[getPeersFromEnvironment] Loaded from localStorage (overrides env):', cleanPeers)
                 return cleanPeers
             }

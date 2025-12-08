@@ -64,8 +64,8 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 # 58846, 58946 - Deluge daemon and web UI
 EXPOSE 80 443 8080 8088 9418 4001 4001/udp 5001 8082 58846 58946 58946/udp
 
-# Core configuration
-ENV RELAY_REPO_PATH=/srv/relay/data/repo.git \
+# Core configuration (server treats RELAY_REPO_PATH as a repository ROOT directory now)
+ENV RELAY_REPO_PATH=/srv/relay/data \
     RELAY_BIND=0.0.0.0:8088 \
     RELAY_TEMPLATE_URL=https://github.com/clevertree/relay-template
 

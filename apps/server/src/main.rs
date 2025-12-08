@@ -31,6 +31,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
 struct AppState {
+    // Now represents the repository ROOT directory that contains one or more bare repos (name.git)
     repo_path: PathBuf,
     // Additional static directories to serve from root before Git/IPFS
     static_paths: Vec<PathBuf>,
@@ -110,18 +111,19 @@ async fn main() -> anyhow::Result<()> {
                 let rp = sa
                     .repo
                     .or_else(|| std::env::var("RELAY_REPO_PATH").ok().map(PathBuf::from))
-                    .unwrap_or_else(|| PathBuf::from("data/repo.git"));
+                    .unwrap_or_else(|| PathBuf::from("data"));
                 (rp, sa.static_paths, sa.bind)
             }
             _ => {
                 let rp = std::env::var("RELAY_REPO_PATH")
                     .map(PathBuf::from)
-                    .unwrap_or_else(|_| PathBuf::from("data/repo.git"));
+                    .unwrap_or_else(|_| PathBuf::from("data"));
                 (rp, Vec::new(), None)
             }
         };
     info!(repo_path = %repo_path.display(), "Repository path resolved");
-    ensure_bare_repo(&repo_path)?;
+    // Treat path as repository ROOT directory
+    let _ = std::fs::create_dir_all(&repo_path);
 
     let state = AppState {
         repo_path,

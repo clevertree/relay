@@ -46,6 +46,35 @@ function extractHostPort(input: string): string {
 }
 
 /**
+ * Parse a full URL or host:port string to extract protocol and port
+ */
+function parseUrl(input: string): { protocol: string; hostname: string; port?: number; urlString: string } {
+  try {
+    const url = new URL(input)
+    return {
+      protocol: url.protocol.replace(':', ''),
+      hostname: url.hostname,
+      port: url.port ? parseInt(url.port, 10) : undefined,
+      urlString: url.toString(),
+    }
+  } catch {
+    // Not a valid URL, try as host:port
+    if (input.includes('://')) {
+      // Has protocol but invalid
+      throw new Error(`Invalid URL: ${input}`)
+    }
+    // Assume https with host:port format
+    const [host, portStr] = input.split(':')
+    return {
+      protocol: 'https',
+      hostname: host,
+      port: portStr ? parseInt(portStr, 10) : 443,
+      urlString: `https://${input}/`,
+    }
+  }
+}
+
+/**
  * Measures median latency from multiple samples
  */
 function median(values: number[]): number {
@@ -80,17 +109,32 @@ async function fetchWithTimeout(
 }
 
 /**
- * Probe HTTPS endpoint
+ * Probe HTTP/HTTPS endpoint using the actual URL provided
+ * Works with any valid URL (http or https)
  */
 export async function probeHttps(host: string): Promise<ProbeResult> {
-  const hostPort = extractHostPort(host)
   const latencies: number[] = []
+  let urlString = host
+  let protocol: PeerProtocol = 'https'
+  let port = 443
+
+  try {
+    const parsed = parseUrl(host)
+    urlString = parsed.urlString
+    protocol = (parsed.protocol === 'http' ? 'https' : 'https') as PeerProtocol
+    port = parsed.port || (parsed.protocol === 'http' ? 80 : 443)
+  } catch {
+    // If URL is invalid, use as-is
+    if (!host.startsWith('http')) {
+      urlString = `https://${host}/`
+    }
+  }
 
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     try {
       const start = performance.now()
       // Use HEAD with no-cors mode to avoid CORS preflight issues
-      await fetchWithTimeout(`https://${hostPort}/`, {
+      await fetchWithTimeout(urlString, {
         method: 'HEAD',
         timeout: PROBE_TIMEOUT_MS,
         mode: 'no-cors',
@@ -99,8 +143,8 @@ export async function probeHttps(host: string): Promise<ProbeResult> {
       latencies.push(latency)
       // If we got here, connection succeeded
       return {
-        protocol: 'https',
-        port: 443,
+        protocol,
+        port,
         ok: true,
         latencyMs: median(latencies),
       }
@@ -110,11 +154,11 @@ export async function probeHttps(host: string): Promise<ProbeResult> {
   }
 
   return {
-    protocol: 'https',
-    port: 443,
+    protocol,
+    port,
     ok: false,
     latencyMs: latencies.length > 0 ? median(latencies) : undefined,
-    error: 'HTTPS probe failed',
+    error: 'Probe failed',
   }
 }
 

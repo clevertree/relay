@@ -139,7 +139,7 @@ export const useAppState = create<AppState>((set, get) => ({
         })),
     addPeer: (host) =>
         set((s) => {
-            // Sanitize the host input - remove protocol prefixes
+            // Keep the full URL as-is (including protocol)
             const cleanHost = host.trim()
 
             // Avoid adding duplicates

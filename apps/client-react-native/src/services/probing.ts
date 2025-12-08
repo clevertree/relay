@@ -91,19 +91,34 @@ async function fetchWithTimeout(
 }
 
 /**
- * Probes HTTPS endpoint (port 443) using HEAD request
+ * Probes HTTP/HTTPS endpoint using HEAD request
+ * Works with any valid URL (http or https)
  */
 async function probeHttps(host: string): Promise<ProbeResult> {
-  const port = 443;
   const latencies: number[] = [];
-  const hostPort = extractHostname(host);
+  let port = 443;
+  let protocol: PeerProtocol = 'https';
+  let urlString = host;
+
+  try {
+    // Parse the URL to extract port and protocol
+    const parsed = parseHostUrl(host);
+    port = parsed.port || (parsed.protocol === 'http' ? 80 : 443);
+    protocol = (parsed.protocol === 'http' ? 'https' : 'https') as PeerProtocol;
+    
+    // Use the full URL if it was provided, otherwise construct one
+    if (!host.startsWith('http')) {
+      urlString = `https://${host}/`;
+    }
+  } catch {
+    // Fall back to https if parsing fails
+    urlString = `https://${host}/`;
+  }
 
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     const start = Date.now();
     try {
-      const url = `https://${hostPort}/`;
-
-      const res = await fetchWithTimeout(url, {method: 'HEAD', timeout: PROBE_TIMEOUT_MS});
+      const res = await fetchWithTimeout(urlString, {method: 'HEAD', timeout: PROBE_TIMEOUT_MS});
       if (res.ok || res.status < 500) {
         latencies.push(Date.now() - start);
       }
@@ -113,7 +128,7 @@ async function probeHttps(host: string): Promise<ProbeResult> {
   }
 
   return {
-    protocol: 'https',
+    protocol,
     port,
     ok: latencies.length > 0,
     latencyMs: latencies.length > 0 ? Math.round(median(latencies)) : undefined,

@@ -5,6 +5,7 @@
 set -e
 
 clone_default_repo() {
+  # Legacy single-repo initialization (kept for backward compatibility when RELAY_MASTER_REPO_LIST is empty)
   repo=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
   # If repo already exists and looks valid, keep it
   if [ -d "$repo" ] && [ -d "$repo/objects" ]; then
@@ -30,6 +31,60 @@ clone_default_repo() {
     echo "Template clone failed; initializing empty bare repo at $repo"
     git init --bare "$repo"
   fi
+}
+
+clone_master_repo_list() {
+  # New multi-repo initialization using RELAY_MASTER_REPO_LIST
+  ROOT=${RELAY_REPO_ROOT:-/srv/relay/data}
+  mkdir -p "$ROOT"
+  
+  # Check if list is empty
+  if [ -z "${RELAY_MASTER_REPO_LIST:-}" ]; then
+    echo "RELAY_MASTER_REPO_LIST is empty; falling back to legacy single repo init"
+    clone_default_repo
+    return
+  fi
+
+  # Parse semicolon-separated list (POSIX sh compatible)
+  repos="${RELAY_MASTER_REPO_LIST}"
+  while [ -n "$repos" ]; do
+    # Extract first URL (everything before semicolon)
+    url="${repos%%;*}"
+    if [ "$url" = "$repos" ]; then
+      # No more semicolons, this is the last one
+      rest=""
+    else
+      # Remove this URL and the semicolon from the remaining string
+      rest="${repos#*;}"
+    fi
+    
+    # Trim whitespace and process
+    u=$(echo "$url" | tr -d ' \t\r\n')
+    if [ -n "$u" ]; then
+      # Derive repo name from URL last path segment; strip trailing .git
+      name=$(echo "$u" | awk -F/ '{print $NF}' | sed 's/\.git$//' | tr -d ' \t')
+      if [ -z "$name" ]; then
+        echo "Skipping invalid URL: $u"
+      else
+        dest="$ROOT/${name}.git"
+        if [ -d "$dest" ] && [ -d "$dest/objects" ]; then
+          echo "Repo exists: $dest — skipping"
+        else
+          echo "Cloning $u -> $dest"
+          if git clone --bare "$u" "$dest"; then
+            echo "Cloned $name"
+          else
+            echo "Failed to clone $u; initializing empty bare repo at $dest"
+            mkdir -p "$dest"
+            git init --bare "$dest" || true
+          fi
+        fi
+      fi
+    fi
+    
+    # Move to next URL
+    repos="$rest"
+  done
 }
 
 start_ipfs() {
@@ -66,10 +121,12 @@ start_git_daemon() {
 main() {
   start_ipfs
   start_deluged
-  clone_default_repo
+  # Initialize repositories
+  clone_master_repo_list
   start_git_daemon
 
-  export RELAY_REPO_PATH=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
+  # Server now treats RELAY_REPO_PATH as the repository ROOT directory
+  export RELAY_REPO_PATH=${RELAY_REPO_PATH:-/srv/relay/data}
   # Allocate an ephemeral port if RELAY_BIND not explicitly provided.
   # If RELAY_BIND is provided in the form host:port and port is non-zero, we'll use it.
   if [ -n "${RELAY_BIND:-}" ]; then
