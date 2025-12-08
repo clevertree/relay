@@ -15,7 +15,7 @@ This document outlines the end-to-end plan to:
 - Registry: GHCR `ghcr.io`. Image name will follow the pattern `ghcr.io/<owner>/<repo>:<tag>`.
 - Source Dockerfile: `Dockerfile` at the repository root. It builds the Rust server binary and packages runtime
   dependencies (git, deluge, IPFS/kubo, tini). Ports exposed by the image: 8088 (HTTP), 9418 (git), plus IPFS and Deluge
-  ports. See `docs/ipfs-plan.md` for the IPFS node design and serving/caching plan.
+  ports. See the infrastructure section of this file or the project vision document for deployment architecture.
 - Authentication: Use `GHCR_PAT` within GitHub Actions to push to GHCR. The workflow will set appropriate permissions.
 - Tagging strategy:
     - For branch builds on `main`: `ghcr.io/<owner>/<repo>:main` and `ghcr.io/<owner>/<repo>:sha-<shortsha>`.

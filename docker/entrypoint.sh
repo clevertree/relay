@@ -141,12 +141,50 @@ PY
   /usr/local/bin/relay-server serve --repo "$RELAY_REPO_PATH" --static /srv/relay/www --bind "$RELAY_BIND" &
   RELAY_PID=$!
 
-  # Start git-pull timer (triggers every hour)
+  # Start git-pull timer (triggers every hour) with re-clone attempts for missing repos
   start_git_pull_timer() {
+    # First wait a bit to let the relay server start
+    sleep 10
+    
     while true; do
       sleep 3600  # Wait 1 hour
-      echo "$(date): Triggering git-pull..."
-      curl -s -X POST "http://localhost:${PORT_FOR_ADVERTISE}/git-pull" 2>/dev/null | jq '.' || echo "git-pull request failed"
+      echo "$(date): Running periodic git updates and repo checks..."
+      
+      # Attempt to re-clone any missing repos from RELAY_MASTER_REPO_LIST
+      if [ -n "${RELAY_MASTER_REPO_LIST:-}" ]; then
+        ROOT=${RELAY_REPO_ROOT:-/srv/relay/data}
+        repos="${RELAY_MASTER_REPO_LIST}"
+        while [ -n "$repos" ]; do
+          url="${repos%%;*}"
+          if [ "$url" = "$repos" ]; then
+            rest=""
+          else
+            rest="${repos#*;}"
+          fi
+          
+          u=$(echo "$url" | tr -d ' \t\r\n')
+          if [ -n "$u" ]; then
+            name=$(echo "$u" | awk -F/ '{print $NF}' | sed 's/\.git$//' | tr -d ' \t')
+            if [ -n "$name" ]; then
+              dest="$ROOT/${name}.git"
+              # Check if repo is missing or incomplete
+              if [ ! -d "$dest" ] || [ ! -d "$dest/objects" ]; then
+                echo "$(date): Attempting to clone missing repo: $u -> $dest"
+                if git clone --bare "$u" "$dest" 2>&1; then
+                  echo "$(date): Successfully re-cloned $name"
+                else
+                  echo "$(date): Failed to re-clone $u; will retry on next cycle"
+                fi
+              fi
+            fi
+          fi
+          repos="$rest"
+        done
+      fi
+      
+      # Trigger git-pull on all existing repos via relay server API
+      echo "$(date): Triggering git-pull on all repositories via relay API..."
+      curl -s -X POST "http://localhost:${PORT_FOR_ADVERTISE}/git-pull" 2>/dev/null | jq '.' 2>/dev/null || echo "$(date): git-pull request completed (or timed out)"
     done
   }
   start_git_pull_timer &
