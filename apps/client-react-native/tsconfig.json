@@ -9,7 +9,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
+    "strict": false,
     "baseUrl": ".",
+    "types": ["nativewind/types"],
     "paths": {
       "@/components/*": ["src/components/*"],
       "@/state/*": ["src/state/*"],
