@@ -89,7 +89,15 @@ jobs:
             -PANDROID_KEYSTORE_ALIAS=${{ secrets.ANDROID_KEYSTORE_ALIAS || 'androiddebugkey' }} \
             -PANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }} \
             -PANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'android' }} \
-            --no-daemon
+            --no-daemon \
+            --stacktrace \
+            --info 2>&1 | tee build.log
+          BUILD_EXIT_CODE=$?
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "=== Build Failed ==="
+            tail -200 build.log
+            exit $BUILD_EXIT_CODE
+          fi
 
       - name: Debug build outputs
         run: |

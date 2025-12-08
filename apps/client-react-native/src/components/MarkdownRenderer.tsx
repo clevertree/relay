@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text, View, Image, TouchableOpacity, ViewProps, TextProps } from 'react-native';
-// @ts-ignore - markdown-to-jsx may not have types, but NativeWind's Babel plugin handles this
+// @ts-ignore - markdown-to-jsx types not available
 import Markdown from 'markdown-to-jsx';
 import { ThemeManager } from '../utils/themeManager';
 
