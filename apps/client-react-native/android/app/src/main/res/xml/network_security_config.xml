@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
+    <!-- Default configuration for production (HTTPS by default) -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">relaynet.online</domain>
+    </domain-config>
+    
     <!-- Allow cleartext traffic for local development servers -->
     <domain-config cleartextTrafficPermitted="true">
         <!-- Android emulator special host -->
@@ -7,16 +12,10 @@
         <!-- Localhost and loopback -->
         <domain includeSubdomains="true">localhost</domain>
         <domain includeSubdomains="true">127.0.0.1</domain>
-    </domain-config>
-
-    <!-- Allow cleartext for internal/private network ranges (development only) -->
-    <domain-config cleartextTrafficPermitted="true">
-        <!-- RFC 1918 private ranges -->
+        <!-- Any development server on port 8080 -->
+        <domain includeSubdomains="true">192.168.1.0</domain>
         <domain includeSubdomains="true">192.168.0.0</domain>
         <domain includeSubdomains="true">10.0.0.0</domain>
         <domain includeSubdomains="true">172.16.0.0</domain>
     </domain-config>
-
-    <!-- Production domains use HTTPS (no cleartext needed) -->
-    <!-- node-dfw1.relaynet.online and node-dfw2.relaynet.online are accessed via HTTPS -->
 </network-security-config>

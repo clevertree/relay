@@ -104,11 +104,11 @@ async function probeHttps(host: string): Promise<ProbeResult> {
     // Parse the URL to extract port and protocol
     const parsed = parseHostUrl(host);
     port = parsed.port || (parsed.protocol === 'http' ? 80 : 443);
-    protocol = (parsed.protocol === 'http' ? 'https' : 'https') as PeerProtocol;
+    protocol = (parsed.protocol === 'http' ? 'http' : 'https') as PeerProtocol;
     
     // Use the full URL if it was provided, otherwise construct one
     if (!host.startsWith('http')) {
-      urlString = `https://${host}/`;
+      urlString = `${protocol}://${host}/`;
     }
   } catch {
     // Fall back to https if parsing fails
@@ -118,7 +118,7 @@ async function probeHttps(host: string): Promise<ProbeResult> {
   for (let i = 0; i < PROBE_SAMPLES; i++) {
     const start = Date.now();
     try {
-      const res = await fetchWithTimeout(urlString, {method: 'HEAD', timeout: PROBE_TIMEOUT_MS});
+      const res = await fetchWithTimeout(urlString);
       if (res.ok || res.status < 500) {
         latencies.push(Date.now() - start);
       }
@@ -147,7 +147,7 @@ async function probeIpfsApi(host: string): Promise<ProbeResult> {
     const start = Date.now();
     try {
       const url = `http://${hostname}:${port}/api/v0/version`;
-      const res = await fetchWithTimeout(url, {method: 'POST', timeout: PROBE_TIMEOUT_MS});
+      const res = await fetchWithTimeout(url);
       if (res.ok) {
         latencies.push(Date.now() - start);
       }
@@ -176,7 +176,7 @@ async function probeIpfsGateway(host: string): Promise<ProbeResult> {
     const start = Date.now();
     try {
       const url = `http://${hostname}:${port}/ipfs/`;
-      const res = await fetchWithTimeout(url, {method: 'HEAD', timeout: PROBE_TIMEOUT_MS});
+      const res = await fetchWithTimeout(url);
       // Gateway may return 400 for malformed path, but that still means it's up
       if (res.status < 500) {
         latencies.push(Date.now() - start);
@@ -239,7 +239,7 @@ export async function fetchPeerOptions(host: string): Promise<{
     const hostPort = extractHostname(host);
     const url = `https://${hostPort}/`;
 
-    const res = await fetchWithTimeout(url, {method: 'OPTIONS', timeout: PROBE_TIMEOUT_MS});
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return {};
 
     const data = await res.json();
