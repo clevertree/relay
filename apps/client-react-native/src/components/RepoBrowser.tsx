@@ -19,7 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import MarkdownView from './MarkdownView';
+import MarkdownRenderer from './MarkdownRenderer';
 import { HookLoader, RNModuleLoader, transpileCode, looksLikeTsOrJsx, type HookContext } from '@relay/shared/runtime-loader';
 
 /**
@@ -121,7 +121,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
 
         if (loading) return <Text>Loading...</Text>
         if (error) return <Text style={{ color: 'red' }}>{error}</Text>
-        return <MarkdownView content={content} />
+        return <MarkdownRenderer content={content} />
       }
 
       const loadModule = async (modulePath: string): Promise<any> => {
@@ -588,7 +588,7 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
             <Text style={styles.branchText}>{branch}</Text>
           </View>
         )}
-        
+
         {/* Search input - flex to take available space */}
         <TextInput
           style={styles.input}
@@ -600,7 +600,7 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
           autoCorrect={false}
           onSubmitEditing={isPathInput ? handleSearch : handleVisit}
         />
-        
+
         {/* Visit button - only show when input doesn't start with '/' */}
         {!isPathInput && (
           <TouchableOpacity
@@ -610,7 +610,7 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
             <Text style={styles.actionButtonText}>Visit</Text>
           </TouchableOpacity>
         )}
-        
+
         {/* Search button - only show when input starts with '/' */}
         {isPathInput && (
           <TouchableOpacity
@@ -651,10 +651,8 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
         // it using the MarkdownView. Otherwise show the search/list view.
         (mode === 'visit' && displayedResults.length > 0 && displayedResults[0].content) ? (
           <View style={styles.markdownContainer}>
-            <MarkdownView
+            <MarkdownRenderer
               content={displayedResults[0].content as string}
-              baseUrl={getBaseUrl()}
-              branch={branch}
               onLinkPress={(url) => {
                 // Navigate to external links in browser
                 // If internal path, set as new input and visit

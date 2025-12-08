@@ -1,47 +1,17 @@
 #!/bin/sh
 # Minimal entrypoint for Relay all-in-one image.
-# Starts IPFS, Deluge, ensures a bare repo exists, runs git-daemon, then execs relay-server.
+# Starts IPFS, Deluge, clones bare repos from RELAY_MASTER_REPO_LIST, runs git-daemon, then execs relay-server.
 
 set -e
-
-clone_default_repo() {
-  # Legacy single-repo initialization (kept for backward compatibility when RELAY_MASTER_REPO_LIST is empty)
-  repo=${RELAY_REPO_PATH:-/srv/relay/data/repo.git}
-  # If repo already exists and looks valid, keep it
-  if [ -d "$repo" ] && [ -d "$repo/objects" ]; then
-    echo "Using existing bare repo at $repo"
-    return
-  fi
-
-  # Prefer copying a provided default repo from /data/repo.git (mount host ./data -> /data)
-  if [ -d "/data/repo.git" ] && [ -d "/data/repo.git/objects" ]; then
-    echo "Copying default bare repo from /data/repo.git to $repo"
-    mkdir -p "$(dirname "$repo")"
-    cp -a /data/repo.git "$repo"
-    return
-  fi
-
-  # Otherwise, attempt to clone the template; if it fails, initialize an empty bare repo
-  tmpl=${RELAY_TEMPLATE_URL:-https://github.com/clevertree/relay-template}
-  echo "Cloning bare repo from $tmpl to $repo"
-  mkdir -p "$(dirname "$repo")"
-  if git clone --bare "$tmpl" "$repo"; then
-    echo "Template cloned successfully"
-  else
-    echo "Template clone failed; initializing empty bare repo at $repo"
-    git init --bare "$repo"
-  fi
-}
 
 clone_master_repo_list() {
   # New multi-repo initialization using RELAY_MASTER_REPO_LIST
   ROOT=${RELAY_REPO_ROOT:-/srv/relay/data}
   mkdir -p "$ROOT"
-  
-  # Check if list is empty
+
+  # If list is empty, nothing to clone (no fallbacks)
   if [ -z "${RELAY_MASTER_REPO_LIST:-}" ]; then
-    echo "RELAY_MASTER_REPO_LIST is empty; falling back to legacy single repo init"
-    clone_default_repo
+    echo "RELAY_MASTER_REPO_LIST is empty; no repositories will be cloned."
     return
   fi
 
@@ -57,7 +27,7 @@ clone_master_repo_list() {
       # Remove this URL and the semicolon from the remaining string
       rest="${repos#*;}"
     fi
-    
+
     # Trim whitespace and process
     u=$(echo "$url" | tr -d ' \t\r\n')
     if [ -n "$u" ]; then
@@ -81,7 +51,7 @@ clone_master_repo_list() {
         fi
       fi
     fi
-    
+
     # Move to next URL
     repos="$rest"
   done
@@ -121,11 +91,11 @@ start_git_daemon() {
 main() {
   start_ipfs
   start_deluged
-  # Initialize repositories
+  # Initialize repositories strictly from RELAY_MASTER_REPO_LIST (no fallbacks)
   clone_master_repo_list
   start_git_daemon
 
-  # Server now treats RELAY_REPO_PATH as the repository ROOT directory
+  # Server treats RELAY_REPO_PATH as the repository ROOT directory
   export RELAY_REPO_PATH=${RELAY_REPO_PATH:-/srv/relay/data}
   # Allocate an ephemeral port if RELAY_BIND not explicitly provided.
   # If RELAY_BIND is provided in the form host:port and port is non-zero, we'll use it.

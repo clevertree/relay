@@ -2,7 +2,7 @@
  * React Native Theme Manager
  * Handles theme detection and application for React Native
  * Uses AsyncStorage for persistence and Appearance API for system preference
- * 
+ *
  * Usage:
  *   await ThemeManager.initialize() // Call on app startup
  *   await ThemeManager.setTheme('dark') // Switch themes
@@ -22,9 +22,9 @@ interface ThemeManagerState {
 
 export class ThemeManager {
   private static readonly STORAGE_KEY = 'relay-theme-preference';
-  private static readonly DEFAULT_THEME: ThemeName = 'light';
+  private static readonly DEFAULT_THEME: ThemeName = 'dark';
   private static state: ThemeManagerState = {
-    currentTheme: 'light',
+    currentTheme: 'dark',
     listeners: new Set(),
     initialized: false,
   };
@@ -181,8 +181,16 @@ export class ThemeManager {
    */
   static getColors() {
     // Dynamically import to avoid circular dependencies
-    const { COLORS } = require('../../../template/hooks/client/colors.js');
-    return this.state.currentTheme === 'dark' ? COLORS.dark : COLORS.light;
+    const { THEMES } = require('../../../template/hooks/client/theme.js');
+    return this.state.currentTheme === 'dark' ? THEMES.dark.colors : THEMES.light.colors;
+  }
+
+  /**
+   * Get full theme tokens (colors, spacing, typography)
+   */
+  static getTokens() {
+    const { THEMES } = require('../../../template/hooks/client/theme.js');
+    return this.state.currentTheme === 'dark' ? THEMES.dark : THEMES.light;
   }
 
   /**

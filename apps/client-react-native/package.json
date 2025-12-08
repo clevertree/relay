@@ -12,7 +12,7 @@
     "android:release": "cd android && gradlew.bat installRelease",
     "ios": "react-native run-ios",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node scripts/ensure-reactandroid-settings.js"
+    "test": "jest"
   },
   "dependencies": {
     "@babel/runtime": "^7.24.0",
@@ -23,6 +23,7 @@
     "@react-navigation/native": "^6.1.0",
     "@react-navigation/native-stack": "^6.9.0",
     "@relay/shared": "file:../shared",
+    "markdown-to-jsx": "^7.4.6",
     "nativewind": "^4.0.36",
     "react": "18.2.0",
     "react-native": "0.75.4",
@@ -34,13 +35,26 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@react-native-community/cli": "latest",
     "@react-native/babel-preset": "0.75.4",
     "@react-native/codegen": "0.75.4",
     "@react-native/gradle-plugin": "0.75.4",
     "@react-native/metro-config": "0.75.4",
     "@types/react": "18.3.12",
+    "jest": "^29.7.0",
+    "react-test-renderer": "18.2.0",
     "tailwindcss": "^3.4.18",
     "typescript": "5.6.3"
+  }
+  ,
+  "jest": {
+    "preset": "react-native",
+    "transformIgnorePatterns": [
+      "node_modules/(?!(@react-native|react-native|@react-navigation|react-clone-referenced-element|nativewind|markdown-to-jsx)/)"
+    ],
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ]
   }
 }
