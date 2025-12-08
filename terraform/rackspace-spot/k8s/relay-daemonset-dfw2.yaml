@@ -21,8 +21,8 @@ spec:
         - operator: "Exists"
       containers:
         - name: relay
-          # Image published by CI: use the latest sha-tagged image pushed to GHCR
-          image: ghcr.io/clevertree/relay:sha-7b310cb
+          # Image published by CI: use the latest version pushed to GHCR
+          image: ghcr.io/clevertree/relay:latest
           imagePullPolicy: Always
           env:
             - name: RELAY_SSL_MODE
