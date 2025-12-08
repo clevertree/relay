@@ -32,22 +32,24 @@ interface StyledImageProps {
 
 // Wrapper components that accept className
 const StyledView = React.forwardRef<View, StyledViewProps>(
-  ({ className, ...props }, ref) => <View ref={ref} {...props} />
+  ({ className, ...props }, ref) => <View ref={ref} {...(props as ViewProps)} />
 );
 StyledView.displayName = 'StyledView';
 
 const StyledText = React.forwardRef<Text, StyledTextProps>(
-  ({ className, ...props }, ref) => <Text ref={ref} {...props} />
+  ({ className, ...props }, ref) => <Text ref={ref} {...(props as TextProps)} />
 );
 StyledText.displayName = 'StyledText';
 
-const StyledTouchable = React.forwardRef<typeof TouchableOpacity, StyledTouchableProps>(
-  ({ className, ...props }, ref) => <TouchableOpacity ref={ref as any} {...props} />
+const StyledTouchable = React.forwardRef<any, StyledTouchableProps>(
+  ({ className, ...props }, ref) => (
+    <TouchableOpacity ref={ref} {...(props as ViewProps & { onPress?: () => void })} />
+  )
 );
 StyledTouchable.displayName = 'StyledTouchable';
 
 const StyledImage: React.FC<StyledImageProps> = ({ className, ...props }) => (
-  <Image {...props} />
+  <Image {...(props as any)} />
 );
 
 // Basic Native components with NativeWind className support
@@ -199,7 +201,7 @@ export const MarkdownRenderer: React.FC<Props> = ({ content, onLinkPress }) => {
   // Ensure theme tokens are computed (side effect not needed, but call for consistency)
   void ThemeManager.getTokens();
   return (
-    <View className="p-3">
+    <StyledView className="p-3">
       <Markdown
         options={{
           forceBlock: true,
@@ -225,7 +227,7 @@ export const MarkdownRenderer: React.FC<Props> = ({ content, onLinkPress }) => {
       >
         {content}
       </Markdown>
-    </View>
+    </StyledView>
   );
 };
 
