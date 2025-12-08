@@ -8,31 +8,6 @@ interface PeersViewProps {
     onPeerPress?: (host: string) => void
 }
 
-/**
- * Helper function to safely render array fields that might contain objects or strings
- */
-function renderArrayField(items: any[]): string {
-    if (!Array.isArray(items)) {
-        return String(items)
-    }
-
-    return items
-        .map((item) => {
-            if (typeof item === 'string') {
-                return item
-            }
-            if (typeof item === 'object' && item !== null && 'name' in item) {
-                return item.name
-            }
-            if (typeof item === 'object' && item !== null && 'path' in item) {
-                return item.path
-            }
-            // Fallback: just use the string representation
-            return String(item)
-        })
-        .join(', ')
-}
-
 export function PeersView({onPeerPress}: PeersViewProps) {
     const peers = useAppState((s) => s.peers)
     const setPeers = useAppState((s) => s.setPeers)
@@ -211,17 +186,28 @@ export function PeersView({onPeerPress}: PeersViewProps) {
                                 </div>
                             </div>
 
-                            {peer.branches && peer.branches.length > 0 && (
-                                <div className="flex gap-2 mb-1 text-sm">
-                                    <span className="font-semibold text-gray-600">Branches:</span>
-                                    <span className="text-gray-500">{renderArrayField(peer.branches)}</span>
-                                </div>
-                            )}
-
-                            {peer.repos && peer.repos.length > 0 && (
-                                <div className="flex gap-2 mb-1 text-sm">
-                                    <span className="font-semibold text-gray-600">Repos:</span>
-                                    <span className="text-gray-500">{renderArrayField(peer.repos)}</span>
+                            {peer.reposWithBranches && peer.reposWithBranches.length > 0 && (
+                                <div className="text-sm space-y-2 mt-2">
+                                    <div className="font-semibold text-gray-600">Repositories:</div>
+                                    <div className="space-y-2 pl-2">
+                                        {peer.reposWithBranches.map((repo) => (
+                                            <div key={repo.name} className="space-y-1">
+                                                <div className="font-mono text-xs font-semibold bg-blue-50 text-blue-700 px-2 py-1 rounded w-fit">
+                                                    {repo.name}
+                                                </div>
+                                                <div className="space-y-1 pl-2">
+                                                    {Object.entries(repo.branches).map(([branch, commit]) => (
+                                                        <div key={branch} className="flex items-center gap-2 text-xs text-gray-600">
+                                                            <span className="font-semibold">{branch}:</span>
+                                                            <code className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">
+                                                                {commit.substring(0, 7)}
+                                                            </code>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
 

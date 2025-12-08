@@ -165,6 +165,7 @@ export async function fetchPeerOptions(
 ): Promise<{
   branches?: string[]
   repos?: string[]
+  repos_with_branches?: Array<{ name: string; branches: Record<string, string> }>
   branchHeads?: Record<string, string>
   lastUpdateTs?: number
 }> {
@@ -184,6 +185,7 @@ export async function fetchPeerOptions(
         return {
           branches: data.branches,
           repos: data.repos,
+          repos_with_branches: data.repos, // The OPTIONS response includes repos with full structure
           branchHeads: data.branchHeads,
           lastUpdateTs: Date.now(),
         }
@@ -206,6 +208,7 @@ export async function fullProbePeer(
   probes: PeerProbe[]
   branches?: string[]
   repos?: string[]
+  reposWithBranches?: Array<{ name: string; branches: Record<string, string> }>
   lastUpdateTs?: number
 }> {
   const probes: PeerProbe[] = []
@@ -229,6 +232,7 @@ export async function fullProbePeer(
     probes,
     branches: options.branches,
     repos: options.repos,
+    reposWithBranches: options.repos_with_branches,
     lastUpdateTs: options.lastUpdateTs,
   }
 }

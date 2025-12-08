@@ -16,6 +16,7 @@ export interface PeerInfo {
     probes: PeerProbe[]
     branches?: string[]
     repos?: string[]
+    reposWithBranches?: Array<{ name: string; branches: Record<string, string> }>
     isProbing?: boolean
 }
 
