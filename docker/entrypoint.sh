@@ -364,8 +364,24 @@ server {
     # Serve static files (client-web) from the www directory
     root /srv/relay/www;
 
-    # First try to serve static files from the www directory
-    # If not found, proxy to the relay server
+    # Handle OPTIONS requests directly via proxy (discovery endpoint)
+    location = / {
+        if (\$request_method = OPTIONS) {
+            proxy_pass http://127.0.0.1:$RELAY_PORT;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+        }
+        # Try to serve files from the www directory first
+        try_files \$uri \$uri/ @proxy;
+
+        # Set cache headers for static assets
+        expires 1h;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Non-root paths: try files first, then proxy
     location / {
         # Try to serve files from the www directory first
         try_files \$uri \$uri/ @proxy;
@@ -521,8 +537,27 @@ server {
     # Ensure directory requests (like "/") serve index.html from client-web
     index index.html;
 
-    # First try to serve static files from the www directory
-    # If not found, proxy to the relay server
+    # Handle OPTIONS requests directly via proxy (discovery endpoint)
+    location = / {
+        limit_except GET HEAD POST OPTIONS {
+            deny all;
+        }
+        if (\$request_method = OPTIONS) {
+            proxy_pass http://127.0.0.1:$RELAY_PORT;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+        }
+        # Try to serve files from the www directory first
+        try_files \$uri \$uri/ @proxy;
+
+        # Set cache headers for static assets
+        expires 1h;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Non-root paths: try files first, then proxy
     location / {
         # Try to serve files from the www directory first
         try_files \$uri \$uri/ @proxy;
