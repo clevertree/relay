@@ -14,6 +14,9 @@ export default defineConfig({
     // Disable sourcemaps by default to keep Docker/CI builds memory-light.
     // Enable by setting VITE_SOURCEMAP=true when needed locally.
     sourcemap: process.env.VITE_SOURCEMAP === 'true',
+    rollupOptions: {
+      external: ['@babel/standalone'],
+    },
   },
   // Configure server to serve template folder
   resolve: {
