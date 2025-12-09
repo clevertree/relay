@@ -303,8 +303,32 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                 if (looksLikeJsxOrTsx) {
                     console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with @babel/standalone`)
                     // @ts-ignore - @babel/standalone doesn't have type definitions
-                    const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
-                    const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
+                    let BabelNs: any
+                    let Babel: any
+                    try {
+                        // Try to import using the bundler-resolved specifier first
+                        BabelNs = await import(/* @vite-ignore */ '@babel/standalone')
+                        Babel = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
+                    } catch (importErr) {
+                        // Fallback: load Babel from a CDN into window.Babel (UMD build)
+                        console.warn(`[Hook ${kind}] Failed to import @babel/standalone via specifier; falling back to CDN:`, importErr)
+                        try {
+                            await new Promise<void>((resolve, reject) => {
+                                if ((window as any).Babel) return resolve()
+                                const s = document.createElement('script')
+                                s.src = 'https://unpkg.com/@babel/standalone@7.21.4/babel.min.js'
+                                s.async = true
+                                s.onload = () => resolve()
+                                s.onerror = () => reject(new Error('Failed to load @babel/standalone from CDN'))
+                                document.head.appendChild(s)
+                            })
+                            Babel = (window as any).Babel
+                            if (!Babel) throw new Error('window.Babel not available after CDN load')
+                        } catch (cdnErr) {
+                            console.warn(`[Hook ${kind}] CDN fallback for @babel/standalone failed:`, cdnErr)
+                            throw importErr // rethrow original import error so outer catch can handle
+                        }
+                    }
 
                     const presets: any[] = []
                     // TypeScript first so JSX remains for React preset to handle
