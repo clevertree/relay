@@ -364,26 +364,8 @@ server {
     # Serve static files (client-web) from the www directory
     root /srv/relay/www;
 
-    # Root location: proxy everything to relay-server
-    # The relay-server can handle both static file serving and API requests
+    # Handle all requests: try static files first, then proxy
     location / {
-        proxy_pass http://127.0.0.1:$RELAY_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # Try local files first (for efficiency)
-        #try_files \$uri \$uri/ @proxy;
-
-        # Set cache headers for static assets
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Non-root paths: try files first, then proxy
-    location / {
-        # Try to serve files from the www directory first
         try_files \$uri \$uri/ @proxy;
 
         # Set cache headers for static assets
@@ -391,7 +373,7 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
-    # Proxy for API and repo endpoints
+    # Proxy for failed static file matches
     location @proxy {
         proxy_pass http://127.0.0.1:$RELAY_PORT;
         proxy_set_header Host \$host;
@@ -418,6 +400,9 @@ server {
     location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
         try_files \$uri @proxy;
         expires 1h;
+        add_header Cache-Control "public, immutable";
+    }
+}
         add_header Cache-Control "public, immutable";
     }
 }
