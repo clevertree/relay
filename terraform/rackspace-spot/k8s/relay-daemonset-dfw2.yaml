@@ -22,7 +22,7 @@ spec:
       containers:
         - name: relay
           # Image published by CI: use the latest version pushed to GHCR
-          image: ghcr.io/clevertree/relay:latest
+          image: ghcr.io/clevertree/relay:main
           imagePullPolicy: Always
           env:
             - name: RELAY_SSL_MODE
