@@ -8,7 +8,7 @@ set -e
 TEST_DIR=$(mktemp -d)
 echo "Using temp dir: $TEST_DIR"
 
-# Create Flask backend (minimal relay-like OPTIONS response)
+# Create Flask backend (minimal relay-like OPTIONS response, 404 for GET /)
 cat > "$TEST_DIR/backend.py" << 'EOF'
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -24,6 +24,9 @@ def handle_all(path):
             "capabilities": ["GET", "POST", "PUT", "DELETE"],
             "version": "1.0"
         })
+    if request.method in ['GET', 'HEAD'] and path == '':
+        # Simulate relay backend: return 404 for root GET/HEAD to trigger static fallback
+        return '', 404
     return jsonify({"path": path, "method": request.method})
 
 if __name__ == '__main__':
@@ -173,7 +176,20 @@ curl -i -X OPTIONS http://localhost:${HOST_PORT}/
 echo -e "\n=== Test 3: Static asset CORS ==="
 curl -i http://localhost:${HOST_PORT}/index.html
 
-# Cleanup
+echo -e "\n=== Test 4: GET / static fallback ==="
+status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${HOST_PORT}/)
+if [ "$status" -eq 200 ]; then
+    body=$(curl -s http://localhost:${HOST_PORT}/)
+    if echo "$body" | grep -q "<html>"; then
+        echo "PASS: GET / returned 200 with static HTML"
+    else
+        echo "FAIL: GET / returned 200 but not HTML"
+        exit 1
+    fi
+else
+    echo "FAIL: GET / returned status $status, expected 200"
+    exit 1
+fi
 docker stop backend nginx-test
 docker rm backend nginx-test
 docker network rm test-net

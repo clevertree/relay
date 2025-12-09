@@ -67,6 +67,7 @@ See main README.md for complete environment variable documentation.
 - Verify relay-server is running on expected port
 - Check nginx configuration: `docker exec <container> cat /etc/nginx/sites-enabled/default`
 - Ensure SSL certificates were properly generated
+- **Static fallback**: GET / should return 200 with HTML content (not 204); if it returns 204, check relay-server root handler
 
 #### Manual Debugging
 
@@ -119,3 +120,20 @@ services:
 
 #### Kubernetes
 See `terraform/rackspace-spot/k8s/relay-daemonset.yaml` for production deployment example.
+
+### Testing
+
+Run the local CORS and static fallback test:
+
+```bash
+./test_cors.sh
+```
+
+This validates CORS preflight, OPTIONS capabilities, and GET / static fallback.
+
+For live testing:
+
+```bash
+curl -i https://your-domain.com/
+# Should return 200 with HTML
+```

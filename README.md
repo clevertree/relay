@@ -143,7 +143,7 @@ relay/
     - `Access-Control-Allow-Headers: <echoed from request Access-Control-Request-Headers>`
     - `Access-Control-Max-Age: 86400`
     - `Access-Control-Allow-Origin: *`
-  - This applies for all paths, including static files.
+  - This applies for all paths (including static files) and on both HTTPS:443 and HTTP:80. On port 80, nginx handles preflight directly (204) before redirecting other methods to HTTPS to avoid missing CORS headers during redirects.
 - Non-preflight `OPTIONS` requests (no `Access-Control-Request-Method` header) are proxied to the relay server so it can return its capabilities JSON body.
 
 ### Examples
@@ -171,6 +171,17 @@ curl -i -X OPTIONS https://your-host/path
 ```
 
 Expected: proxied response from the relay-server (JSON capabilities) and `Access-Control-Allow-Origin: *` present.
+
+4) Preflight sent to HTTP (port 80) still succeeds
+
+```bash
+curl -i -X OPTIONS \
+  -H "Origin: https://example.com" \
+  -H "Access-Control-Request-Method: GET" \
+  http://your-host/
+```
+
+Expected: `204 No Content` with the same CORS headers; the redirect to HTTPS is only applied for non-preflight requests.
 
 3) Static asset access
 
