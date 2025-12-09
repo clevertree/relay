@@ -152,6 +152,14 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                 return null
             }
 
+            // If OPTIONS returned a valid payload but contains no repositories, surface a clearer error
+            if (Array.isArray(options.repos) && options.repos.length === 0) {
+                setError('Repository discovery did not return any repos. OPTIONS responded successfully but the repos list is empty. See details for diagnostics.')
+                setErrorDetails({phase: 'render', reason: 'no-repos', optionsInfo: options, diagnostics})
+                console.error('[RepoBrowser] No repos returned in OPTIONS payload:', {options, diagnostics})
+                return null
+            }
+
             setOptionsInfo(options)
             diagnostics.parsedFrom = parsedFrom
             const branches = options.repos?.[0]?.branches ? Object.keys(options.repos[0].branches) : undefined
