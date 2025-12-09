@@ -345,85 +345,15 @@ PY
   fi
 
   # --- Configure nginx to proxy to relay-server (always, even without SSL) ---
-  echo "Configuring nginx to proxy to relay-server on 8080"
+  echo "Configuring nginx to proxy to relay-server"
   RELAY_PORT=$(echo "$RELAY_BIND" | awk -F: '{print $NF}')
-  # Keep 8080 debug server block in a dedicated file so it isn't overwritten by SSL configs
-  cat > /etc/nginx/sites-enabled/relay-8080.conf <<EOF
-server {
-    listen 8080 default_server;
-    listen [::]:8080 default_server;
-
-    server_name _;
-
-    # Forward 405 responses (e.g., static handler on OPTIONS) to the relay server upstream
-    error_page 405 = @proxy;
-
-    # Ensure directory requests (like "/") serve index.html from client-web
-    index index.html;
-
-    # Handle OPTIONS requests at root to return JSON metadata from backend
-    location = / {
-        if (\$request_method = OPTIONS) {
-            proxy_pass http://127.0.0.1:$RELAY_PORT;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-        }
-
-        # For other methods, try static files first
-        try_files \$uri \$uri/ @proxy;
-
-        # Set cache headers for static assets
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Catch-all for other paths
-    location / {
-        try_files \$uri \$uri/ @proxy;
-
-        # Set cache headers for static assets
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Proxy for failed static file matches
-    location @proxy {
-        proxy_pass http://127.0.0.1:$RELAY_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Explicitly proxy API requests (for dynamic content)
-    location ~ ^/(api|branches|repos|files|search|options)/ {
-        # CORS headers to allow cross-origin requests
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
-        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
-
-        proxy_pass http://127.0.0.1:$RELAY_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Cache static assets; if not found in /srv/relay/www, proxy to relay-server (Git-backed)
-    location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        try_files \$uri @proxy;
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-}
-        add_header Cache-Control "public, immutable";
-    }
-}
-EOF
+  
+  # Copy the static nginx config for HTTP/port 8080
+  cp /docker/nginx-relay.conf /etc/nginx/sites-enabled/relay-8080.conf
+  
   # Remove any default nginx conf.d snippets to avoid duplicate default_server
   rm -f /etc/nginx/conf.d/* 2>/dev/null || true
+  
   # Start nginx
   nginx
 
@@ -444,42 +374,18 @@ EOF
         -keyout /etc/ssl/private/relay-selfsigned.key \
         -out /etc/ssl/certs/relay-selfsigned.crt
     fi
-    cat > /etc/nginx/sites-enabled/default <<EOF
-server {
-    listen 80;
-    server_name ${FQDN} _;
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name ${FQDN} _;
-
-    ssl_certificate /etc/ssl/certs/relay-selfsigned.crt;
-    ssl_certificate_key /etc/ssl/private/relay-selfsigned.key;
-
-    location / {
-        proxy_pass http://127.0.0.1:${RELAY_PORT};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location ~ ^/(api|branches|repos|files|search|options)/ {
-        # CORS headers to allow cross-origin requests
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
-        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
-
-        proxy_pass http://127.0.0.1:${RELAY_PORT};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-EOF
+    
+    # Generate SSL config from template
+    SSL_CERT_PATH="/etc/ssl/certs/relay-selfsigned.crt"
+    SSL_KEY_PATH="/etc/ssl/private/relay-selfsigned.key"
+    SSL_OPTIONS_INCLUDE=""
+    
+    sed -e "s|{{FQDN}}|${FQDN}|g" \
+        -e "s|{{SSL_CERT_PATH}}|${SSL_CERT_PATH}|g" \
+        -e "s|{{SSL_KEY_PATH}}|${SSL_KEY_PATH}|g" \
+        -e "s|{{SSL_OPTIONS_INCLUDE}}||g" \
+        /docker/nginx-ssl.conf.template > /etc/nginx/sites-enabled/default
+    
     nginx -s reload || true
 
   elif [ -n "${RELAY_CERTBOT_EMAIL:-}" ]; then
@@ -512,98 +418,18 @@ EOF
 
     if [ $CERT_PRESENT -eq 1 ]; then
       echo "Configuring nginx to proxy to relay-server with SSL for ${FQDN}"
-      cat > /etc/nginx/sites-enabled/default <<EOF
-server {
-    listen 80;
-    server_name ${FQDN};
-    return 301 https://\$server_name\$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name ${FQDN};
-
-    ssl_certificate /etc/letsencrypt/live/${FQDN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${FQDN}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
-    # Serve static files (client-web) from the www directory
-    root /srv/relay/www;
-
-    # Forward 405 responses (e.g., static handler on OPTIONS) to the relay server upstream
-    error_page 405 = @proxy;
-
-    # Ensure directory requests (like "/") serve index.html from client-web
-    index index.html;
-
-    # Handle OPTIONS requests at root to return JSON metadata from backend
-    location = / {
-        if (\$request_method = OPTIONS) {
-            proxy_pass http://127.0.0.1:$RELAY_PORT;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-        }
-
-        # For other methods, proxy everything to relay-server
-        # The relay-server can handle both static file serving and API requests
-        proxy_pass http://127.0.0.1:$RELAY_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # Set cache headers for static assets
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Catch-all location for other paths
-    location / {
-        proxy_pass http://127.0.0.1:$RELAY_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # Set cache headers for static assets
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Proxy for API and repo endpoints
-    location @proxy {
-        proxy_pass http://127.0.0.1:$RELAY_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Explicitly proxy API requests (for dynamic content)
-    location ~ ^/(api|branches|repos|files|search|options)/ {
-        # CORS headers to allow cross-origin requests
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
-        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
-
-        proxy_pass http://127.0.0.1:$RELAY_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Cache static assets; if not found in /srv/relay/www, proxy to relay-server (Git-backed)
-    location ~ \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        try_files \$uri @proxy;
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-}
-EOF
+      
+      # Generate SSL config from template
+      SSL_CERT_PATH="/etc/letsencrypt/live/${FQDN}/fullchain.pem"
+      SSL_KEY_PATH="/etc/letsencrypt/live/${FQDN}/privkey.pem"
+      SSL_OPTIONS_INCLUDE="include /etc/letsencrypt/options-ssl-nginx.conf; ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;"
+      
+      sed -e "s|{{FQDN}}|${FQDN}|g" \
+          -e "s|{{SSL_CERT_PATH}}|${SSL_CERT_PATH}|g" \
+          -e "s|{{SSL_KEY_PATH}}|${SSL_KEY_PATH}|g" \
+          -e "s|{{SSL_OPTIONS_INCLUDE}}|${SSL_OPTIONS_INCLUDE}|g" \
+          /docker/nginx-ssl.conf.template > /etc/nginx/sites-enabled/default
+      
       nginx -s reload || true
     else
       if [ "$SSL_MODE" = "certbot-required" ]; then

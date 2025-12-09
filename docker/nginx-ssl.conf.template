@@ -1,0 +1,17 @@
+server {
+    listen 80;
+    server_name {{FQDN}};
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name {{FQDN}};
+
+    ssl_certificate {{SSL_CERT_PATH}};
+    ssl_certificate_key {{SSL_KEY_PATH}};
+    {{SSL_OPTIONS_INCLUDE}}
+
+    # Include the common location blocks from the base nginx config
+    include /docker/nginx-relay-locations.conf;
+}
