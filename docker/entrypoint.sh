@@ -364,17 +364,20 @@ server {
     # Serve static files (client-web) from the www directory
     root /srv/relay/www;
 
-    # Handle OPTIONS requests directly via proxy (discovery endpoint)
+    # Handle root path - OPTIONS requests go directly to proxy, others try files
     location = / {
-        if (\$request_method = OPTIONS) {
+        # For OPTIONS requests, proxy directly to relay-server
+        if ($request_method = OPTIONS) {
             proxy_pass http://127.0.0.1:$RELAY_PORT;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            access_log /var/log/nginx/options.log;
         }
-        # Try to serve files from the www directory first
-        try_files \$uri \$uri/ @proxy;
+
+        # Try to serve files from the www directory first (for non-OPTIONS)
+        try_files $uri $uri/ @proxy;
 
         # Set cache headers for static assets
         expires 1h;
@@ -537,20 +540,19 @@ server {
     # Ensure directory requests (like "/") serve index.html from client-web
     index index.html;
 
-    # Handle OPTIONS requests directly via proxy (discovery endpoint)
+    # Handle root path - OPTIONS requests go directly to proxy
     location = / {
-        limit_except GET HEAD POST OPTIONS {
-            deny all;
-        }
-        if (\$request_method = OPTIONS) {
+        # For OPTIONS requests, proxy directly to relay-server  
+        if ($request_method = OPTIONS) {
             proxy_pass http://127.0.0.1:$RELAY_PORT;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
         }
-        # Try to serve files from the www directory first
-        try_files \$uri \$uri/ @proxy;
+        
+        # Try to serve files from the www directory first (for non-OPTIONS)
+        try_files $uri $uri/ @proxy;
 
         # Set cache headers for static assets
         expires 1h;
