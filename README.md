@@ -146,6 +146,44 @@ relay/
   - This applies for all paths, including static files.
 - Non-preflight `OPTIONS` requests (no `Access-Control-Request-Method` header) are proxied to the relay server so it can return its capabilities JSON body.
 
+### Examples
+
+1) CORS preflight (handled by Nginx — returns 204)
+
+```bash
+curl -i -X OPTIONS \
+  -H "Origin: https://example.com" \
+  -H "Access-Control-Request-Method: GET" \
+  -H "Access-Control-Request-Headers: X-Requested-With,Content-Type" \
+  https://your-host/path
+```
+
+Expected: 204 No Content with headers:
+- `Access-Control-Allow-Origin: *`
+- `Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS`
+- `Access-Control-Allow-Headers: X-Requested-With,Content-Type`
+- `Access-Control-Max-Age: 86400`
+
+2) Non-preflight OPTIONS forwarded to relay-server (capabilities JSON)
+
+```bash
+curl -i -X OPTIONS https://your-host/path
+```
+
+Expected: proxied response from the relay-server (JSON capabilities) and `Access-Control-Allow-Origin: *` present.
+
+3) Static asset access
+
+```bash
+curl -i https://your-host/assets/app.js
+```
+
+Expected: `Access-Control-Allow-Origin: *` present on the static asset response.
+
+Notes:
+- If you need to allow credentials (cookies/Authorization) for cross-origin requests, do not use `*` for `Access-Control-Allow-Origin`. Instead, set the header dynamically to the `Origin` header and set `Access-Control-Allow-Credentials: true`; update `nginx` config accordingly.
+- The nginx preflight handling is intentionally minimal and echoes requested headers. If you require a stricter header whitelist, update `add_header Access-Control-Allow-Headers ...` to a safe list.
+
 ## Building the Web Client
 
 ```bash
