@@ -22,7 +22,11 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "@relay/shared": ["../shared/src"],
+      "@relay/shared/*": ["../shared/src/*"]
+    }
   },
   "include": ["src"]
 }
