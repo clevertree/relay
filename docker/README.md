@@ -137,3 +137,40 @@ For live testing:
 curl -i https://your-domain.com/
 # Should return 200 with HTML
 ```
+
+
+### Local Docker plan (80/443 + 8080/8443)
+
+This is the step-by-step plan we follow for local testing without regressing existing features:
+
+1) Nginx listeners and routing (unified config)
+- Global maps detect GET/HEAD and CORS preflight (`OPTIONS` + `Access-Control-Request-Method`).
+- Port 80: serve ACME path; return `204` for preflight with full CORS headers; redirect everything else to HTTPS :443.
+- Port 8080: no redirect; mirror HTTPS behavior for local testing. Universal CORS headers; handle preflight with `204`; proxy all other methods (including non‑preflight `OPTIONS`) to the relay backend; if backend returns `404` on `GET/HEAD`, serve static client from `/srv/relay/www` with SPA fallback to `index.html`.
+- Ports 443 and 8443 (TLS): same behavior as 8080; use cert symlinks in `/etc/letsencrypt/live/relay/`; handle ACME path and CORS consistently.
+
+2) Docker image
+- Expose `80 443 8080 8443 8088` (plus existing ports). The relay-server listens on `8088` internally; Nginx proxies external ports to it.
+
+3) Repository mounts
+- Mount host `/data` to `/srv/relay/data` inside the container so any existing `*.git` repositories (e.g., `/data/repo.git`) are served alongside clones from `RELAY_MASTER_REPO_LIST`.
+- The entrypoint clone logic skips repositories that already exist, and the hourly maintenance loop fetches/prunes to keep mirrors updated.
+
+4) Local build and run
+```bash
+docker build -t relay-all-in-one:local .
+
+docker run -d --name relay-local \
+  -p 80:80 -p 443:443 -p 8080:8080 -p 8443:8443 \
+  -e RELAY_ENABLE_IPFS=false -e RELAY_ENABLE_TORRENTS=false \
+  -e RELAY_MASTER_REPO_LIST="" \
+  -v $(pwd)/data:/srv/relay/data \
+  -v $(pwd)/apps/client-web/dist:/srv/relay/www:ro \
+  relay-all-in-one:local
+```
+
+5) Verification
+- Static client: `curl -i http://localhost:8080/index.html` → `200`, HTML body, `Access-Control-Allow-Origin` present.
+- Non‑preflight OPTIONS (capabilities): `curl -i -X OPTIONS http://localhost:8080/` → proxied relay response with CORS.
+- CORS preflight: `curl -i -X OPTIONS -H "Origin: https://example.com" -H "Access-Control-Request-Method: GET" http://localhost:8080/` → `204` with `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers` (echoed), and `Access-Control-Max-Age`.
+- Optional TLS: Repeat the above on `https://localhost:8443` (accept self‑signed until Certbot is configured).

@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:debug": "VITE_NODE_ENV=development VITE_SOURCEMAP=true vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@babel/standalone": "^7.26.2",
+    "@swc/wasm-web": "^1.2.147",
     "markdown-to-jsx": "^9.3.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -20,6 +21,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@swc/cli": "^0.7.9",
+    "@swc/core": "^1.15.3",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",

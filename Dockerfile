@@ -15,10 +15,10 @@ FROM ubuntu:24.04
 LABEL org.opencontainers.image.source="https://github.com/your-org/relay"
 WORKDIR /srv/relay
 
-# Install runtime deps: git-daemon, deluge, curl, tar, tini, nginx, certbot
+# Install runtime deps: git-daemon, deluge, curl, tar, tini, certbot (no nginx)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git git-daemon-run deluged deluge-web curl tar ca-certificates tini \
-    nginx certbot python3-certbot-nginx jq nodejs npm build-essential pkg-config libssl-dev \
+    certbot jq nodejs npm build-essential pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust toolchain
@@ -42,33 +42,33 @@ COPY apps/client-web/dist /srv/relay/www
 RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay
 
 # Entrypoint script handles:
-# - Repository initialization from RELAY_TEMPLATE_URL
-# - IPFS, Deluge, and Git daemon startup
-# - Relay server startup on RELAY_BIND port
+# - Repository initialization from RELAY_MASTER_REPO_LIST
+# - IPFS, Deluge, and Git daemon startup (optional via env flags)
+# - Relay server startup on RELAY_HTTP_PORT/RELAY_HTTPS_PORT (TLS optional)
 # - DNS registration via Vercel API (if VERCEL_API_TOKEN set)
-# - SSL certificate provisioning via Let's Encrypt (if RELAY_CERTBOT_EMAIL set)
-# - Nginx proxy configuration for HTTPS
+# - SSL certificate provisioning via Let's Encrypt webroot (if RELAY_CERTBOT_EMAIL set)
 COPY docker/entrypoint.sh /entrypoint.sh
-COPY docker/nginx-relay.conf /docker/nginx-relay.conf
 # Ensure entrypoint has Unix line endings inside the image (fixes CRLF from Windows hosts)
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Expose ports:
-# 80, 443 - HTTP/HTTPS (nginx proxy serving client-web)
-# 8080 - Local debug endpoint (nginx serving client + proxy to server)
-# 8088 - Relay server direct access
+# 80, 443 - HTTP/HTTPS served directly by relay-server
 # 9418 - Git daemon
 # 4001 - IPFS swarm (TCP)
 # 4001/udp - IPFS swarm (QUIC)
 # 5001 - IPFS API
 # 8082 - IPFS gateway
 # 58846, 58946 - Deluge daemon and web UI
-EXPOSE 80 443 8080 8088 9418 4001 4001/udp 5001 8082 58846 58946 58946/udp
+EXPOSE 80 443 9418 4001 4001/udp 5001 8082 58846 58946 58946/udp
 
 # Core configuration (server treats RELAY_REPO_PATH as a repository ROOT directory now)
 ENV RELAY_REPO_PATH=/srv/relay/data \
-    RELAY_BIND=0.0.0.0:8088 \
-    RELAY_TEMPLATE_URL=https://github.com/clevertree/relay-template \
-    RELAY_MASTER_REPO_LIST=""
+    RELAY_MASTER_REPO_LIST="" \
+    RELAY_ENABLE_IPFS=false \
+    RELAY_ENABLE_TORRENTS=false \
+    RELAY_HTTP_PORT=80 \
+    RELAY_HTTPS_PORT=443 \
+    RELAY_ACME_DIR=/var/www/certbot \
+    RELAY_STATIC_DIR=/srv/relay/www
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

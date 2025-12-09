@@ -4,6 +4,8 @@ export type RepoFetchContextValue = {
   baseUrl: string
   resolve: (path: string) => string
   fetch: (input: RequestInfo | URL | string, init?: RequestInit) => Promise<Response>
+  // Optional helpers for validated fetches (non-breaking addition)
+  fetchJson?: (path: string, init?: RequestInit) => Promise<any>
 }
 
 const defaultValue: RepoFetchContextValue = {

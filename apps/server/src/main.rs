@@ -1,4 +1,6 @@
 use std::{
+    fs::File,
+    io::BufReader,
     net::SocketAddr,
     path::{Path as FsPath, PathBuf},
     str::FromStr,
@@ -28,6 +30,8 @@ use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 use tracing_appender::rolling;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use axum_server::tls_rustls::RustlsConfig;
+use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 
 #[derive(Clone)]
 struct AppState {
@@ -72,7 +76,7 @@ struct ServeArgs {
     /// Additional static directory to serve files from (may be repeated)
     #[arg(long = "static", value_name = "DIR")]
     static_paths: Vec<PathBuf>,
-    /// Bind address (host:port)
+    /// Bind address (host:port) for HTTP (overrides RELAY_HTTP_PORT if set)
     #[arg(long)]
     bind: Option<String>,
 }
@@ -105,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Determine serve args from CLI/env
-    let (repo_path, static_paths, bind_cli): (PathBuf, Vec<PathBuf>, Option<String>) =
+    let (repo_path, mut static_paths, bind_cli): (PathBuf, Vec<PathBuf>, Option<String>) =
         match cli.command {
             Some(Commands::Serve(sa)) => {
                 let rp = sa
@@ -121,6 +125,12 @@ async fn main() -> anyhow::Result<()> {
                 (rp, Vec::new(), None)
             }
         };
+    // Append RELAY_STATIC_DIR if provided (comma-separated allowed)
+    if let Ok(extra) = std::env::var("RELAY_STATIC_DIR") {
+        for p in extra.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            static_paths.push(PathBuf::from(p));
+        }
+    }
     info!(repo_path = %repo_path.display(), "Repository path resolved");
     // Treat path as repository ROOT directory
     let _ = std::fs::create_dir_all(&repo_path);
@@ -135,13 +145,13 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|s| s.strip_suffix(".git"))
                 .unwrap_or(repo_url);
             let bare_repo_path = repo_path.join(format!("{}.git", repo_name));
-            
+
             // Skip if already cloned
             if bare_repo_path.exists() {
                 info!(repo = %repo_name, "Repository already exists, skipping clone");
                 continue;
             }
-            
+
             info!(repo = %repo_name, url = %repo_url, "Cloning repository");
             match std::process::Command::new("git")
                 .arg("clone")
@@ -170,12 +180,23 @@ async fn main() -> anyhow::Result<()> {
         static_paths,
     };
 
-    // Build app (breaking changes: removed /status and /query/*; OPTIONS is the discovery endpoint)
+    // Build app (OPTIONS is the discovery endpoint)
+    let acme_route_dir = std::env::var("RELAY_ACME_DIR").unwrap_or_else(|_| "/var/www/certbot".to_string());
     let app = Router::new()
         .route("/openapi.yaml", get(get_openapi_yaml))
         .route("/swagger-ui", get(get_swagger_ui))
         .route("/api/config", get(get_api_config))
         .route("/git-pull", post(post_git_pull))
+        // ACME HTTP-01 challenge support (served from RELAY_ACME_DIR)
+        .route(
+            "/.well-known/acme-challenge/*path",
+            get({
+                let dir = acme_route_dir.clone();
+                move |AxPath(path): AxPath<String>| async move {
+                    serve_acme_challenge(&dir, &path).await
+                }
+            }),
+        )
         .route("/", get(get_root).head(head_root).options(options_capabilities))
         .route(
             "/*path",
@@ -192,13 +213,51 @@ async fn main() -> anyhow::Result<()> {
 
     // Peer tracker removed; no background registration
 
-    let bind = bind_cli
-        .or_else(|| std::env::var("RELAY_BIND").ok())
-        .unwrap_or_else(|| "0.0.0.0:8088".into());
-    let addr = SocketAddr::from_str(&bind)?;
-    info!(%addr, "Relay server listening");
-    let listener = TcpListener::bind(&addr).await?;
-    axum::serve(listener, app.into_make_service()).await?;
+    // Configure listeners: HTTP and optional HTTPS via Rustls
+    let http_addr: SocketAddr = if let Some(bind) = bind_cli.or_else(|| std::env::var("RELAY_BIND").ok()) {
+        SocketAddr::from_str(&bind)?
+    } else {
+        let port = std::env::var("RELAY_HTTP_PORT").ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or(80);
+        SocketAddr::from_str(&format!("0.0.0.0:{}", port))?
+    };
+    let https_port = std::env::var("RELAY_HTTPS_PORT").ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or(443);
+    let tls_cert = std::env::var("RELAY_TLS_CERT").ok();
+    let tls_key = std::env::var("RELAY_TLS_KEY").ok();
+
+    let app_http = app.clone();
+    let http_task = tokio::spawn(async move {
+        info!(%http_addr, "HTTP listening");
+        let listener = TcpListener::bind(&http_addr).await.expect("bind http");
+        if let Err(e) = axum::serve(listener, app_http.into_make_service()).await {
+            error!(?e, "HTTP server error");
+        }
+    });
+
+    // HTTPS optional
+    let https_task = if let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) {
+        let https_addr: SocketAddr = SocketAddr::from_str(&format!("0.0.0.0:{}", https_port))?;
+        // load_rustls_config is async; await it here in the main async context
+        let config = load_rustls_config(&cert_path, &key_path).await?;
+        let app_https = app;
+        Some(tokio::spawn(async move {
+            info!(%https_addr, cert=%cert_path, key=%key_path, "HTTPS listening");
+            if let Err(e) = axum_server::bind_rustls(https_addr, config)
+                .serve(app_https.into_make_service())
+                .await
+            {
+                error!(?e, "HTTPS server error");
+            }
+        }))
+    } else {
+        info!("TLS is disabled: RELAY_TLS_CERT and RELAY_TLS_KEY not both set");
+        None
+    };
+
+    if let Some(t) = https_task {
+        let _ = tokio::join!(http_task, t);
+    } else {
+        let _ = tokio::join!(http_task);
+    }
     Ok(())
 }
 
@@ -542,7 +601,7 @@ async fn options_capabilities(
     let mut repos_json: Vec<serde_json::Value> = Vec::new();
     let mut branches_for_current: Vec<String> = Vec::new();
     let mut relay_config: Option<RelayConfig> = None;
-    
+
     for name in &repo_names {
         if let Some(repo) = open_repo(&state.repo_path, name) {
             let mut heads_map = serde_json::Map::new();
@@ -1269,7 +1328,7 @@ mod tests {
     #[tokio::test]
     async fn test_options_returns_repo_list() {
         let repo_dir = tempdir().unwrap();
-        
+
         // Create a bare repo named "repo.git" inside the temp directory
         let repo_path = repo_dir.path().join("repo.git");
         let repo = Repository::init_bare(&repo_path).unwrap();
@@ -1309,7 +1368,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_file_success() {
         let repo_dir = tempdir().unwrap();
-        
+
         // Create a bare repo named "repo.git" inside the temp directory
         let repo_path = repo_dir.path().join("repo.git");
         let repo = Repository::init_bare(&repo_path).unwrap();
@@ -1356,7 +1415,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_file_not_found() {
         let repo_dir = tempdir().unwrap();
-        
+
         // Create a bare repo named "repo.git" inside the temp directory
         let repo_path = repo_dir.path().join("repo.git");
         let repo = Repository::init_bare(&repo_path).unwrap();
@@ -1423,7 +1482,7 @@ mod tests {
     #[tokio::test]
     async fn test_options_headers() {
         let repo_dir = tempdir().unwrap();
-        
+
         // Create a bare repo named "repo.git" inside the temp directory
         let repo_path = repo_dir.path().join("repo.git");
         let repo = Repository::init_bare(&repo_path).unwrap();
@@ -1489,11 +1548,11 @@ mod tests {
     #[tokio::test]
     async fn test_strict_repo_from_default() {
         let repo_dir = tempdir().unwrap();
-        
+
         // Create a bare repo named "repo"
         let repo_path = repo_dir.path().join("repo.git");
         let repo = Repository::init_bare(&repo_path).unwrap();
-        
+
         let sig = Signature::now("relay", "relay@local").unwrap();
         let tb = repo.treebuilder(None).unwrap();
         let tree_id = tb.write().unwrap();
@@ -1501,7 +1560,7 @@ mod tests {
         let _commit_oid = repo
             .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
             .unwrap();
-        
+
         let headers = HeaderMap::new();
         let selected = strict_repo_from(&repo_dir.path().to_path_buf(), &headers);
 
@@ -1524,7 +1583,7 @@ mod tests {
     #[tokio::test]
     async fn test_bare_repo_names() {
         let repo_dir = tempdir().unwrap();
-        
+
         // Create two bare repos
         Repository::init_bare(repo_dir.path().join("repo1.git")).unwrap();
         Repository::init_bare(repo_dir.path().join("repo2.git")).unwrap();
@@ -1556,7 +1615,7 @@ mod tests {
     #[tokio::test]
     async fn test_head_file_success() {
         let repo_dir = tempdir().unwrap();
-        
+
         // Create a bare repo named "repo.git"
         let repo_path = repo_dir.path().join("repo.git");
         let repo = Repository::init_bare(&repo_path).unwrap();
@@ -1604,7 +1663,7 @@ mod tests {
     #[tokio::test]
     async fn test_head_file_not_found() {
         let repo_dir = tempdir().unwrap();
-        
+
         // Create a bare repo named "repo.git"
         let repo_path = repo_dir.path().join("repo.git");
         let repo = Repository::init_bare(&repo_path).unwrap();
@@ -1702,26 +1761,29 @@ async fn get_file(
     info!(%path, "get_file called");
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
     info!(decoded = %decoded, "decoded path");
-    // 1) Try static directories first
-    if let Some(resp) = try_static(&state, &decoded).await {
-        return resp;
-    }
+    // 1) Resolve GIT first (when a repo is selected). If no repo header/subdomain was provided,
+    // try serving from static paths directly so client-web assets under root work without repo context.
     let branch = branch_from(&headers);
-    let repo_name = match strict_repo_from(&state.repo_path, &headers) {
-        Some(r) => r,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                [
-                    ("Content-Type", "text/plain".to_string()),
-                    (HEADER_BRANCH, branch.clone()),
-                    (HEADER_REPO, "".to_string()),
-                ],
-                "Repository not found".to_string(),
-            )
-                .into_response();
+    let repo_name_opt = strict_repo_from(&state.repo_path, &headers);
+    let repo_name: String;
+    if repo_name_opt.is_none() {
+        // No repo selected: treat as Git 404, then attempt static for the same path
+        if let Some(resp) = try_static(&state, &decoded).await {
+            return resp;
         }
-    };
+        return (
+            StatusCode::NOT_FOUND,
+            [
+                ("Content-Type", "text/plain".to_string()),
+                (HEADER_BRANCH, branch.clone()),
+                (HEADER_REPO, "".to_string()),
+            ],
+            "Not Found".to_string(),
+        )
+            .into_response();
+    } else {
+        repo_name = repo_name_opt.unwrap();
+    }
     info!(%branch, "resolved branch");
 
     // Resolve via Git first for all file types
@@ -1735,8 +1797,16 @@ async fn get_file(
     match git_result {
         GitResolveResult::Respond(resp) => return resp,
         GitResolveResult::NotFound(rel_missing) => {
-            // Git miss: delegate to repo get script (hooks/get.mjs)
-            return run_get_script_or_404(&state, &branch, &repo_name, &rel_missing).await;
+            // 2) Git miss: delegate to repo get script (hooks/get.mjs)
+            let hook_resp = run_get_script_or_404(&state, &branch, &repo_name, &rel_missing).await;
+            if hook_resp.status() != StatusCode::NOT_FOUND {
+                return hook_resp;
+            }
+            // 3) Static fallback only after Git+hook 404
+            if let Some(resp) = try_static(&state, &decoded).await {
+                return resp;
+            }
+            return hook_resp; // 404
         }
     }
 }
@@ -1884,7 +1954,11 @@ async fn try_static(state: &AppState, decoded: &str) -> Option<Response> {
                         .first_or_octet_stream()
                         .essence_str()
                         .to_string();
-                    let resp = (StatusCode::OK, [("Content-Type", ct)], bytes).into_response();
+                    // Add basic cache headers for static assets
+                    let mut resp = (StatusCode::OK, [("Content-Type", ct.clone())], bytes).into_response();
+                    let headers = resp.headers_mut();
+                    headers.insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=3600"));
+                    headers.insert(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, axum::http::HeaderValue::from_static("*"));
                     return Some(resp);
                 }
                 Err(e) => {
@@ -1892,8 +1966,36 @@ async fn try_static(state: &AppState, decoded: &str) -> Option<Response> {
                 }
             }
         }
+        // Do not fallback to index.html for arbitrary 404s.
     }
     None
+}
+
+async fn serve_acme_challenge(base_dir: &str, subpath: &str) -> Response {
+    // Sanitize subpath
+    let rel = subpath
+        .split('/')
+        .filter(|p| !p.is_empty() && *p != "." && *p != "..")
+        .collect::<Vec<_>>()
+        .join("/");
+    if rel.is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let path = PathBuf::from(base_dir).join(rel);
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => (StatusCode::OK, [("Content-Type", "text/plain")], bytes).into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn load_rustls_config(cert_path: &str, key_path: &str) -> anyhow::Result<RustlsConfig> {
+    // Read files as raw bytes and pass to RustlsConfig::from_pem which expects Vec<u8>
+    let cert_bytes = tokio::fs::read(cert_path).await?;
+    let key_bytes = tokio::fs::read(key_path).await?;
+
+    // from_pem is async and returns io::Result<RustlsConfig>
+    let config = RustlsConfig::from_pem(cert_bytes, key_bytes).await?;
+    Ok(config)
 }
 
 enum GitResolveResult {
@@ -2019,26 +2121,31 @@ fn git_resolve_and_respond(
 // IPFS fallback removed; IPFS logic is delegated to repo scripts (hooks/get.mjs)
 
 async fn get_root(
-    _state: State<AppState>,
+    State(state): State<AppState>,
     _headers: HeaderMap,
     _query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
-    // GET / should not claim a successful empty response here so that
-    // a proxy-fronting webserver (nginx) can fall back to serving
-    // static SPA assets (index.html) when appropriate. Return 404
-    // so nginx's proxy-first+404->static fallback activates.
-    StatusCode::NOT_FOUND
+    // Try serving SPA index.html from configured static paths
+    if let Some(resp) = try_static(&state, "index.html").await {
+        return resp;
+    }
+    StatusCode::NOT_FOUND.into_response()
 }
 
 /// HEAD / - returns same headers as GET but no body. Returns 204 No Content.
 async fn head_root(
-    _state: State<AppState>,
+    State(state): State<AppState>,
     _headers: HeaderMap,
     _query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
-    // HEAD / mirrors GET behaviour but without a body. Return 404
-    // to match GET and allow nginx to fall back to static assets.
-    StatusCode::NOT_FOUND
+    // If index exists, signal 200 without body
+    if let Some(resp) = try_static(&state, "index.html").await {
+        let (parts, _body) = resp.into_parts();
+        if parts.status == StatusCode::OK {
+            return StatusCode::OK.into_response();
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
 }
 
 /// HEAD handler for files. Returns same headers as GET but no body.
@@ -2050,22 +2157,46 @@ async fn head_file(
     _query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
     let decoded = url_decode(&path).decode_utf8_lossy().to_string();
-    
+
     let branch = branch_from(&headers);
-    let repo_name = match strict_repo_from(&state.repo_path, &headers) {
-        Some(r) => r,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                [
-                    ("Content-Type", "text/plain".to_string()),
-                    (HEADER_BRANCH, branch.clone()),
-                    (HEADER_REPO, "".to_string()),
-                ],
-            )
-                .into_response();
+    let repo_name_opt = strict_repo_from(&state.repo_path, &headers);
+    let repo_name: String;
+    if repo_name_opt.is_none() {
+        // No repo selected: treat as Git 404 and check static for existence
+        if let Some(resp) = try_static(&state, &decoded).await {
+            let (parts, _body) = resp.into_parts();
+            if parts.status == StatusCode::OK {
+                return (
+                    StatusCode::OK,
+                    [
+                        (
+                            "Content-Type",
+                            parts
+                                .headers
+                                .get("Content-Type")
+                                .and_then(|h| h.to_str().ok())
+                                .unwrap_or("application/octet-stream")
+                                .to_string(),
+                        ),
+                        (HEADER_BRANCH, branch.clone()),
+                        (HEADER_REPO, "".to_string()),
+                    ],
+                )
+                    .into_response();
+            }
         }
-    };
+        return (
+            StatusCode::NOT_FOUND,
+            [
+                ("Content-Type", "text/plain".to_string()),
+                (HEADER_BRANCH, branch.clone()),
+                (HEADER_REPO, "".to_string()),
+            ],
+        )
+            .into_response();
+    } else {
+        repo_name = repo_name_opt.unwrap();
+    }
 
     // Resolve via Git - if found, return headers without body
     match git_resolve_and_respond(
@@ -2082,7 +2213,7 @@ async fn head_file(
                 (
                     StatusCode::OK,
                     [
-                        ("Content-Type", 
+                        ("Content-Type",
                             parts.headers.get("Content-Type")
                                 .and_then(|h| h.to_str().ok())
                                 .unwrap_or("application/octet-stream")

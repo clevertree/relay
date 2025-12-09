@@ -180,57 +180,127 @@ try {
 export async function transpileCode(
   code: string,
   options: TransformOptions,
-  toCommonJs: boolean = false
+  _toCommonJs: boolean = false
 ): Promise<string> {
+  // Use SWC WASM in the browser to transpile TS/TSX/JSX → modern JS (ESM)
+  // No external network calls; the wasm is bundled by Vite.
   try {
-    // @ts-ignore - @babel/standalone doesn't have type definitions
-    const BabelNs: any = await import('@babel/standalone')
-    const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
-
-    const presets: any[] = []
-    const plugins: any[] = []
-
-    // TypeScript support
-    const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
-    if (TS_PRESET) {
-      presets.push([
-        TS_PRESET,
-        options.hasJsxPragma ? { jsxPragma: 'h', jsxPragmaFrag: 'React.Fragment' } : {},
-      ])
+    // 1) Prefer a preloaded SWC instance exposed by the web app
+    const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : (window as any)) || {}
+    let swc: any = g.__swc
+    let swcNs: any = undefined
+    if (!swc) {
+      // 2) Fallback to dynamic import if bridge not present
+      swcNs = await import('@swc/wasm-web')
+      swc = swcNs && (swcNs.default ? { ...swcNs.default, ...swcNs } : swcNs)
+      const initFn = typeof swc?.init === 'function' ? swc.init : typeof swcNs?.init === 'function' ? swcNs.init : undefined
+      if (initFn) {
+        try {
+          // init() is idempotent; ignore errors if already initialized
+          await initFn()
+        } catch (_) {
+          // Some bundlers initialize automatically; proceed on failure
+        }
+      }
+      // Cache globally for subsequent calls
+      try { (globalThis as any).__swc = swc } catch {}
     }
 
-    // React JSX support - use classic runtime for consistency
-    const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
-    if (REACT_PRESET) {
-      const runtimeOpts = options.hasJsxPragma
-        ? { runtime: 'classic', pragma: 'h', pragmaFrag: 'React.Fragment', development: options.development ?? true }
-        : { runtime: 'classic', pragma: '_jsx_', pragmaFrag: '_jsxFrag_', development: options.development ?? true }
-      presets.push([REACT_PRESET, runtimeOpts])
+    const filename = options.filename || 'module.tsx'
+    const isTs = /\.(tsx?|mts|cts)$/.test(filename)
+    const isJsx = /\.(jsx|tsx)$/.test(filename) || /<([A-Za-z][A-Za-z0-9]*)\s/.test(code)
+    // Infer development mode from environment when not explicitly provided
+    const isDevEnv = (() => {
+      try {
+        // Vite exposes import.meta.env.MODE
+        // eslint-disable-next-line no-undef
+        const viteMode = (import.meta as any)?.env?.MODE
+        if (viteMode) return String(viteMode) === 'development'
+      } catch {}
+      try {
+        // Fallback to process.env.NODE_ENV if defined by bundler
+        // eslint-disable-next-line no-undef
+        if (typeof process !== 'undefined' && (process as any)?.env?.NODE_ENV) {
+          return (process as any).env.NODE_ENV === 'development'
+        }
+      } catch {}
+      return false
+    })()
+    const reactDev = options.development ?? isDevEnv
+
+    const transformOptions = {
+      jsc: {
+        target: 'es2022',
+        parser: isTs
+          ? { syntax: 'typescript' as const, tsx: isJsx }
+          : { syntax: 'ecmascript' as const, jsx: isJsx },
+        transform: isJsx
+          ? {
+              react: {
+                runtime: 'classic',
+                pragma: '_jsx_',
+                pragmaFrag: '_jsxFrag_',
+                development: !!reactDev,
+              },
+            }
+          : undefined,
+      },
+      module: { type: 'es6' as const },
+      sourceMaps: !!reactDev,
+      filename,
     }
 
-    // CommonJS transformation (for React Native eval)
-    if (toCommonJs) {
-      const CJS_PLUGIN =
-        Babel.availablePlugins?.['transform-modules-commonjs'] ||
-        Babel.availablePlugins?.['commonjs'] ||
-        'transform-modules-commonjs'
-      if (CJS_PLUGIN) {
-        plugins.push([CJS_PLUGIN, {}])
+    const transformFn = swc?.transformSync || swcNs?.transformSync || swcNs?.default?.transformSync || swc?.transform || swcNs?.transform || swcNs?.default?.transform
+    if (typeof transformFn !== 'function') {
+      const keys = swcNs ? Object.keys(swcNs || {}) : []
+      const dkeys = swcNs ? Object.keys((swcNs as any)?.default || {}) : []
+      const hint = g.__swc ? 'Global __swc exists but lacks transform().' : 'Global __swc not found.'
+      throw new Error(`SWC not available: missing transform(). ${hint} Module keys=${JSON.stringify(keys)}, default keys=${JSON.stringify(dkeys)}`)
+    }
+    // Some environments exhibit a weird error from swc glue: reading 'transform' of undefined.
+    // Normalize options to plain JSON and retry once with a conservative shape if it happens.
+    const callTransform = async (opts: any) => {
+      // Strip undefined and functions
+      const jsonOpts = JSON.parse(JSON.stringify(opts))
+      return transformFn(code, jsonOpts)
+    }
+    let result
+    try {
+      result = await callTransform(transformOptions)
+    } catch (e: any) {
+      const msg = e?.message || String(e)
+      if (/reading 'transform'/.test(msg) || /Cannot read properties of undefined \(reading 'transform'\)/.test(msg)) {
+        // Retry with forced jsc.transform object present
+        const retryOpts = {
+          ...transformOptions,
+          jsc: {
+            ...transformOptions.jsc,
+            transform: {
+              react: {
+                runtime: 'classic',
+                pragma: '_jsx_',
+                pragmaFrag: '_jsxFrag_',
+                development: !!reactDev,
+              },
+            },
+          },
+        }
+        result = await callTransform(retryOpts)
+      } else {
+        throw e
       }
     }
-
-    const result = Babel.transform(code, {
-      filename: options.filename,
-      presets,
-      plugins,
-      sourceMaps: 'inline',
-      retainLines: true,
-    })
-
-    return result.code as string
+    const out: string = (result && result.code) || ''
+    return out + `\n//# sourceURL=${filename}`
   } catch (err) {
-    console.error('[transpileCode] Babel transform failed:', err)
-    throw err
+    console.error('[transpileCode] SWC transform failed:', err)
+    const message = (err as any)?.message || String(err)
+    const e: any = new Error(`TranspileError: ${options.filename || 'unknown'}: ${message}`)
+    e.name = 'TranspileError'
+    if ((err as any)?.stack) e.stack = (err as any).stack
+    if ((err as any)?.code) (e as any).code = (err as any).code
+    if ((err as any)?.cause) (e as any).cause = (err as any).cause
+    throw e
   }
 }
 
@@ -331,12 +401,32 @@ export class HookLoader {
             false // Web uses import, not CommonJS
           )
         } catch (err) {
-          console.warn('[HookLoader.loadModule] Transpilation failed, trying raw:', err)
+          const msg = (err as any)?.message || String(err)
+          const diag: LoaderDiagnostics = {
+            phase: 'transform',
+            error: msg,
+            details: { moduleUrl, filename: normalizedPath, ...(err as any) }
+          }
+          this.onDiagnostics(diag)
+          // Do NOT execute raw JSX; surface a clear error to the caller/UI
+          throw new Error(`TranspileError: ${normalizedPath}: ${msg}`)
         }
       }
 
       // Execute and cache
-      const mod = await this.moduleLoader.executeModule(finalCode, normalizedPath, context)
+      let mod: any
+      try {
+        mod = await this.moduleLoader.executeModule(finalCode, normalizedPath, context)
+      } catch (execErr) {
+        const execMsg = (execErr as any)?.message || String(execErr)
+        const diag: LoaderDiagnostics = {
+          phase: 'import',
+          error: execMsg,
+          details: { filename: normalizedPath }
+        }
+        this.onDiagnostics(diag)
+        throw execErr
+      }
       this.moduleCache.set(cacheKey, mod)
       return mod
     } catch (err) {

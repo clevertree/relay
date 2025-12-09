@@ -2,8 +2,9 @@ import React, {useEffect, useMemo, useState} from 'react'
 import {useAppState} from '../state/store'
 import {TemplateLayout} from './TemplateLayout'
 import {FileRenderer} from './FileRenderer'
-import { buildPeerUrl, buildRepoHeaders } from '@relay/shared'
-import { RepoFetchProvider } from '../context/RepoFetchContext'
+import {buildPeerUrl, buildRepoHeaders, transpileCode} from '@relay/shared'
+import {RepoFetchProvider} from '../context/RepoFetchContext'
+import ErrorBoundary from './ErrorBoundary'
 
 interface RepoBrowserProps {
     tabId: string
@@ -169,7 +170,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                 branches,
                 reposList: options.repos?.map((r) => r.name),
             }))
-            if (!options?.client?.hooks?.get?.path || !options?.client?.hooks?.query?.path) {
+            if (!options?.client?.hooks?.get?.path) {
                 console.error('[RepoBrowser] Discovery missing client hook paths', {options, diagnostics})
             }
             return options
@@ -240,24 +241,18 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
         const queryPath = info?.client?.hooks?.query?.path
         const hookPath = kind === 'get' ? getPath : kind === 'query' ? queryPath : undefined
         if (!hookPath) {
-            console.debug(`[Hook ${kind}] Missing hook path in discovery, attempting one-time refresh`)
-            const refreshed = await loadOptions()
-            const retryInfo = refreshed ?? optionsInfo
-            const retryPath = kind === 'get' ? retryInfo?.client?.hooks?.get?.path : kind === 'query' ? retryInfo?.client?.hooks?.query?.path : undefined
-            if (!retryPath) {
-                setError(
-                    'Missing hook path in repository discovery. OPTIONS may be empty or blocked by proxy. We also attempted GET / fallback. Ensure .relay.yaml exposes client.hooks.get.path and client.hooks.query.path.'
-                )
-                setErrorDetails({
-                    ...diagnostics,
-                    reason: 'missing-hook-path',
-                    note: 'OPTIONS returned empty or missing body; GET fallback may have succeeded or failed. See optionsInfo for raw payload.',
-                    options: retryInfo || {},
-                })
-                console.error('[RepoBrowser] Hook path missing after refresh. Discovery payload:', retryInfo)
-                return false
-            }
-            return tryRenderWithHook(kind, extraParams, retryInfo)
+            // No fallbacks: surface a strict error when client hooks are not provided by OPTIONS
+            setError(
+                'Missing client hook path in repository discovery. Ensure your .relay.yaml defines client.hooks.get.path and client.hooks.query.path and that OPTIONS / returns them.'
+            )
+            setErrorDetails({
+                ...diagnostics,
+                phase: 'options',
+                reason: 'missing-hook-path',
+                options: info || {},
+            })
+            console.error('[RepoBrowser] Missing client hook path in OPTIONS payload:', info)
+            return false
         }
         // Use resolvePath to properly join baseUrl and hookPath without double slashes
         const hookUrl = resolvePath(hookPath)
@@ -295,6 +290,24 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
             diagnostics.codeLength = code.length
             console.debug(`[Hook ${kind}] Received code (${code.length} chars)`)
 
+            // Detect SPA fallback: HTML served instead of JS module
+            const ctLower = (diagnostics.fetch.contentType || '').toLowerCase()
+            if (ctLower.includes('text/html') || /^\s*<!?doctype\s+html/i.test(code) || /^\s*<html/i.test(code)) {
+                setError('Hook source request returned HTML, not a JS module. This often happens when a missing file 404 is converted to index.html by the proxy (SPA fallback).')
+                setErrorDetails({
+                    ...diagnostics,
+                    reason: 'hook-html-fallback',
+                    fetchHtml: {
+                        url: hookUrl,
+                        status: diagnostics.fetch.status,
+                        ok: diagnostics.fetch.ok,
+                        contentType: diagnostics.fetch.contentType,
+                        sample: code.slice(0, 256),
+                    },
+                })
+                return false
+            }
+
             // Optionally pre-process JSX/TSX if present/opted-in
             let finalCode = code
             let usedJsx = false
@@ -302,56 +315,8 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                 const looksLikeJsxOrTsx = /\/\s*@use-jsx|\/\s*@use-ts|<([A-Za-z][A-Za-z0-9]*)\s|jsxRuntime\s*:\s*['\"]automatic['\"]/m.test(code)
                     || hookPath.endsWith('.jsx') || hookPath.endsWith('.tsx') || hookPath.endsWith('.ts')
                 if (looksLikeJsxOrTsx) {
-                    console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with @babel/standalone`)
-                    // @ts-ignore - @babel/standalone doesn't have type definitions
-                    let BabelNs: any
-                    let Babel: any
-                    try {
-                        // Try to import using the bundler-resolved specifier first
-                        BabelNs = await import(/* @vite-ignore */ '@babel/standalone')
-                        Babel = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
-                    } catch (importErr) {
-                        // Fallback: load Babel from a CDN into window.Babel (UMD build)
-                        console.warn(`[Hook ${kind}] Failed to import @babel/standalone via specifier; falling back to CDN:`, importErr)
-                        try {
-                            await new Promise<void>((resolve, reject) => {
-                                if ((window as any).Babel) return resolve()
-                                const s = document.createElement('script')
-                                s.src = 'https://unpkg.com/@babel/standalone@7.21.4/babel.min.js'
-                                s.async = true
-                                s.onload = () => resolve()
-                                s.onerror = () => reject(new Error('Failed to load @babel/standalone from CDN'))
-                                document.head.appendChild(s)
-                            })
-                            Babel = (window as any).Babel
-                            if (!Babel) throw new Error('window.Babel not available after CDN load')
-                        } catch (cdnErr) {
-                            console.warn(`[Hook ${kind}] CDN fallback for @babel/standalone failed:`, cdnErr)
-                            throw importErr // rethrow original import error so outer catch can handle
-                        }
-                    }
-
-                    const presets: any[] = []
-                    // TypeScript first so JSX remains for React preset to handle
-                    const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
-                    const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
-                    if (TS_PRESET) {
-                        presets.push([TS_PRESET])
-                    }
-                    // Use classic runtime with _jsx_ helper - we'll inject it at the top
-                    presets.push([REACT_PRESET, {
-                        runtime: 'classic',
-                        pragma: '_jsx_',
-                        pragmaFrag: '_jsxFrag_',
-                        development: true
-                    }])
-                    const result = Babel.transform(code, {
-                        filename: hookPath.split('/').pop() || 'hook.tsx',
-                        presets,
-                        sourceMaps: 'inline',
-                        retainLines: true,
-                        plugins: [],
-                    })
+                    console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with SWC (wasm) runtime`)
+                    const transformed = await transpileCode(code, {filename: hookPath.split('/').pop() || 'hook.tsx'})
                     // Inject helpers that reference window.__ctx__
                     // Use globalThis for better compatibility with blob modules
                     const preamble = `
@@ -365,22 +330,30 @@ if (!React) {
 const _jsx_ = (...args) => __ctx_obj__.__ctx__.React.createElement(...args);
 const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
 `
-                    finalCode = preamble + result.code
+                    finalCode = preamble + transformed
                     usedJsx = true
                     console.debug(`[Hook ${kind}] Preamble:`, preamble)
                     console.debug(`[Hook ${kind}] First 1000 chars of final code:\n${finalCode.substring(0, 1000)}`)
                 }
             } catch (jsxErr) {
-                console.warn(`[Hook ${kind}] JSX transform failed, will attempt raw import`, jsxErr)
-                // Capture detailed JSX error info for debugging
-                diagnostics.jsxError = jsxErr instanceof Error ? jsxErr.message : String(jsxErr)
-                diagnostics.jsxErrorFull = jsxErr instanceof Error ? {
-                    message: jsxErr.message,
-                    name: jsxErr.name,
-                    stack: jsxErr.stack,
-                    ...(jsxErr as any).pos && { pos: (jsxErr as any).pos },
-                    ...(jsxErr as any).loc && { loc: (jsxErr as any).loc },
-                } : jsxErr
+                console.warn(`[Hook ${kind}] JSX transform failed`, jsxErr)
+                const msg = jsxErr instanceof Error ? jsxErr.message : String(jsxErr)
+                // Surface a clear transpile error instead of proceeding to raw import (which causes 'Unexpected token')
+                setError(`Hook transpilation failed: ${msg}. Ensure the file extension is .jsx/.tsx or add '// @use-jsx' at the top.`)
+                setErrorDetails({
+                    ...diagnostics,
+                    reason: 'transpile-failed',
+                    error: msg,
+                    jsxError: jsxErr instanceof Error ? {
+                        message: jsxErr.message,
+                        name: jsxErr.name,
+                        stack: jsxErr.stack,
+                        ...(jsxErr as any).pos && {pos: (jsxErr as any).pos},
+                        ...(jsxErr as any).loc && {loc: (jsxErr as any).loc},
+                        ...(jsxErr as any).codeFrame && {codeFrame: (jsxErr as any).codeFrame},
+                    } : jsxErr,
+                })
+                return false
             }
 
             const blob = new Blob([finalCode], {type: 'text/javascript'})
@@ -424,10 +397,21 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
                 }
 
                 console.debug(`[Hook ${kind}] Calling hook function...`)
-                const element: React.ReactNode = await mod.default(ctx)
-                console.debug(`[Hook ${kind}] Hook executed successfully, element:`, element)
-                console.debug(`[Hook ${kind}] Element type:`, typeof element, element?.constructor?.name, React.isValidElement(element))
-                setHookElement(element)
+                const element: any = await mod.default(ctx)
+                const isElement = !!(element && React.isValidElement(element))
+                console.debug(`[Hook ${kind}] Hook executed, isValidElement=`, isElement, 'type:', typeof element, element?.constructor?.name)
+                if (!isElement) {
+                    const summary = typeof element === 'object' ? `{ ${Object.keys(element || {}).join(', ')} }` : String(element)
+                    setError('Hook returned a non-React element. Expected a React element from default export.')
+                    setErrorDetails({
+                        ...diagnostics,
+                        reason: 'invalid-element',
+                        returnedType: typeof element,
+                        summary,
+                    })
+                    return false
+                }
+                setHookElement(element as React.ReactNode)
                 // Clear any previous error state so diagnostics <pre> disappears
                 setError(null)
                 setErrorDetails(null)
@@ -438,14 +422,15 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
                 console.debug(`[Hook ${kind}] Execution failed:`, errMsg)
                 console.error(`[Hook ${kind}] Full error:`, err)
                 console.error(`[Hook ${kind}] Stack:`, errStack)
-                setError(
-                    `Hook execution failed: ${errMsg}. If using JSX, add '// @use-jsx' comment at the top or use .jsx extension so the loader transpiles it.`
-                )
+                // If this came from helpers.fetchJson (repo-aware), surface its diagnostic details
+                const fetchJsonDetails = (err as any)?.name === 'RepoFetchJsonError' ? (err as any).details : undefined
+                setError(`Hook execution failed: ${errMsg}.`)
                 setErrorDetails({
                     ...diagnostics,
                     reason: 'execution-failed',
                     error: errMsg,
-                    stack: errStack.split('\n').slice(0, 5)
+                    stack: errStack.split('\n').slice(0, 5),
+                    ...(fetchJsonDetails ? {fetchJson: fetchJsonDetails} : {}),
                 })
                 return false
             } finally {
@@ -482,7 +467,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
             // Relative to current hook path
             const basePath = fromHookPath && fromHookPath.startsWith('/')
                 ? fromHookPath
-                : '/hooks/get-client.jsx'
+                : '/hooks/client/get-client.jsx'
             const currentDir = basePath.split('/').slice(0, -1).join('/')
             resolvedPath = `${currentDir}/${modulePath}`
                 .replace(/\/\.\//g, '/')
@@ -600,28 +585,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
                     || normalizedPath.endsWith('.tsx') || normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.jsx')
                 if (looksLikeTsOrJsx) {
                     try {
-                        // @ts-ignore - @babel/standalone doesn't have type definitions
-                        const BabelNs: any = await import(/* @vite-ignore */ '@babel/standalone')
-                        const Babel: any = (BabelNs && (BabelNs as any).default) ? (BabelNs as any).default : BabelNs
-                        const presets: any[] = []
-                        const TS_PRESET = Babel.availablePresets?.typescript || Babel.presets?.typescript || 'typescript'
-                        const REACT_PRESET = Babel.availablePresets?.react || Babel.presets?.react || 'react'
-                        if (TS_PRESET) {
-                            presets.push([TS_PRESET])
-                        }
-                        // Use classic runtime with _jsx_ helper
-                        presets.push([REACT_PRESET, {
-                            runtime: 'classic',
-                            pragma: '_jsx_',
-                            pragmaFrag: '_jsxFrag_',
-                            development: true
-                        }])
-                        const result = Babel.transform(code, {
-                            filename: normalizedPath.split('/').pop() || 'module.tsx',
-                            presets,
-                            sourceMaps: 'inline',
-                            retainLines: true,
-                        })
+                        const transformed = await transpileCode(code, {filename: normalizedPath.split('/').pop() || 'module.tsx'})
                         // Inject _jsx_ and _jsxFrag_ helpers
                         const preamble = `
 const __globalCtx__ = typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : {};
@@ -630,9 +594,15 @@ const _jsx_ = (...args) => __globalCtx__.__ctx__?.React?.createElement(...args);
 const _jsxFrag_ = __globalCtx__.__ctx__?.React?.Fragment;
 if (!React) throw new Error('React not available in loadModule preamble');
 `
-                        finalCode = preamble + result.code
+                        finalCode = preamble + transformed
                     } catch (e) {
-                        console.warn('[loadModule] Babel transform failed, trying raw import', e)
+                        // Throw a structured error so hook UI can present useful information
+                        const errMsg = (e as any)?.message || String(e)
+                        const te: any = new Error(`TranspileError: ${normalizedPath.split('/').pop()}: ${errMsg}`)
+                        te.name = 'TranspileError'
+                        if ((e as any)?.loc) te.loc = (e as any).loc
+                        if ((e as any)?.codeFrame) te.codeFrame = (e as any).codeFrame
+                        throw te
                     }
                 }
 
@@ -679,6 +649,29 @@ if (!React) throw new Error('React not available in loadModule preamble');
             }
         }
 
+        // Validated JSON fetch helper with HTML-fallback detection
+        const repoFetchJson = async (path: string, init?: RequestInit): Promise<any> => {
+            const url = resolveRelative(path)
+            const resp = await fetch(url, init)
+            const ct = (resp.headers.get('content-type') || '').toLowerCase()
+            const text = await resp.text()
+            const mkErr = (message: string) => {
+                const e: any = new Error(message)
+                e.name = 'RepoFetchJsonError'
+                e.details = {url, status: resp.status, ok: resp.ok, contentType: ct, sample: text.slice(0, 256)}
+                return e
+            }
+            if (!resp.ok) throw mkErr(`HTTP ${resp.status} while fetching JSON: ${url}`)
+            if (!ct.includes('application/json')) {
+                if (text.trim().startsWith('<')) throw mkErr('Expected JSON but received HTML (likely SPA fallback)')
+            }
+            try {
+                return JSON.parse(text)
+            } catch (err) {
+                throw mkErr(`Failed to parse JSON: ${(err as any)?.message || String(err)}`)
+            }
+        }
+
         return {
             React,
             createElement: React.createElement,
@@ -694,6 +687,7 @@ if (!React) throw new Error('React not available in loadModule preamble');
                 resolvePath: (modulePath: string) => resolvePath(modulePath, hookBasePath),
                 fetch: repoFetch,
                 resolve: resolveRelative,
+                fetchJson: repoFetchJson,
             },
         }
     }
@@ -716,187 +710,262 @@ if (!React) throw new Error('React not available in loadModule preamble');
         return fetch(input, init)
     }, [providerResolve])
 
+    const providerFetchJson = useMemo(() => async (path: string, init?: RequestInit) => {
+        const url = providerResolve(path)
+        const resp = await fetch(url, init)
+        const ct = (resp.headers.get('content-type') || '').toLowerCase()
+        const text = await resp.text()
+        const mkErr = (message: string) => {
+            const e: any = new Error(message)
+            e.name = 'RepoFetchJsonError'
+            e.details = {url, status: resp.status, ok: resp.ok, contentType: ct, sample: text.slice(0, 256)}
+            return e
+        }
+        if (!resp.ok) throw mkErr(`HTTP ${resp.status} while fetching JSON: ${url}`)
+        if (!ct.includes('application/json')) {
+            // Heuristic: many proxies return index.html (text/html)
+            if (text.trim().startsWith('<')) {
+                throw mkErr('Expected JSON but received HTML (likely SPA fallback)')
+            }
+        }
+        try {
+            return JSON.parse(text)
+        } catch (err) {
+            throw mkErr(`Failed to parse JSON: ${(err as any)?.message || String(err)}`)
+        }
+    }, [providerResolve])
+
     return (
-        <RepoFetchProvider value={{ baseUrl: repoBaseUrl, resolve: providerResolve, fetch: providerFetch }}>
-        <div className="flex flex-col h-full">
-            <div className="flex-1 overflow-y-auto">
-                {loading && <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>}
+        <RepoFetchProvider value={{
+            baseUrl: repoBaseUrl,
+            resolve: providerResolve,
+            fetch: providerFetch,
+            fetchJson: providerFetchJson
+        }}>
+            <div className="flex flex-col h-full">
+                <ErrorBoundary>
+                    <div className="flex-1 overflow-y-auto">
+                        {loading &&
+                            <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>}
 
-                {error && (
-                    <div
-                        className="p-8 bg-red-500/20 dark:bg-red-900/30 border border-red-400 dark:border-red-700 rounded-lg text-red-700 dark:text-red-300">
-                        <h3 className="mt-0">Error</h3>
-                        <p className="font-semibold">{error}</p>
+                        {error && (
+                            <div
+                                className="p-8 bg-red-500/20 dark:bg-red-900/30 border border-red-400 dark:border-red-700 rounded-lg text-red-700 dark:text-red-300">
+                                <h3 className="mt-0">Error</h3>
+                                <p className="font-semibold">{error}</p>
 
-                        {errorDetails && (
-                            <div className="mt-4 space-y-3 text-sm">
-                                {/* Show hook path and HTTP request info */}
-                                {errorDetails.kind && (
-                                    <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
-                                        <div className="font-mono text-xs space-y-1">
-                                            <div><strong>Hook Type:</strong> {errorDetails.kind}</div>
-                                            {errorDetails.hookUrl && (
-                                                <div className="break-all"><strong>GET URL:</strong> <code className="bg-black/20 px-1 py-0.5 rounded">{errorDetails.hookUrl}</code></div>
-                                            )}
-                                            {errorDetails.fetch && (
-                                                <>
-                                                    <div><strong>HTTP Status:</strong> {errorDetails.fetch.status} {errorDetails.fetch.ok ? '✓' : '✗'}</div>
-                                                    <div><strong>Content-Type:</strong> {errorDetails.fetch.contentType || 'not specified'}</div>
-                                                </>
-                                            )}
-                                            {errorDetails.codeLength && (
-                                                <div><strong>Code Length:</strong> {errorDetails.codeLength} bytes</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
+                                {errorDetails && (
+                                    <div className="mt-4 space-y-3 text-sm">
+                                        {/* Show hook path and HTTP request info */}
+                                        {errorDetails.kind && (
+                                            <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
+                                                <div className="font-mono text-xs space-y-1">
+                                                    <div><strong>Hook Type:</strong> {errorDetails.kind}</div>
+                                                    {errorDetails.hookUrl && (
+                                                        <div className="break-all"><strong>GET URL:</strong> <code
+                                                            className="bg-black/20 px-1 py-0.5 rounded">{errorDetails.hookUrl}</code>
+                                                        </div>
+                                                    )}
+                                                    {errorDetails.fetch && (
+                                                        <>
+                                                            <div><strong>HTTP
+                                                                Status:</strong> {errorDetails.fetch.status} {errorDetails.fetch.ok ? '✓' : '✗'}
+                                                            </div>
+                                                            <div>
+                                                                <strong>Content-Type:</strong> {errorDetails.fetch.contentType || 'not specified'}
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                    {errorDetails.codeLength && (
+                                                        <div><strong>Code
+                                                            Length:</strong> {errorDetails.codeLength} bytes</div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
 
-                                {/* Show JSX transpilation errors */}
-                                {errorDetails.jsxError && (
-                                    <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
-                                        <div className="font-semibold text-xs mb-2">JSX Transpilation Error:</div>
-                                        <pre className="text-xs overflow-auto max-h-32 whitespace-pre-wrap font-mono bg-black/20 p-2 rounded">
-{errorDetails.jsxError}
+                                        {/* Show JSX transpilation errors */}
+                                        {errorDetails.jsxError && (
+                                            <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
+                                                <div className="font-semibold text-xs mb-2">JSX Transpilation Error:
+                                                </div>
+                                                <pre
+                                                    className="text-xs overflow-auto max-h-32 whitespace-pre-wrap font-mono bg-black/20 p-2 rounded">
+{typeof errorDetails.jsxError === 'string' ? errorDetails.jsxError : JSON.stringify(errorDetails.jsxError, null, 2)}
                                         </pre>
-                                    </div>
-                                )}
+                                            </div>
+                                        )}
 
-                                {/* Show execution errors */}
-                                {errorDetails.reason === 'execution-failed' && errorDetails.error && (
-                                    <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
-                                        <div className="font-semibold text-xs mb-2">Execution Error:</div>
-                                        <div className="font-mono text-xs">{errorDetails.error}</div>
-                                        {errorDetails.stack && Array.isArray(errorDetails.stack) && (
-                                            <pre className="text-xs mt-2 overflow-auto max-h-16 whitespace-pre-wrap opacity-80">
+                                        {/* Show execution errors */}
+                                        {errorDetails.reason === 'execution-failed' && errorDetails.error && (
+                                            <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
+                                                <div className="font-semibold text-xs mb-2">Execution Error:</div>
+                                                <div className="font-mono text-xs">{errorDetails.error}</div>
+                                                {errorDetails.stack && Array.isArray(errorDetails.stack) && (
+                                                    <pre
+                                                        className="text-xs mt-2 overflow-auto max-h-16 whitespace-pre-wrap opacity-80">
 {errorDetails.stack.join('\n')}
                                             </pre>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Repo fetch JSON mismatch diagnostics */}
+                                        {errorDetails.fetchJson && (
+                                            <div className="bg-yellow-600/10 p-3 rounded border border-yellow-400/50">
+                                                <div className="font-semibold text-xs mb-2">Expected JSON but got HTML
+                                                    (likely SPA fallback)
+                                                </div>
+                                                <div className="text-xs space-y-1 font-mono">
+                                                    <div><strong>URL:</strong> {errorDetails.fetchJson.url}</div>
+                                                    <div>
+                                                        <strong>Status:</strong> {String(errorDetails.fetchJson.status)} ({errorDetails.fetchJson.ok ? 'ok' : 'error'})
+                                                    </div>
+                                                    <div>
+                                                        <strong>Content-Type:</strong> {errorDetails.fetchJson.contentType || 'n/a'}
+                                                    </div>
+                                                    {errorDetails.fetchJson.sample && (
+                                                        <details className="mt-2">
+                                                            <summary className="cursor-pointer">Response sample
+                                                            </summary>
+                                                            <pre
+                                                                className="mt-1 max-h-40 overflow-auto bg-black/20 p-2 rounded">{errorDetails.fetchJson.sample}</pre>
+                                                        </details>
+                                                    )}
+                                                </div>
+                                                <div className="text-xs mt-2 opacity-80">
+                                                    Tips: Ensure the file exists in the repository, and that the relay
+                                                    server serves it at the path above. If nginx SPA fallback is
+                                                    enabled, upstream 404 may be converted into 200 HTML.
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Show general diagnostics */}
+                                        {errorDetails.reason && (
+                                            <div className="text-xs opacity-80">
+                                                <strong>Phase:</strong> {errorDetails.phase || 'unknown'} | <strong>Reason:</strong> {errorDetails.reason}
+                                            </div>
                                         )}
                                     </div>
                                 )}
 
-                                {/* Show general diagnostics */}
-                                {errorDetails.reason && (
-                                    <div className="text-xs opacity-80">
-                                        <strong>Phase:</strong> {errorDetails.phase || 'unknown'} | <strong>Reason:</strong> {errorDetails.reason}
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                                <div className="mt-4 text-sm opacity-80">
+                                    <div className="font-semibold mb-2">Troubleshooting:</div>
+                                    <ul className="list-disc pl-5 space-y-1">
+                                        <li>Verify <code>.relay.yaml</code> contains <code>client.hooks.get.path</code> and <code>client.hooks.query.path</code>.
+                                        </li>
+                                        <li>Ensure the hook module exports a default function: <code>export default
+                                            async
+                                            function(ctx) {'{'} return ... {'}'} </code></li>
+                                        <li>If using JSX, add a top-of-file comment <code>// @use-jsx</code> or
+                                            use <code>.jsx</code>/<code>.tsx</code> extension.
+                                        </li>
+                                        <li>Check browser console (F12) for detailed logs starting
+                                            with <code>[Hook]</code> or <code>[RepoBrowser]</code>.
+                                        </li>
+                                    </ul>
+                                </div>
 
-                        <div className="mt-4 text-sm opacity-80">
-                            <div className="font-semibold mb-2">Troubleshooting:</div>
-                            <ul className="list-disc pl-5 space-y-1">
-                                <li>Verify <code>.relay.yaml</code> contains <code>client.hooks.get.path</code> and <code>client.hooks.query.path</code>.
-                                </li>
-                                <li>Ensure the hook module exports a default function: <code>export default async
-                                    function(ctx) {'{'} return ... {'}'} </code></li>
-                                <li>If using JSX, add a top-of-file comment <code>// @use-jsx</code> or
-                                    use <code>.jsx</code>/<code>.tsx</code> extension.
-                                </li>
-                                <li>Check browser console (F12) for detailed logs starting with <code>[Hook]</code> or <code>[RepoBrowser]</code>.
-                                </li>
-                            </ul>
-                        </div>
-
-                        {/* Show full JSON for debugging */}
-                        <details className="mt-4 text-xs opacity-70">
-                            <summary className="cursor-pointer font-semibold">Full Diagnostics (JSON)</summary>
-                            <pre className="mt-2 overflow-auto max-h-64 whitespace-pre-wrap bg-black/20 p-2 rounded">
+                                {/* Show full JSON for debugging */}
+                                <details className="mt-4 text-xs opacity-70">
+                                    <summary className="cursor-pointer font-semibold">Full Diagnostics (JSON)</summary>
+                                    <pre
+                                        className="mt-2 overflow-auto max-h-64 whitespace-pre-wrap bg-black/20 p-2 rounded">
 {JSON.stringify(errorDetails, null, 2)}
                             </pre>
-                        </details>
+                                </details>
 
-                        <button onClick={loadContent}
-                                className="px-4 py-2 bg-red-600 text-white border-none rounded cursor-pointer mt-4 hover:bg-red-700">Try
-                            Again
-                        </button>
-                    </div>
-                )}
-
-                {!loading && hookElement}
-                {!loading && !error && !hookElement && (
-                    <div className="p-4 bg-blue-100 text-blue-700">
-                        No content - hook returned null or undefined
-                    </div>
-                )}
-            </div>
-
-            {/* Footer with version and git pull button */}
-            <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between">
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                    {serverHeadCommit ? (
-                        <span>
-                            Version: <code className="bg-gray-200 dark:bg-gray-800 px-2 py-1 rounded text-xs">{serverHeadCommit}</code>
-                        </span>
-                    ) : (
-                        <span>Version: loading...</span>
-                    )}
-                </div>
-                <button
-                    onClick={handleGitPull}
-                    disabled={isPulling}
-                    className={`px-4 py-2 rounded text-sm font-medium transition ${
-                        isPulling
-                            ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
-                            : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
-                    }`}
-                    title={isPulling ? 'Pulling updates...' : 'Pull latest updates from origin'}
-                >
-                    {isPulling ? '⟳ Pulling...' : `⟳ Pull${serverHeadCommit ? ` (${serverHeadCommit})` : ''}`}
-                </button>
-            </div>
-
-            {/* Update modal */}
-            {showUpdateModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-                        <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">
-                            Update Available
-                        </h2>
-                        {pullResult && (
-                            <div className="space-y-3 text-gray-700 dark:text-gray-300">
-                                <p>
-                                    <strong>Status:</strong> {pullResult.success ? '✓ Success' : '✗ Failed'}
-                                </p>
-                                <p>
-                                    <strong>Message:</strong> {pullResult.message}
-                                </p>
-                                {pullResult.before_commit && (
-                                    <p>
-                                        <strong>Before:</strong>{' '}
-                                        <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
-                                            {pullResult.before_commit.substring(0, 7)}
-                                        </code>
-                                    </p>
-                                )}
-                                {pullResult.after_commit && (
-                                    <p>
-                                        <strong>After:</strong>{' '}
-                                        <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
-                                            {pullResult.after_commit.substring(0, 7)}
-                                        </code>
-                                    </p>
-                                )}
+                                <button onClick={loadContent}
+                                        className="px-4 py-2 bg-red-600 text-white border-none rounded cursor-pointer mt-4 hover:bg-red-700">Try
+                                    Again
+                                </button>
                             </div>
                         )}
-                        <div className="flex gap-3 mt-6">
-                            <button
-                                onClick={() => setShowUpdateModal(false)}
-                                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-                            >
-                                Close
-                            </button>
-                            <button
-                                onClick={handleRefresh}
-                                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
-                            >
-                                Refresh
-                            </button>
+
+                        {!loading && hookElement}
+                        {/* No placeholders: if the hook didn't render and there's no error, render nothing */}
+                    </div>
+                </ErrorBoundary>
+
+                {/* Footer with version and git pull button */}
+                <div
+                    className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between">
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                        {serverHeadCommit ? (
+                            <span>
+                            Version: <code
+                                className="bg-gray-200 dark:bg-gray-800 px-2 py-1 rounded text-xs">{serverHeadCommit}</code>
+                        </span>
+                        ) : (
+                            <span>Version: loading...</span>
+                        )}
+                    </div>
+                    <button
+                        onClick={handleGitPull}
+                        disabled={isPulling}
+                        className={`px-4 py-2 rounded text-sm font-medium transition ${
+                            isPulling
+                                ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                        }`}
+                        title={isPulling ? 'Pulling updates...' : 'Pull latest updates from origin'}
+                    >
+                        {isPulling ? '⟳ Pulling...' : `⟳ Pull${serverHeadCommit ? ` (${serverHeadCommit})` : ''}`}
+                    </button>
+                </div>
+
+                {/* Update modal */}
+                {showUpdateModal && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                            <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">
+                                Update Available
+                            </h2>
+                            {pullResult && (
+                                <div className="space-y-3 text-gray-700 dark:text-gray-300">
+                                    <p>
+                                        <strong>Status:</strong> {pullResult.success ? '✓ Success' : '✗ Failed'}
+                                    </p>
+                                    <p>
+                                        <strong>Message:</strong> {pullResult.message}
+                                    </p>
+                                    {pullResult.before_commit && (
+                                        <p>
+                                            <strong>Before:</strong>{' '}
+                                            <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
+                                                {pullResult.before_commit.substring(0, 7)}
+                                            </code>
+                                        </p>
+                                    )}
+                                    {pullResult.after_commit && (
+                                        <p>
+                                            <strong>After:</strong>{' '}
+                                            <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
+                                                {pullResult.after_commit.substring(0, 7)}
+                                            </code>
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                            <div className="flex gap-3 mt-6">
+                                <button
+                                    onClick={() => setShowUpdateModal(false)}
+                                    className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                                >
+                                    Close
+                                </button>
+                                <button
+                                    onClick={handleRefresh}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
+                                >
+                                    Refresh
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )}
+            </div>
         </RepoFetchProvider>
     )
 }

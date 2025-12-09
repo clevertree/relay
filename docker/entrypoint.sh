@@ -4,6 +4,15 @@
 
 set -e
 
+# Helper: is_truthy VAR -> returns 0 if VAR is set to a truthy value (true, 1, yes)
+is_truthy() {
+  v=$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')
+  case "$v" in
+    1|true|yes|y) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 clone_master_repo_list() {
   # New multi-repo initialization using RELAY_MASTER_REPO_LIST
   ROOT=${RELAY_REPO_ROOT:-/srv/relay/data}
@@ -89,8 +98,21 @@ start_git_daemon() {
 }
 
 main() {
-  start_ipfs
-  start_deluged
+  # Conditionally start IPFS and Deluge based on environment flags
+  # By default these are disabled in the Dockerfile (RELAY_ENABLE_IPFS=false, RELAY_ENABLE_TORRENTS=false)
+  if is_truthy "${RELAY_ENABLE_IPFS:-false}"; then
+    echo "RELAY_ENABLE_IPFS=true -> starting IPFS daemon"
+    start_ipfs
+  else
+    echo "RELAY_ENABLE_IPFS not enabled; skipping IPFS startup"
+  fi
+
+  if is_truthy "${RELAY_ENABLE_TORRENTS:-false}"; then
+    echo "RELAY_ENABLE_TORRENTS=true -> starting Deluge daemon"
+    start_deluged
+  else
+    echo "RELAY_ENABLE_TORRENTS not enabled; skipping Deluge startup"
+  fi
   # Initialize repositories strictly from RELAY_MASTER_REPO_LIST (no fallbacks)
   clone_master_repo_list
   start_git_daemon
@@ -136,9 +158,13 @@ PY
     echo "Allocated ephemeral port ${EPHEMERAL_PORT} and set RELAY_BIND=${RELAY_BIND}"
   fi
 
+  # Ensure ACME webroot exists for certbot http-01 challenges (served by Rust at /.well-known/...)
+  RELAY_ACME_DIR=${RELAY_ACME_DIR:-/var/www/certbot}
+  mkdir -p "$RELAY_ACME_DIR"
+
   # Start the relay server in background so we can perform post-start tasks (peer upsert)
-  echo "Starting relay-server with RELAY_BIND=${RELAY_BIND}"
-  /usr/local/bin/relay-server serve --repo "$RELAY_REPO_PATH" --static /srv/relay/www --bind "$RELAY_BIND" &
+  echo "Starting relay-server (HTTP port: ${RELAY_HTTP_PORT:-80}, HTTPS port: ${RELAY_HTTPS_PORT:-443})"
+  /usr/local/bin/relay-server serve --repo "$RELAY_REPO_PATH" --static "${RELAY_STATIC_DIR:-/srv/relay/www}" &
   RELAY_PID=$!
 
   # Start git-pull timer (triggers every hour) with re-clone attempts for missing repos
@@ -214,8 +240,8 @@ PY
     else
       HOSTNAME_FOR_ADVERTISE="localhost"
     fi
-    # Extract port from RELAY_BIND
-    PORT_FOR_ADVERTISE=$(echo "$RELAY_BIND" | awk -F: '{print $NF}')
+    # Use RELAY_HTTP_PORT for advertise
+    PORT_FOR_ADVERTISE=${RELAY_HTTP_PORT:-80}
     SOCKET_URL="http://${HOSTNAME_FOR_ADVERTISE}:${PORT_FOR_ADVERTISE}"
     export RELAY_SOCKET_URL=${SOCKET_URL}
   fi
@@ -356,42 +382,16 @@ PY
     echo "VERCEL_API_TOKEN not set; skipping DNS upsert"
   fi
 
-  # --- Nginx setup: use unified config; no dynamic template generation ---
-  echo "Configuring nginx (unified config)"
-  mkdir -p /etc/nginx/sites-enabled /etc/nginx/conf.d /var/www/certbot
-  # Ensure only our site is enabled
-  rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
-  rm -f /etc/nginx/conf.d/* 2>/dev/null || true
-  cp /docker/nginx-relay.conf /etc/nginx/sites-enabled/default
-
-  # Create stable cert symlink target so nginx can start before real certs exist
-  mkdir -p /etc/letsencrypt/live /etc/ssl/relay-self
-  if [ ! -f /etc/ssl/relay-self/privkey.pem ] || [ ! -f /etc/ssl/relay-self/fullchain.pem ]; then
-    openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
-      -subj "/CN=${FQDN:-localhost}" \
-      -keyout /etc/ssl/relay-self/privkey.pem \
-      -out /etc/ssl/relay-self/fullchain.pem >/dev/null 2>&1 || true
-  fi
-  mkdir -p /etc/letsencrypt/live/relay
-  ln -sf /etc/ssl/relay-self/fullchain.pem /etc/letsencrypt/live/relay/fullchain.pem
-  ln -sf /etc/ssl/relay-self/privkey.pem   /etc/letsencrypt/live/relay/privkey.pem
-
-  # Start nginx now; it will serve HTTP and HTTPS (with self-signed) immediately
-  nginx || true
-
   # --- Automatic SSL via certbot (webroot) ---
   SSL_MODE=${RELAY_SSL_MODE:-auto}
   if [ -n "${RELAY_CERTBOT_EMAIL:-}" ] && [ -n "${FQDN:-}" ]; then
     echo "Attempting Let's Encrypt certificate provisioning for ${FQDN} (mode=${SSL_MODE})"
-    # Obtain/renew certificate using webroot to avoid touching nginx config
-    if certbot certonly --webroot -w /var/www/certbot -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
+    # Obtain/renew certificate using webroot (served by Rust), no nginx involved
+    if certbot certonly --webroot -w "$RELAY_ACME_DIR" -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
       echo "Certbot obtained/renewed certificate for ${FQDN}"
-      # Repoint stable symlinks to the real certificate
-      if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
-        ln -sf "/etc/letsencrypt/live/${FQDN}/fullchain.pem" /etc/letsencrypt/live/relay/fullchain.pem
-        ln -sf "/etc/letsencrypt/live/${FQDN}/privkey.pem"   /etc/letsencrypt/live/relay/privkey.pem
-        nginx -s reload || true
-      fi
+      # Note: To enable HTTPS, set RELAY_TLS_CERT and RELAY_TLS_KEY to the certbot paths and restart container
+      # e.g., RELAY_TLS_CERT=/etc/letsencrypt/live/${FQDN}/fullchain.pem
+      #       RELAY_TLS_KEY=/etc/letsencrypt/live/${FQDN}/privkey.pem
     else
       echo "Certbot failed to obtain certificate for ${FQDN}"
       if [ "$SSL_MODE" = "certbot-required" ]; then
@@ -404,7 +404,7 @@ PY
     (
       while true; do
         sleep 43200
-        certbot renew --quiet && nginx -s reload || true
+        certbot renew --quiet || true
       done
     ) &
   else
@@ -413,7 +413,7 @@ PY
       kill ${RELAY_PID} || true
       exit 1
     else
-      echo "Skipping certbot provisioning (email or FQDN not set). HTTPS will use self-signed until available."
+      echo "Skipping certbot provisioning (email or FQDN not set)."
     fi
   fi
 

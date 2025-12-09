@@ -10,7 +10,7 @@
   "files": ["src"],
   "keywords": ["relay", "runtime", "loader", "hooks"],
   "dependencies": {
-    "@babel/standalone": "^7.25.0",
+    "@swc/wasm-web": "^1.2.147",
     "react": "^18.0.0"
   },
   "devDependencies": {
