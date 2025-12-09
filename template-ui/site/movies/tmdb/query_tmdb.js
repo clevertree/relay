@@ -12,7 +12,11 @@ export async function loadEnvOnce() {
         const meta = document.querySelector('meta[name="relay-branch"]');
         const branch = meta?.getAttribute('content') || 'main';
         headers['X-Relay-Branch'] = branch;
-        const res = await fetch('/hooks/env.json');
+        // Prefer repo-aware fetch from context when available
+        const ctxFetch = (typeof window !== 'undefined' && window.__ctx__ && window.__ctx__.helpers && window.__ctx__.helpers.fetch)
+          ? window.__ctx__.helpers.fetch
+          : fetch;
+        const res = await ctxFetch('/hooks/env.json');
         __envCache = res.ok ? await res.json() : {};
     } catch {
         __envCache = {};

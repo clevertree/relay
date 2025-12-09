@@ -1,8 +1,9 @@
-import React, {useEffect, useState} from 'react'
+import React, {useEffect, useMemo, useState} from 'react'
 import {useAppState} from '../state/store'
 import {TemplateLayout} from './TemplateLayout'
 import {FileRenderer} from './FileRenderer'
 import { buildPeerUrl, buildRepoHeaders } from '@relay/shared'
+import { RepoFetchProvider } from '../context/RepoFetchContext'
 
 interface RepoBrowserProps {
     tabId: string
@@ -476,7 +477,7 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
         }
 
         let resolvedPath = modulePath
-        
+
         if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
             // Relative to current hook path
             const basePath = fromHookPath && fromHookPath.startsWith('/')
@@ -652,6 +653,32 @@ if (!React) throw new Error('React not available in loadModule preamble');
             }
         }
 
+        // Repo-aware resolver for generic relative URLs (e.g., "/hooks/env.json")
+        const resolveRelative = (p: string) => {
+            if (!tab?.host) throw new Error('[helpers.resolve] No host available')
+            const baseUrl = normalizeHostUrl(tab.host)
+            const path = p.startsWith('/') ? p.slice(1) : p
+            return new URL(path, baseUrl).toString()
+        }
+
+        // Repo-aware fetch that resolves relative paths against the repo socket
+        const repoFetch = async (input: any, init?: RequestInit): Promise<Response> => {
+            try {
+                if (typeof input === 'string') {
+                    const isAbsolute = /^(https?:)?\/\//i.test(input)
+                    const url = isAbsolute ? input : resolveRelative(input)
+                    return fetch(url, init)
+                }
+                if (input instanceof URL) {
+                    return fetch(input.toString(), init)
+                }
+                // Request object or other types
+                return fetch(input, init)
+            } catch (e) {
+                return Promise.reject(e)
+            }
+        }
+
         return {
             React,
             createElement: React.createElement,
@@ -665,6 +692,8 @@ if (!React) throw new Error('React not available in loadModule preamble');
                 setBranch: (br: string) => updateTab(tab!.id, (t) => ({...t, currentBranch: br})),
                 loadModule,
                 resolvePath: (modulePath: string) => resolvePath(modulePath, hookBasePath),
+                fetch: repoFetch,
+                resolve: resolveRelative,
             },
         }
     }
@@ -673,7 +702,22 @@ if (!React) throw new Error('React not available in loadModule preamble');
         return <div className="repo-browser">Tab not found</div>
     }
 
+    const repoBaseUrl = useMemo(() => tab?.host ? normalizeHostUrl(tab.host) : '/', [tab?.host])
+    const providerResolve = useMemo(() => (p: string) => {
+        const path = p.startsWith('/') ? p.slice(1) : p
+        return new URL(path, repoBaseUrl).toString()
+    }, [repoBaseUrl])
+    const providerFetch = useMemo(() => (input: any, init?: RequestInit) => {
+        if (typeof input === 'string') {
+            const isAbs = /^(https?:)?\/\//i.test(input)
+            return fetch(isAbs ? input : providerResolve(input), init)
+        }
+        if (input instanceof URL) return fetch(input.toString(), init)
+        return fetch(input, init)
+    }, [providerResolve])
+
     return (
+        <RepoFetchProvider value={{ baseUrl: repoBaseUrl, resolve: providerResolve, fetch: providerFetch }}>
         <div className="flex flex-col h-full">
             <div className="flex-1 overflow-y-auto">
                 {loading && <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>}
@@ -853,6 +897,7 @@ if (!React) throw new Error('React not available in loadModule preamble');
                 </div>
             )}
         </div>
+        </RepoFetchProvider>
     )
 }
 
