@@ -364,20 +364,17 @@ server {
     # Serve static files (client-web) from the www directory
     root /srv/relay/www;
 
-    # Handle root path - OPTIONS requests go directly to proxy, others try files
-    location = / {
-        # For OPTIONS requests, proxy directly to relay-server
-        if ($request_method = OPTIONS) {
-            proxy_pass http://127.0.0.1:$RELAY_PORT;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            access_log /var/log/nginx/options.log;
-        }
-
-        # Try to serve files from the www directory first (for non-OPTIONS)
-        try_files $uri $uri/ @proxy;
+    # Root location: proxy everything to relay-server
+    # The relay-server can handle both static file serving and API requests
+    location / {
+        proxy_pass http://127.0.0.1:$RELAY_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # Try local files first (for efficiency)
+        #try_files \$uri \$uri/ @proxy;
 
         # Set cache headers for static assets
         expires 1h;
@@ -540,30 +537,15 @@ server {
     # Ensure directory requests (like "/") serve index.html from client-web
     index index.html;
 
-    # Handle root path - OPTIONS requests go directly to proxy
-    location = / {
-        # For OPTIONS requests, proxy directly to relay-server  
-        if ($request_method = OPTIONS) {
-            proxy_pass http://127.0.0.1:$RELAY_PORT;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }
-        
-        # Try to serve files from the www directory first (for non-OPTIONS)
-        try_files $uri $uri/ @proxy;
-
-        # Set cache headers for static assets
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Non-root paths: try files first, then proxy
+    # Root location: proxy everything to relay-server
+    # The relay-server can handle both static file serving and API requests
     location / {
-        # Try to serve files from the www directory first
-        try_files \$uri \$uri/ @proxy;
-
+        proxy_pass http://127.0.0.1:$RELAY_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        
         # Set cache headers for static assets
         expires 1h;
         add_header Cache-Control "public, immutable";
