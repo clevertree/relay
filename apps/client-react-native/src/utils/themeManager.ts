@@ -181,12 +181,17 @@ export class ThemeManager {
    * TODO: Fix theme import path or use default colors
    */
   static getColors() {
-    // For now, return a default color palette
+    // Return default color palette with all required theme colors
+    const isDark = this.state.currentTheme === 'dark';
     return {
       primary: '#3b82f6',
       secondary: '#8b5cf6',
-      background: this.state.currentTheme === 'dark' ? '#1f2937' : '#ffffff',
-      text: this.state.currentTheme === 'dark' ? '#f3f4f6' : '#1f2937',
+      background: isDark ? '#1f2937' : '#ffffff',
+      text: isDark ? '#f3f4f6' : '#1f2937',
+      textPrimary: isDark ? '#f3f4f6' : '#1f2937',
+      textSecondary: isDark ? '#d1d5db' : '#4b5563',
+      border: isDark ? '#374151' : '#e5e7eb',
+      bgTertiary: isDark ? '#111827' : '#f3f4f6',
     };
   }
 
