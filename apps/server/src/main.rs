@@ -2023,8 +2023,11 @@ async fn get_root(
     _headers: HeaderMap,
     _query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
-    // GET / should not return discovery; serve no content here.
-    StatusCode::NO_CONTENT
+    // GET / should not claim a successful empty response here so that
+    // a proxy-fronting webserver (nginx) can fall back to serving
+    // static SPA assets (index.html) when appropriate. Return 404
+    // so nginx's proxy-first+404->static fallback activates.
+    StatusCode::NOT_FOUND
 }
 
 /// HEAD / - returns same headers as GET but no body. Returns 204 No Content.
@@ -2033,8 +2036,9 @@ async fn head_root(
     _headers: HeaderMap,
     _query: Option<Query<HashMap<String, String>>>,
 ) -> impl IntoResponse {
-    // HEAD / should return same response as GET but without body
-    StatusCode::NO_CONTENT
+    // HEAD / mirrors GET behaviour but without a body. Return 404
+    // to match GET and allow nginx to fall back to static assets.
+    StatusCode::NOT_FOUND
 }
 
 /// HEAD handler for files. Returns same headers as GET but no body.
