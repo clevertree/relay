@@ -178,19 +178,39 @@ export class ThemeManager {
   /**
    * Get theme colors for the current theme
    * This imports from the template color definitions
+   * TODO: Fix theme import path or use default colors
    */
   static getColors() {
-    // Dynamically import to avoid circular dependencies
-    const { THEMES } = require('../../../template/hooks/client/theme.js');
-    return this.state.currentTheme === 'dark' ? THEMES.dark.colors : THEMES.light.colors;
+    // For now, return a default color palette
+    return {
+      primary: '#3b82f6',
+      secondary: '#8b5cf6',
+      background: this.state.currentTheme === 'dark' ? '#1f2937' : '#ffffff',
+      text: this.state.currentTheme === 'dark' ? '#f3f4f6' : '#1f2937',
+    };
   }
 
   /**
    * Get full theme tokens (colors, spacing, typography)
+   * TODO: Fix theme import path or use default tokens
    */
   static getTokens() {
-    const { THEMES } = require('../../../template/hooks/client/theme.js');
-    return this.state.currentTheme === 'dark' ? THEMES.dark : THEMES.light;
+    // Return a basic default token structure
+    return {
+      colors: this.getColors(),
+      spacing: {
+        xs: '4px',
+        sm: '8px',
+        md: '16px',
+        lg: '24px',
+        xl: '32px',
+      },
+      typography: {
+        body: { fontSize: '16px', lineHeight: '1.5' },
+        heading: { fontSize: '24px', fontWeight: 'bold', lineHeight: '1.3' },
+        small: { fontSize: '12px', lineHeight: '1.4' },
+      },
+    };
   }
 
   /**
