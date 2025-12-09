@@ -1,13 +1,12 @@
 # Relay - Distributed Repository Protocol Implementation
 
-A modern, cross-platform implementation of the Relay protocol for distributed file management, search, and content delivery. Built with React, TypeScript, Rust, and Node.js.
+A modern, cross-platform implementation of the Relay protocol for distributed file management, search, and content delivery. Built with React, TypeScript, and Rust.
 
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+ and npm
+- Node.js 18+ and npm (for local development)
 - Docker (for containerized deployment)
-- Rust (for building native modules, optional)
 
 ### Local Development
 
@@ -15,7 +14,7 @@ A modern, cross-platform implementation of the Relay protocol for distributed fi
 # Install dependencies
 npm install
 
-# Start development server (Vite + template server on localhost:3000)
+# Start development server (Vite + template server via proxy)
 npm run web:dev:full
 
 # Run tests
@@ -25,17 +24,83 @@ npm run test
 npm run build
 ```
 
-### Docker Deployment
+## Containerized Deployment (Nginx + Certbot, unified config)
+
+The all-in-one Docker image runs:
+- relay-server (HTTP API)
+- nginx (TLS termination and reverse proxy)
+- optional background services used by hooks (IPFS, Deluge)
+
+Nginx is configured from a single file `docker/nginx-relay.conf` and:
+- Proxies ALL requests (including `OPTIONS`) to the relay backend.
+- If the backend returns 404 and the method is `GET`/`HEAD`, it serves static client-web files from `/srv/relay/www` with SPA fallback to `index.html`.
+- Serves ACME challenges from `/.well-known/acme-challenge/` for Let’s Encrypt.
+- Redirects HTTP (80) to HTTPS (443) and enables HTTP/2.
+
+### Build and Run
 
 ```bash
-# Build Docker image
-docker build -t relay:latest .
+# Build the image
+docker build -t relay-all-in-one:latest .
 
-# Run container
-docker run -p 3000:3000 -p 3001:3001 relay:latest
+# First run: self-signed TLS until Certbot succeeds
+docker run -d \
+  --name relay \
+  -p 80:80 -p 443:443 \
+  -e FQDN=node1.example.com \
+  -e RELAY_CERTBOT_EMAIL=admin@example.com \
+  -e RELAY_MASTER_REPO_LIST="https://github.com/you/repo1.git;https://github.com/you/repo2.git" \
+  -v $(pwd)/data:/srv/relay/data \
+  -v $(pwd)/www:/srv/relay/www \
+  -v $(pwd)/letsencrypt:/etc/letsencrypt \
+  relay-all-in-one:latest
 
-# Access at http://localhost:3000
+# Access: https://node1.example.com (or your host)
 ```
+
+Notes:
+- If `FQDN` and `RELAY_CERTBOT_EMAIL` are set, the entrypoint will attempt to obtain/renew a real certificate via Certbot in webroot mode and automatically reload nginx.
+- Until issuance succeeds, nginx serves a temporary self-signed certificate via stable symlinks at `/etc/letsencrypt/live/relay/`.
+
+### Environment Variables
+
+Required for automated TLS (recommended):
+- `FQDN` — Fully qualified domain name for this node (e.g., `node1.example.com`).
+- `RELAY_CERTBOT_EMAIL` — Email for Let’s Encrypt registration and renewal notices.
+
+TLS behavior:
+- `RELAY_SSL_MODE` — `auto` (default), `certbot-required`.
+  - `auto`: try Certbot when `FQDN` and `RELAY_CERTBOT_EMAIL` are provided; otherwise serve self-signed until available.
+  - `certbot-required`: exit if a real certificate cannot be obtained.
+
+Repositories:
+- `RELAY_MASTER_REPO_LIST` — Semicolon-separated list of git URLs to clone as bare mirrors at startup. Example: `https://github.com/you/repo1.git;https://github.com/you/repo2.git`.
+- `RELAY_REPO_ROOT` — Root directory for bare repos (default `/srv/relay/data`).
+- `RELAY_REPO_PATH` — Exposed to relay-server as the repository root (defaults to `RELAY_REPO_ROOT`).
+
+Public address (optional):
+- `RELAY_PUBLIC_HOST` — Hostname to advertise if not using `FQDN`.
+
+Vercel DNS (optional):
+- `VERCEL_API_TOKEN` — If set, the container will upsert an A record for `${RELAY_DNS_SUBDOMAIN}.${RELAY_DNS_DOMAIN}` to the detected public IP.
+- `RELAY_DNS_DOMAIN` — Domain for Vercel DNS (default `relaynet.online`).
+- `RELAY_DNS_SUBDOMAIN` — Subdomain (default `node1`).
+- `VERCEL_TEAM_ID` — Optional team scope for Vercel API calls.
+
+### Volumes
+- `/srv/relay/data` — Bare git repositories (persistent).
+- `/srv/relay/www` — Static web root for client-web build artifacts (optional but recommended for SPA fallback).
+- `/etc/letsencrypt` — Certbot certificates and renewal state (persistent).
+- `/var/www/certbot` — ACME webroot (managed by entrypoint; not typically mounted).
+
+### Runtime behavior
+- relay-server is started by the entrypoint and proxied by nginx on 443; nginx also redirects 80→443.
+- Certbot runs in webroot mode against `/var/www/certbot`. Successful issuance repoints stable symlinks under `/etc/letsencrypt/live/relay/` and reloads nginx.
+- A background renewal loop (`certbot renew`) runs twice daily and reloads nginx on changes.
+- Repository maintenance runs hourly:
+  - Re-clone any missing repos from `RELAY_MASTER_REPO_LIST`.
+  - Trigger server-side `POST /git-pull` on the relay API.
+  - `git fetch --all --prune --tags` on all bare repos under `/srv/relay/data`.
 
 ## Project Structure
 
@@ -44,71 +109,59 @@ relay/
 ├── apps/
 │   ├── client-web/           # React web client (TypeScript)
 │   ├── client-react-native/  # React Native mobile app
-│   ├── server/               # Node.js backend (if applicable)
-│   ├── extension/            # Browser extension
+│   ├── server/               # Rust relay-server (HTTP API)
 │   └── shared/               # Shared utilities
 ├── crates/                   # Rust modules
-│   ├── relay-cli/            # Command-line interface
-│   ├── relay-lib/            # Core library
-│   └── streaming-files/      # File streaming implementation
-├── template/                 # Template system for dynamic hooks
-│   ├── hooks/                # GET/PUT/Query hooks
-│   ├── components/           # JSX components (MovieResults, CreateView, Layout)
-│   └── plugins/              # TMDB, YTS integrations
+├── template/                 # Template system and sample hooks/components
 ├── docs/                     # Documentation
-├── docker/                   # Docker configuration
-├── scripts/                  # Build and deployment scripts
+├── docker/                   # Docker configuration (nginx-relay.conf, entrypoint.sh)
+├── scripts/                  # Build/deploy scripts
 ├── terraform/                # Infrastructure as Code
-└── data/                     # Data files and git repos
+└── data/                     # Persistent data and git repos
 ```
 
 ## Key Features
 
 ### Web Client
-- **Modern UI** - React 19 with TypeScript
-- **Real-time Updates** - Live search with TMDB/YTS integrations
-- **Dynamic Components** - JSX-based template system with runtime transpilation
-- **Responsive Design** - Cross-platform styling with Tailwind CSS
-- **Plugin Architecture** - Extensible content handlers
+- React 19 + TypeScript
+- SPA served by nginx as 404 fallback when backend returns 404 for `GET/HEAD`
 
-### Template System
-- **Hook-based Architecture** - GET/PUT/Query hooks for repository operations
-- **Dynamic JSX Loading** - Components loaded and transpiled at runtime via Babel standalone
-- **Relative Path Resolution** - Centralized path resolver for consistent URL handling
-- **FileRenderer** - Supports markdown, code, images, and videos
+### Protocol Implementation (relay-server)
+- `OPTIONS` discovery, `GET/PUT/DELETE`, custom query interface
+- Multi-branch repository handling and peer capabilities
 
-### Protocol Implementation
-- **OPTIONS Discovery** - Repository capability advertisement
-- **GET/PUT/DELETE** - Standard HTTP operations
-- **Query Interface** - Custom search and filtering
-- **Branch Support** - Multi-branch repository handling
-- **Peer-to-Peer** - Support for distributed peers
+### Nginx Routing Summary
+- All methods, including `OPTIONS`, are proxied to relay-server.
+- If the backend responds 404 on `GET/HEAD`, nginx serves `/srv/relay/www` and falls back to `/index.html` for SPA routes.
+- ACME challenges are served from `/var/www/certbot` on both HTTP and HTTPS.
 
-## Development Workflow
+### CORS Policy
+- All responses include `Access-Control-Allow-Origin: *` and expose `Content-Length, Content-Range, ETag`.
+- Preflight detection: requests with method `OPTIONS` and header `Access-Control-Request-Method` are treated as CORS preflight by nginx.
+  - Nginx responds `204 No Content` with:
+    - `Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS`
+    - `Access-Control-Allow-Headers: <echoed from request Access-Control-Request-Headers>`
+    - `Access-Control-Max-Age: 86400`
+    - `Access-Control-Allow-Origin: *`
+  - This applies for all paths, including static files.
+- Non-preflight `OPTIONS` requests (no `Access-Control-Request-Method` header) are proxied to the relay server so it can return its capabilities JSON body.
 
-### Running Dev Server
+## Building the Web Client
+
 ```bash
-npm run web:dev:full
+npm run build
+# Place built assets into ./www and mount to /srv/relay/www in the container
 ```
 
-This starts:
-- **Vite dev server** on port 5173 (hot module reloading)
-- **Template server** on port 3001 (serves /template files)
-- **Proxy server** on port 3000 (combines both)
+## Troubleshooting
 
-### Building Template Components
-
-Template components are JSX files loaded dynamically at runtime:
-
-```jsx
-// template/hooks/client/components/MovieResults.jsx
-/** @jsx h */
-
-export function renderMovieResults(h, results, source, onPageChange, onViewMovie, theme = null) {
-  // Component implementation
-  return h('div', {}, /* content */)
-}
-```
+- Certificate issuance fails:
+  - Ensure `FQDN` resolves publicly to the node’s IP and port 80 is reachable from the internet.
+  - Set `RELAY_CERTBOT_STAGING=true` to use Let’s Encrypt staging for tests.
+- Static files not served:
+  - Verify your client build is present at `/srv/relay/www` in the container and includes `index.html`.
+- Repos not syncing:
+  - Confirm `RELAY_MASTER_REPO_LIST` is set and repositories are accessible; check logs for periodic fetch messages.
 
 Key patterns:
 - Use `/** @jsx h */` pragma for classic JSX runtime

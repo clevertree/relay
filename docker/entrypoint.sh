@@ -145,11 +145,11 @@ PY
   start_git_pull_timer() {
     # First wait a bit to let the relay server start
     sleep 10
-    
+
     while true; do
       sleep 3600  # Wait 1 hour
       echo "$(date): Running periodic git updates and repo checks..."
-      
+
       # Attempt to re-clone any missing repos from RELAY_MASTER_REPO_LIST
       if [ -n "${RELAY_MASTER_REPO_LIST:-}" ]; then
         ROOT=${RELAY_REPO_ROOT:-/srv/relay/data}
@@ -161,7 +161,7 @@ PY
           else
             rest="${repos#*;}"
           fi
-          
+
           u=$(echo "$url" | tr -d ' \t\r\n')
           if [ -n "$u" ]; then
             name=$(echo "$u" | awk -F/ '{print $NF}' | sed 's/\.git$//' | tr -d ' \t')
@@ -181,10 +181,22 @@ PY
           repos="$rest"
         done
       fi
-      
+
       # Trigger git-pull on all existing repos via relay server API
       echo "$(date): Triggering git-pull on all repositories via relay API..."
       curl -s -X POST "http://localhost:${PORT_FOR_ADVERTISE}/git-pull" 2>/dev/null | jq '.' 2>/dev/null || echo "$(date): git-pull request completed (or timed out)"
+
+      # Also directly fetch/prune on all bare repos to ensure up-to-date mirrors
+      ROOT=${RELAY_REPO_ROOT:-/srv/relay/data}
+      if [ -d "$ROOT" ]; then
+        for repo in "$ROOT"/*.git; do
+          [ -d "$repo" ] || continue
+          if [ -d "$repo/objects" ]; then
+            echo "$(date): Fetching updates in $repo"
+            (cd "$repo" && git fetch --all --prune --tags 2>&1) || echo "$(date): Fetch failed in $repo"
+          fi
+        done
+      fi
     done
   }
   start_git_pull_timer &
@@ -344,109 +356,64 @@ PY
     echo "VERCEL_API_TOKEN not set; skipping DNS upsert"
   fi
 
-  # --- Configure nginx to proxy to relay-server (always, even without SSL) ---
-  echo "Configuring nginx to proxy to relay-server"
-  RELAY_PORT=$(echo "$RELAY_BIND" | awk -F: '{print $NF}')
-  
-  # Copy the static nginx config for HTTP/port 8080
-  cp /docker/nginx-relay.conf /etc/nginx/sites-enabled/relay-8080.conf
-  
-  # Remove any default nginx conf.d snippets to avoid duplicate default_server
+  # --- Nginx setup: use unified config; no dynamic template generation ---
+  echo "Configuring nginx (unified config)"
+  mkdir -p /etc/nginx/sites-enabled /etc/nginx/conf.d /var/www/certbot
+  # Ensure only our site is enabled
+  rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
   rm -f /etc/nginx/conf.d/* 2>/dev/null || true
-  
-  # Start nginx
-  nginx
+  cp /docker/nginx-relay.conf /etc/nginx/sites-enabled/default
 
-  # --- SSL certificate via certbot (nginx) ---
-  # SSL strategy
-  # Modes:
-  #   RELAY_SSL_MODE=certbot-required -> obtain certs via certbot and FAIL if unavailable
-  #   RELAY_SSL_MODE=selfsigned       -> generate a self-signed cert and enable HTTPS
-  #   RELAY_SSL_MODE=auto (default)   -> if RELAY_CERTBOT_EMAIL set, try certbot (non-fatal), else HTTP only
+  # Create stable cert symlink target so nginx can start before real certs exist
+  mkdir -p /etc/letsencrypt/live /etc/ssl/relay-self
+  if [ ! -f /etc/ssl/relay-self/privkey.pem ] || [ ! -f /etc/ssl/relay-self/fullchain.pem ]; then
+    openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+      -subj "/CN=${FQDN:-localhost}" \
+      -keyout /etc/ssl/relay-self/privkey.pem \
+      -out /etc/ssl/relay-self/fullchain.pem >/dev/null 2>&1 || true
+  fi
+  mkdir -p /etc/letsencrypt/live/relay
+  ln -sf /etc/ssl/relay-self/fullchain.pem /etc/letsencrypt/live/relay/fullchain.pem
+  ln -sf /etc/ssl/relay-self/privkey.pem   /etc/letsencrypt/live/relay/privkey.pem
+
+  # Start nginx now; it will serve HTTP and HTTPS (with self-signed) immediately
+  nginx || true
+
+  # --- Automatic SSL via certbot (webroot) ---
   SSL_MODE=${RELAY_SSL_MODE:-auto}
-
-  if [ "$SSL_MODE" = "selfsigned" ]; then
-    echo "RELAY_SSL_MODE=selfsigned: generating self-signed cert and enabling HTTPS"
-    mkdir -p /etc/ssl/certs /etc/ssl/private
-    if [ ! -f /etc/ssl/private/relay-selfsigned.key ] || [ ! -f /etc/ssl/certs/relay-selfsigned.crt ]; then
-      openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
-        -subj "/CN=${FQDN}" \
-        -keyout /etc/ssl/private/relay-selfsigned.key \
-        -out /etc/ssl/certs/relay-selfsigned.crt
-    fi
-    
-    # Generate SSL config from template
-    SSL_CERT_PATH="/etc/ssl/certs/relay-selfsigned.crt"
-    SSL_KEY_PATH="/etc/ssl/private/relay-selfsigned.key"
-    SSL_OPTIONS_INCLUDE=""
-    
-    sed -e "s|{{FQDN}}|${FQDN}|g" \
-        -e "s|{{SSL_CERT_PATH}}|${SSL_CERT_PATH}|g" \
-        -e "s|{{SSL_KEY_PATH}}|${SSL_KEY_PATH}|g" \
-        -e "s|{{SSL_OPTIONS_INCLUDE}}||g" \
-        /docker/nginx-ssl.conf.template > /etc/nginx/sites-enabled/default
-    
-    nginx -s reload || true
-
-  elif [ -n "${RELAY_CERTBOT_EMAIL:-}" ]; then
-    echo "Attempting SSL certificate provisioning for ${FQDN} ($SSL_MODE)"
-
-    # ensure certbot directories are present (persisted via hostPath)
-    mkdir -p /etc/letsencrypt /var/lib/letsencrypt
-    CERT_PRESENT=0
-    if [ -d "/etc/letsencrypt/live/${FQDN}" ]; then
+  if [ -n "${RELAY_CERTBOT_EMAIL:-}" ] && [ -n "${FQDN:-}" ]; then
+    echo "Attempting Let's Encrypt certificate provisioning for ${FQDN} (mode=${SSL_MODE})"
+    # Obtain/renew certificate using webroot to avoid touching nginx config
+    if certbot certonly --webroot -w /var/www/certbot -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
+      echo "Certbot obtained/renewed certificate for ${FQDN}"
+      # Repoint stable symlinks to the real certificate
       if [ -f "/etc/letsencrypt/live/${FQDN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${FQDN}/privkey.pem" ]; then
-        CERT_PRESENT=1
+        ln -sf "/etc/letsencrypt/live/${FQDN}/fullchain.pem" /etc/letsencrypt/live/relay/fullchain.pem
+        ln -sf "/etc/letsencrypt/live/${FQDN}/privkey.pem"   /etc/letsencrypt/live/relay/privkey.pem
+        nginx -s reload || true
       fi
-    fi
-
-    if [ $CERT_PRESENT -eq 0 ]; then
-      echo "No existing certs for ${FQDN}; attempting certbot (will retry up to 3 times)"
-      for i in 1 2 3; do
-        if certbot --nginx -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
-          echo "Certbot succeeded on attempt $i"
-          CERT_PRESENT=1
-          break
-        else
-          echo "Certbot attempt $i failed; will retry after backoff"
-          sleep $((10 * i))
-        fi
-      done
     else
-      echo "Found existing certs for ${FQDN}; skipping initial certbot run"
-    fi
-
-    if [ $CERT_PRESENT -eq 1 ]; then
-      echo "Configuring nginx to proxy to relay-server with SSL for ${FQDN}"
-      
-      # Generate SSL config from template
-      SSL_CERT_PATH="/etc/letsencrypt/live/${FQDN}/fullchain.pem"
-      SSL_KEY_PATH="/etc/letsencrypt/live/${FQDN}/privkey.pem"
-      SSL_OPTIONS_INCLUDE="include /etc/letsencrypt/options-ssl-nginx.conf; ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;"
-      
-      sed -e "s|{{FQDN}}|${FQDN}|g" \
-          -e "s|{{SSL_CERT_PATH}}|${SSL_CERT_PATH}|g" \
-          -e "s|{{SSL_KEY_PATH}}|${SSL_KEY_PATH}|g" \
-          -e "s|{{SSL_OPTIONS_INCLUDE}}|${SSL_OPTIONS_INCLUDE}|g" \
-          /docker/nginx-ssl.conf.template > /etc/nginx/sites-enabled/default
-      
-      nginx -s reload || true
-    else
+      echo "Certbot failed to obtain certificate for ${FQDN}"
       if [ "$SSL_MODE" = "certbot-required" ]; then
-        echo "Certbot required but no certs obtained for ${FQDN}; stopping relay-server and exiting"
+        echo "RELAY_SSL_MODE=certbot-required: exiting due to certificate failure"
         kill ${RELAY_PID} || true
         exit 1
-      else
-        echo "No certs obtained for ${FQDN}; continuing with HTTP only (non-fatal)."
       fi
     fi
+    # Background renewal loop
+    (
+      while true; do
+        sleep 43200
+        certbot renew --quiet && nginx -s reload || true
+      done
+    ) &
   else
     if [ "$SSL_MODE" = "certbot-required" ]; then
-      echo "RELAY_SSL_MODE=certbot-required but RELAY_CERTBOT_EMAIL not set; exiting"
+      echo "RELAY_SSL_MODE=certbot-required but RELAY_CERTBOT_EMAIL or FQDN not set; exiting"
       kill ${RELAY_PID} || true
       exit 1
     else
-      echo "RELAY_CERTBOT_EMAIL not set; skipping SSL certificate provisioning"
+      echo "Skipping certbot provisioning (email or FQDN not set). HTTPS will use self-signed until available."
     fi
   fi
 

@@ -50,8 +50,6 @@ RUN mkdir -p /srv/relay/data /srv/relay/git /var/lib/deluge /var/log/relay
 # - Nginx proxy configuration for HTTPS
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/nginx-relay.conf /docker/nginx-relay.conf
-COPY docker/nginx-relay-locations.conf /docker/nginx-relay-locations.conf
-COPY docker/nginx-ssl.conf.template /docker/nginx-ssl.conf.template
 # Ensure entrypoint has Unix line endings inside the image (fixes CRLF from Windows hosts)
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
