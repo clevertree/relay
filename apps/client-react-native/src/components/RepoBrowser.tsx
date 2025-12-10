@@ -264,6 +264,7 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<any>(null);
   const [mode, setMode] = useState<'visit' | 'search'>('visit');
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -457,25 +458,56 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
         return;
       }
 
-      const url = `${baseUrl}/query`;
+      const url = baseUrl;
+      const payload = JSON.stringify({
+        query: searchQuery,
+        page: 1,
+        pageSize: 1000, // Fetch large page to support pagination
+      });
       const res = await fetch(url, {
-        method: 'POST',
+        method: 'QUERY',
         headers: {
           'Content-Type': 'application/json',
           'X-Relay-Branch': branch,
         },
-        body: JSON.stringify({
-          query: searchQuery,
-          page: 1,
-          pageSize: 1000, // Fetch large page to support pagination
-        }),
+        body: payload,
       });
+      const bodyText = await res.text();
 
       if (!res.ok) {
-        throw new Error(`QUERY failed: ${res.status}`);
+        const err = new Error(`QUERY failed: ${res.status} ${res.statusText}`);
+        ;(err as any).details = {
+          kind: 'query',
+          url,
+          method: 'QUERY',
+          status: res.status,
+          statusText: res.statusText,
+          responseBody: bodyText,
+          requestBody: payload,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Relay-Branch': branch,
+          },
+        };
+        throw err;
       }
 
-      const data = await res.json();
+      let data;
+      try {
+        data = JSON.parse(bodyText || '{}');
+      } catch (parseErr) {
+        const err = new Error('QUERY response parse failed');
+        ;(err as any).details = {
+          kind: 'query',
+          url,
+          method: 'QUERY',
+          status: res.status,
+          statusText: res.statusText,
+          responseBody: bodyText,
+          parseError: parseErr instanceof Error ? parseErr.message : String(parseErr),
+        };
+        throw err;
+      }
       const eTag = res.headers.get('ETag') || undefined;
       const lastModified = res.headers.get('Last-Modified') || undefined;
 
@@ -504,6 +536,15 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
       cacheResults(cacheKey, processedResults, eTag, lastModified);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Search failed');
+      const errorDetails = (e as any)?.details;
+      if (errorDetails) {
+        setErrorDetails({
+          kind: 'query',
+          ...errorDetails,
+        });
+      } else {
+        setErrorDetails({ kind: 'query', reason: 'unknown', error: e instanceof Error ? e.message : String(e) });
+      }
     } finally {
       setLoading(false);
     }
@@ -670,6 +711,26 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
       ) : error ? (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
+          {errorDetails && (
+            <View style={styles.errorDetailsContainer}>
+              {errorDetails.url && (
+                <Text style={styles.errorDetailText}>URL: {errorDetails.url}</Text>
+              )}
+              {errorDetails.status && (
+                <Text style={styles.errorDetailText}>Status: {errorDetails.status} {errorDetails.statusText}</Text>
+              )}
+              {errorDetails.responseBody && (
+                <Text style={styles.errorDetailText} numberOfLines={4} ellipsizeMode="tail">
+                  Response: {errorDetails.responseBody}
+                </Text>
+              )}
+              {errorDetails.requestBody && (
+                <Text style={styles.errorDetailText} numberOfLines={2} ellipsizeMode="tail">
+                  Request: {errorDetails.requestBody}
+                </Text>
+              )}
+            </View>
+          )}
           <TouchableOpacity style={styles.retryButton} onPress={mode === 'visit' ? handleVisit : handleSearch}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
@@ -823,6 +884,19 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#dc3545',
     textAlign: 'center',
+  },
+  errorDetailsContainer: {
+    marginTop: 8,
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderColor: '#f5c6cb',
+    backgroundColor: '#fdf2f2',
+    padding: 8,
+    borderRadius: 6,
+  },
+  errorDetailText: {
+    fontSize: 12,
+    color: '#4a4a4a',
   },
   retryButton: {
     backgroundColor: '#007AFF',

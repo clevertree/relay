@@ -31,9 +31,12 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
   const [pathInput, setPathInput] = useState(tab?.path ?? '/');
 
   useEffect(() => {
-    if (!tab) return;
+    if (!tab) {
+      console.warn(`[RepoTab] Tab with ID ${tabId} not found. Tabs available:`, useAppState.getState().tabs.map(t => t.id));
+      return;
+    }
     loadOptions();
-  }, [tab?.host]);
+  }, [tab?.host, tabId]);
 
   const loadOptions = async () => {
     if (!tab) return;
@@ -61,7 +64,12 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
   if (!tab) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Tab not found</Text>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Tab not found (ID: {tabId})</Text>
+          <Text style={{color: '#666', marginTop: 8, fontSize: 12}}>
+            The tab may have been closed or is still loading.
+          </Text>
+        </View>
       </View>
     );
   }

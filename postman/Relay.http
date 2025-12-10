@@ -37,8 +37,8 @@ X-Relay-Branch: {{branch}}
 
 ###
 # group: Server - Files
-# @name POST /query/{path}
-POST {{relay_base_url}}/query/{{path}}
+# @name QUERY /{path}
+QUERY {{relay_base_url}}/{{path}}
 Content-Type: application/json
 X-Relay-Branch: {{branch}}
 

@@ -48,7 +48,7 @@ enum Commands {
     Query {
         /// e.g. localhost:8080
         socket: String,
-        /// Optional path suffix after /query (rare)
+        /// Optional path suffix (rare)
         #[arg(long)]
         path: Option<String>,
         /// Branch or 'all' (default main)

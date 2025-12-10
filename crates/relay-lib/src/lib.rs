@@ -89,10 +89,11 @@ pub async fn put_file(socket: &str, path: &str, branch: &str, body: Bytes) -> Re
 
 pub async fn post_query(socket: &str, branch: &str, path: Option<&str>, body: Option<serde_json::Value>) -> Result<QueryResponse> {
     let base = normalize_socket(socket);
-    let mut url = format!("{}/query", base.trim_end_matches('/'));
+    let mut url = base.trim_end_matches('/').to_string();
     if let Some(p) = path { url.push('/'); url.push_str(&urlencoding::encode(p)); }
     let client = reqwest::Client::new();
-    let req = client.post(url).header(HEADER_BRANCH, branch);
+    let method = reqwest::Method::from_bytes(b"QUERY").expect("invalid query method");
+    let req = client.request(method, url).header(HEADER_BRANCH, branch);
     let req = if let Some(b) = body { req.json(&b) } else { req };
     let res = req.send().await?;
     if !res.status().is_success() {

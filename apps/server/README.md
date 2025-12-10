@@ -98,12 +98,9 @@ CLI & Run
       [Ctrl+D]
     - Fetch it:
       curl -i "http://localhost:8080/README.md?branch=main"
-    - Query (POST):
-      curl -i -X POST "http://localhost:8080/query" -H "X-Relay-Branch: main" -H "Content-Type: application/json"
+    - Query (QUERY method):
+      curl -i -X QUERY "http://localhost:8080" -H "X-Relay-Branch: main" -H "Content-Type: application/json"
       --data '{"filter":{"title":"Inception"}}'
-    - Query (QUERY alias):
-      curl -i -X QUERY "http://localhost:8080" -H "X-Relay-Branch: main" -H "Content-Type: application/json" --data '{"
-      filter":{"title":"Inception"}}'
 
 Serving order (GET requests)
 

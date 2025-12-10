@@ -92,8 +92,11 @@ const MainScreen: React.FC<{navigation: any}> = ({navigation}) => {
   }, [checkForUpdate]);
 
   const handlePeerPress = (host: string) => {
-    const tabId = openTab(host);
-    navigation.navigate('RepoTab', {tabId});
+    openTab(host).then((tabId) => {
+      navigation.navigate('RepoTab', {tabId});
+    }).catch((err) => {
+      console.error('Failed to open tab:', err);
+    });
   };
 
   return (
@@ -140,7 +143,9 @@ const RepoTabScreen: React.FC<{route: any; navigation: any}> = ({route, navigati
         <View style={styles.headerSpacer} />
       </View>
       <TabBar navigation={navigation} />
-      <RepoTab tabId={tabId} />
+      <View style={styles.contentWrapper}>
+        <RepoTab tabId={tabId} />
+      </View>
     </SafeAreaView>
   );
 };
@@ -308,11 +313,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sidePanel: {
-    width: 320,
+    flex: 1,
     borderRightWidth: 1,
     borderRightColor: '#eee',
   },
   fullPanel: {
+    flex: 1,
+  },
+  contentWrapper: {
     flex: 1,
   },
 });

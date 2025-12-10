@@ -149,9 +149,9 @@
                     "response": []
                 },
                 {
-                    "name": "POST /query/{path}",
+                    "name": "QUERY /{path}",
                     "request": {
-                        "method": "POST",
+                        "method": "QUERY",
                         "header": [
                             {
                                 "key": "Content-Type",
@@ -172,12 +172,11 @@
                             }
                         },
                         "url": {
-                            "raw": "{{relay_base_url}}/query/{{path}}",
+                            "raw": "{{relay_base_url}}/{{path}}",
                             "host": [
                                 "{{relay_base_url}}"
                             ],
                             "path": [
-                                "query",
                                 "{{path}}"
                             ]
                         }

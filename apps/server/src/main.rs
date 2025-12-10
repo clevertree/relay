@@ -9,7 +9,7 @@ use std::{
 use axum::{
     body::{Body, Bytes},
     extract::{Path as AxPath, Query, State},
-    http::{HeaderMap, Request, StatusCode},
+    http::{HeaderMap, Method, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, head, post},
@@ -201,14 +201,27 @@ async fn main() -> anyhow::Result<()> {
                 }
             }),
         )
-        .route("/", get(get_root).head(head_root).options(options_capabilities))
+        .route(
+            "/",
+            get(get_root)
+                .head(head_root)
+                .options(options_capabilities)
+                .method(
+                    Method::from_bytes(b"QUERY").expect("invalid query method"),
+                    post_query,
+                ),
+        )
         .route(
             "/*path",
             get(get_file)
                 .head(head_file)
                 .put(put_file)
                 .delete(delete_file)
-                .options(options_capabilities),
+                .options(options_capabilities)
+                .method(
+                    Method::from_bytes(b"QUERY").expect("invalid query method"),
+                    post_query,
+                ),
         )
         // Add permissive CORS headers without intercepting OPTIONS
         .layer(axum::middleware::from_fn(cors_headers))
@@ -822,42 +835,6 @@ async fn post_query(
     } else {
         (StatusCode::INTERNAL_SERVER_ERROR, "failed to spawn node").into_response()
     }
-}
-
-// Middleware that rewrites custom HTTP method QUERY to POST /query/*
-async fn query_alias_middleware(
-    req: axum::http::Request<axum::body::Body>,
-    next: axum::middleware::Next,
-) -> impl IntoResponse {
-    use axum::http::{Method, Uri};
-    let is_query_method = req.method().as_str().eq_ignore_ascii_case("QUERY");
-    if is_query_method {
-        // Build the new path by prefixing "/query" to the existing path
-        let orig_path = req.uri().path();
-        let orig_query = req.uri().query();
-        let mut new_path = String::from("/query");
-        if orig_path.starts_with('/') {
-            new_path.push_str(orig_path);
-        } else {
-            new_path.push('/');
-            new_path.push_str(orig_path);
-        }
-        let new_pq = if let Some(q) = orig_query {
-            format!("{}?{}", new_path, q)
-        } else {
-            new_path
-        };
-        // Rebuild request with POST method and new URI path
-        let (mut parts, body) = req.into_parts();
-        parts.method = Method::POST;
-        parts.uri = Uri::builder()
-            .path_and_query(new_pq)
-            .build()
-            .unwrap_or_else(|_| Uri::from_static("/query"));
-        let req2 = axum::http::Request::from_parts(parts, body);
-        return next.run(req2).await;
-    }
-    next.run(req).await
 }
 
 // removed SQLite row_to_json helper
