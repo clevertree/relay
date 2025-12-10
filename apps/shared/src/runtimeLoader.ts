@@ -235,6 +235,7 @@ if (typeof h === 'undefined') { var h = (...args) => __getReact__()?.createEleme
     if (!swc) {
       // 2) Fallback to dynamic import if bridge not present
       console.log('[transpileCode] __swc not preloaded, importing @swc/wasm-web')
+      // @ts-ignore
       swcNs = await import('@swc/wasm-web')
       console.log('[transpileCode] @swc/wasm-web imported, keys:', Object.keys(swcNs), 'default:', typeof swcNs?.default)
       

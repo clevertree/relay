@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Shared utilities for Relay clients (web and React Native)",
   "type": "module",
+  "types": "src/types.d.ts",
   "exports": {
     ".": "./src/index.ts",
     "./runtime-loader": "./src/runtimeLoader.ts"
@@ -14,6 +15,7 @@
     "react": "^18.0.0"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "@types/react": "^18.0.0",
     "typescript": "^5.0.0"
   },
