@@ -397,6 +397,14 @@ PY
       export RELAY_TLS_CERT="/etc/letsencrypt/live/${FQDN}/fullchain.pem"
       export RELAY_TLS_KEY="/etc/letsencrypt/live/${FQDN}/privkey.pem"
       echo "Using certbot certificate: RELAY_TLS_CERT=$RELAY_TLS_CERT"
+      
+      # Restart relay-server to pick up the certificate
+      echo "Restarting relay-server to use certbot certificate..."
+      kill ${RELAY_PID} 2>/dev/null || true
+      sleep 2
+      echo "Starting relay-server with certbot certificate (HTTP port: ${RELAY_HTTP_PORT:-80}, HTTPS port: ${RELAY_HTTPS_PORT:-443})"
+      /usr/local/bin/relay-server serve --repo "$RELAY_REPO_PATH" --static "${RELAY_STATIC_DIR:-/srv/relay/www}" --bind "$RELAY_BIND" &
+      RELAY_PID=$!
     else
       echo "Certbot failed to obtain certificate for ${FQDN}"
       if [ "$SSL_MODE" = "certbot-required" ]; then
