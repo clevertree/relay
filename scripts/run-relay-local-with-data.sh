@@ -40,6 +40,7 @@ docker rm -f "$CNTR_NAME" >/dev/null 2>&1 || true
 echo "[run] Starting $CNTR_NAME from $IMG_NAME"
 docker run -d --name "$CNTR_NAME" \
   -p 80:80 -p 443:443 -p 8080:8080 -p 8443:8443 \
+  -e RELAY_HTTP_PORT=8080 -e RELAY_HTTPS_PORT=8443 \
   -e RELAY_ENABLE_IPFS=false -e RELAY_ENABLE_TORRENTS=false \
   -e RELAY_MASTER_REPO_LIST="" \
   -v "$HOST_DATA":/srv/relay/data \

@@ -119,9 +119,13 @@ main() {
 
   # Server treats RELAY_REPO_PATH as the repository ROOT directory
   export RELAY_REPO_PATH=${RELAY_REPO_PATH:-/srv/relay/data}
-  # Allocate an ephemeral port if RELAY_BIND not explicitly provided.
-  # If RELAY_BIND is provided in the form host:port and port is non-zero, we'll use it.
-  if [ -n "${RELAY_BIND:-}" ]; then
+  
+  # Determine bind address from RELAY_HTTP_PORT or use ephemeral port
+  if [ -n "${RELAY_HTTP_PORT:-}" ] && [ "$RELAY_HTTP_PORT" != "0" ]; then
+    # Use provided HTTP port
+    export RELAY_BIND="0.0.0.0:${RELAY_HTTP_PORT}"
+    echo "Using RELAY_HTTP_PORT=${RELAY_HTTP_PORT}; set RELAY_BIND=${RELAY_BIND}"
+  elif [ -n "${RELAY_BIND:-}" ]; then
     # Use provided bind
     export RELAY_BIND=${RELAY_BIND}
   else
@@ -164,7 +168,7 @@ PY
 
   # Start the relay server in background so we can perform post-start tasks (peer upsert)
   echo "Starting relay-server (HTTP port: ${RELAY_HTTP_PORT:-80}, HTTPS port: ${RELAY_HTTPS_PORT:-443})"
-  /usr/local/bin/relay-server serve --repo "$RELAY_REPO_PATH" --static "${RELAY_STATIC_DIR:-/srv/relay/www}" &
+  /usr/local/bin/relay-server serve --repo "$RELAY_REPO_PATH" --static "${RELAY_STATIC_DIR:-/srv/relay/www}" --bind "$RELAY_BIND" &
   RELAY_PID=$!
 
   # Start git-pull timer (triggers every hour) with re-clone attempts for missing repos
