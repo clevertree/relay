@@ -393,9 +393,10 @@ PY
     # Obtain/renew certificate using webroot (served by Rust), no nginx involved
     if certbot certonly --webroot -w "$RELAY_ACME_DIR" -d "${FQDN}" -m "${RELAY_CERTBOT_EMAIL}" --agree-tos --non-interactive ${RELAY_CERTBOT_STAGING:+--staging}; then
       echo "Certbot obtained/renewed certificate for ${FQDN}"
-      # Note: To enable HTTPS, set RELAY_TLS_CERT and RELAY_TLS_KEY to the certbot paths and restart container
-      # e.g., RELAY_TLS_CERT=/etc/letsencrypt/live/${FQDN}/fullchain.pem
-      #       RELAY_TLS_KEY=/etc/letsencrypt/live/${FQDN}/privkey.pem
+      # Automatically set RELAY_TLS_CERT and RELAY_TLS_KEY to use the certbot certificate
+      export RELAY_TLS_CERT="/etc/letsencrypt/live/${FQDN}/fullchain.pem"
+      export RELAY_TLS_KEY="/etc/letsencrypt/live/${FQDN}/privkey.pem"
+      echo "Using certbot certificate: RELAY_TLS_CERT=$RELAY_TLS_CERT"
     else
       echo "Certbot failed to obtain certificate for ${FQDN}"
       if [ "$SSL_MODE" = "certbot-required" ]; then
