@@ -6,7 +6,11 @@
  * module execution (browser import vs RN eval).
  */
 
-/**
+import { ES6ImportHandler, type ImportHandlerOptions } from './es6ImportHandler'
+
+// Provide type definitions for global scope (for React and process availability)
+declare const global: any
+declare const process: any/**
  * Babel transform configuration for hook modules
  */
 export interface TransformOptions {
@@ -72,30 +76,60 @@ export interface ModuleLoader {
 }
 
 /**
- * Web-specific module loader: uses dynamic import with blob URLs
+ * Web-specific module loader: uses Function constructor for Metro compatibility
  */
 export class WebModuleLoader implements ModuleLoader {
   async executeModule(code: string, filename: string, context: HookContext): Promise<any> {
     // Note: preamble is now added BEFORE transpilation in transpileCode(),
     // so we no longer need to add it again here
 
-    const blob = new Blob([code], { type: 'text/javascript' })
-    const blobUrl = URL.createObjectURL(blob)
+    const exports: any = {}
+    const module = { exports }
 
     try {
       // Set global context for JSX transpiled code
       ;(window as any).__ctx__ = context
 
-      // @vite-ignore - Dynamic import of remote blob module (intentional pattern)
-      const mod: any = await import(/* @vite-ignore */ blobUrl)
+      // Use Function constructor instead of dynamic import for Metro compatibility
+      // eslint-disable-next-line no-new-func
+      const fn = new Function(
+        'require',
+        'module',
+        'exports',
+        'context',
+        `
+try {
+  ${code}
+} catch (err) {
+  console.error('[WebModuleLoader] Code execution error in ${filename}:', err.message || err);
+  throw err;
+}
+        `
+      )
 
+      // Execute the module code
+      fn(
+        (spec: string) => {
+          // Basic require shim for web
+          if (spec === 'react') {
+            // eslint-disable-next-line no-undef
+            return window.React || {}
+          }
+          return {}
+        },
+        module,
+        exports,
+        context
+      )
+
+      // Return the module exports
+      const mod = module.exports
       if (!mod || typeof mod.default !== 'function') {
         throw new Error('Hook module does not export a default function')
       }
 
       return mod
     } finally {
-      URL.revokeObjectURL(blobUrl)
       // Clean up global after async operations may complete
       setTimeout(() => {
         delete (window as any).__ctx__
@@ -105,33 +139,68 @@ export class WebModuleLoader implements ModuleLoader {
 }
 
 /**
- * React Native module loader: uses Function constructor with CommonJS eval
+ * React Native module loader: uses Function constructor with ES6 import() support
+ * 
+ * Executes hook code with support for ES6 dynamic imports via __import__() calls.
+ * This allows hooks to use modern import() syntax instead of CommonJS require().
  */
 export class RNModuleLoader implements ModuleLoader {
+  private importHandler: ES6ImportHandler | null = null
   private requireShim: (spec: string) => any
+  private transpiler: (code: string, filename: string) => Promise<string>
 
-  constructor(requireShim?: (spec: string) => any) {
-    this.requireShim = requireShim || ((spec: string) => {
-      if (spec === 'react') return require('react')
+  constructor(options?: {
+    requireShim?: (spec: string) => any
+    host?: string
+    transpiler?: (code: string, filename: string) => Promise<string>
+    onDiagnostics?: (diag: any) => void
+  }) {
+    this.requireShim = options?.requireShim || ((spec: string) => {
+      // Provide basic React shim for RN
+      if (spec === 'react') {
+        // For RN, React is already in the global scope
+        return typeof (global as any).React !== 'undefined' ? (global as any).React : {}
+      }
       return {}
     })
+
+    this.transpiler = options?.transpiler || (async (code: string) => code)
+
+    // Initialize ES6 import handler if host is provided
+    if (options?.host) {
+      this.importHandler = new ES6ImportHandler({
+        host: options.host,
+        baseUrl: '/hooks',
+        onDiagnostics: options?.onDiagnostics,
+        transpiler: this.transpiler,
+      })
+    }
+  }
+
+  /**
+   * Set up the import handler (called after host is known)
+   */
+  setImportHandler(importHandler: ES6ImportHandler): void {
+    this.importHandler = importHandler
   }
 
   async executeModule(code: string, filename: string, context: HookContext): Promise<any> {
     const exports: any = {}
     const module = { exports }
 
-    // Inject context and helpers into the function scope for the hook to access
-    const contextStr = JSON.stringify(context, (key, value) => {
-      // Skip non-serializable values (functions, React components)
-      if (typeof value === 'function' || (value && typeof value === 'object' && value.$$typeof)) {
-        return undefined
-      }
-      return value
-    })
+    // Check if code uses ES6 import() syntax
+    const usesES6Import = /\bawait\s+import\s*\(|import\s*\(/.test(code)
+
+    if (usesES6Import && !this.importHandler) {
+      console.warn(
+        '[RNModuleLoader] Code uses import() but no ES6ImportHandler available. Install will fail.',
+        { filename }
+      )
+    }
 
     // eslint-disable-next-line no-new-func
     const fn = new Function(
+      '__import__',
       'require',
       'module',
       'exports',
@@ -146,8 +215,17 @@ try {
 //# sourceURL=${filename}
     `
     )
+
     try {
-      fn(this.requireShim, module, exports, context)
+      // Pass ES6 import handler as first parameter (or dummy if not available)
+      let importFn = this.importHandler?.handle.bind(this.importHandler)
+      if (!importFn) {
+        importFn = (modulePath: string) => {
+          throw new Error(`import('${modulePath}') not supported - ES6ImportHandler not initialized`)
+        }
+      }
+
+      await fn(importFn, this.requireShim, module, exports, context)
     } catch (err) {
       console.error(`[RNModuleLoader] Failed to execute module ${filename}:`, err)
       throw err

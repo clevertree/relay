@@ -18,4 +18,6 @@ export {
   HookLoader,
 } from './runtimeLoader'
 
+export { ES6ImportHandler, type ImportHandlerOptions } from './es6ImportHandler'
+
 export { buildPeerUrl, buildRepoHeaders } from './urlBuilder'

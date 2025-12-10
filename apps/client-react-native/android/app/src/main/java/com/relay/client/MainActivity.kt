@@ -26,6 +26,8 @@ class MainActivity : ReactActivity() {
    */
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    // Disable Bridgeless mode to avoid ReactContext issues
+    System.setProperty("react.bridge.bridgeless", "false")
     PermissionsManager.checkAndRequestNetworkPermissions(this)
   }
 }

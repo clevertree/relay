@@ -20,8 +20,7 @@ import {
   View,
 } from 'react-native';
 import MarkdownRenderer from './MarkdownRenderer';
-import { HookLoader, RNModuleLoader, transpileCode, looksLikeTsOrJsx, type HookContext } from '@relay/shared/runtime-loader';
-import { buildPeerUrl, buildRepoHeaders } from '@relay/shared';
+import { HookLoader, RNModuleLoader, transpileCode, looksLikeTsOrJsx, type HookContext, ES6ImportHandler, buildPeerUrl, buildRepoHeaders } from '../../../shared/src';
 
 /**
  * New lightweight path: render the repository-owned UI by loading the get-hook module
@@ -65,10 +64,37 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
       if (spec === 'react') return require('react')
       return {}
     }
+    
+    // Wrapper for transpileCode to match the expected signature
+    const transpileWrapper = (code: string, filename: string) => {
+      return transpileCode(code, { filename })
+    }
+    
+    // Create RN module loader with ES6 import support
+    const rnModuleLoader = new RNModuleLoader({
+      requireShim,
+      host: normalizedHost.replace(/^https?:\/\//, ''), // Remove protocol for host
+      transpiler: transpileWrapper,
+      onDiagnostics: (diag) => {
+        console.debug('[RNModuleLoader] Diagnostics:', diag)
+      },
+    })
+    
+    // Create ES6 import handler and set it on the loader
+    const importHandler = new ES6ImportHandler({
+      host: normalizedHost.replace(/^https?:\/\//, ''),
+      baseUrl: '/hooks',
+      transpiler: transpileWrapper,
+      onDiagnostics: (diag) => {
+        console.debug('[ES6ImportHandler] Diagnostics:', diag)
+      },
+    })
+    rnModuleLoader.setImportHandler(importHandler)
+    
     hookLoaderRef.current = new HookLoader({
       host: normalizedHost,
       protocol: 'http', // Placeholder - HookLoader expects protocol separately
-      moduleLoader: new RNModuleLoader(requireShim),
+      moduleLoader: rnModuleLoader,
       onDiagnostics: (diag) => {
         console.debug('[HookLoader] Diagnostics:', diag)
       },
