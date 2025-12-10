@@ -85,6 +85,9 @@ struct ServeArgs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Initialize rustls crypto provider for TLS support
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    
     let cli = Cli::parse();
 
     // Set up logging: stdout + rolling file appender
@@ -222,8 +225,22 @@ async fn main() -> anyhow::Result<()> {
         SocketAddr::from_str(&format!("0.0.0.0:{}", port))?
     };
     let https_port = std::env::var("RELAY_HTTPS_PORT").ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or(443);
-    let tls_cert = std::env::var("RELAY_TLS_CERT").ok();
-    let tls_key = std::env::var("RELAY_TLS_KEY").ok();
+    let tls_cert = std::env::var("RELAY_TLS_CERT").ok()
+        .or_else(|| {
+            for path in &["cert/server.crt", "/srv/relay/cert/server.crt"] {
+                let p = PathBuf::from(path);
+                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+            }
+            None
+        });
+    let tls_key = std::env::var("RELAY_TLS_KEY").ok()
+        .or_else(|| {
+            for path in &["cert/server.key", "/srv/relay/cert/server.key"] {
+                let p = PathBuf::from(path);
+                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+            }
+            None
+        });
 
     let app_http = app.clone();
     let http_task = tokio::spawn(async move {
@@ -234,7 +251,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // HTTPS optional
+    // HTTPS with self-signed cert by default
     let https_task = if let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) {
         let https_addr: SocketAddr = SocketAddr::from_str(&format!("0.0.0.0:{}", https_port))?;
         // load_rustls_config is async; await it here in the main async context
@@ -250,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }))
     } else {
-        info!("TLS is disabled: RELAY_TLS_CERT and RELAY_TLS_KEY not both set");
+        info!("TLS is disabled: no cert found at cert/server.crt or RELAY_TLS_CERT/RELAY_TLS_KEY not both set");
         None
     };
 

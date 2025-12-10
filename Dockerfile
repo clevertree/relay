@@ -35,6 +35,9 @@ RUN curl -L https://dist.ipfs.tech/kubo/${IPFS_VERSION}/kubo_${IPFS_VERSION}_lin
 # Copy server binary from builder stage
 COPY --from=builder /work/target/release/relay-server /usr/local/bin/relay-server
 
+# Copy default self-signed certificates
+COPY cert/server.crt cert/server.key /srv/relay/cert/
+
 # Copy client-web build from host (built beforehand)
 COPY apps/client-web/dist /srv/relay/www
 
