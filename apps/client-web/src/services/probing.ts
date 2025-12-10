@@ -215,7 +215,9 @@ export async function fetchPeerOptions(
 }> {
   const hostPort = extractHostPort(host)
   const isSecureContext = window.location.protocol === 'https:'
-  const protocols = isSecureContext ? ['https', 'http'] : ['http', 'https']
+  // In HTTPS context, ONLY try HTTPS to avoid mixed content warnings
+  // In HTTP context, try both for maximum compatibility
+  const protocols = isSecureContext ? ['https'] : ['https', 'http']
 
   for (const protocol of protocols) {
     try {
