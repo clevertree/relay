@@ -8,7 +8,7 @@
         "dev:client": "cargo run --manifest-path apps/client/Cargo.toml",
         "build:client": "cargo build --manifest-path apps/client/Cargo.toml",
         "dev:server": "cargo run --manifest-path apps/server/Cargo.toml -- serve",
-        "dev:server:dist": "RELAY_REPO_PATH=./data RELAY_STATIC_DIR=apps/client-web/dist RELAY_HTTP_PORT=8080 RELAY_HTTPS_PORT=8443 cargo run --manifest-path apps/server/Cargo.toml -- serve",
+        "dev:server:dist": "RELAY_REPO_PATH=./data RELAY_STATIC_DIR=/Users/ari.asulin/p/relay/apps/client-web/dist RELAY_HTTP_PORT=8080 RELAY_HTTPS_PORT=8443 cargo run --manifest-path apps/server/Cargo.toml -- serve",
         "dev:server:dist:debug": "RELAY_REPO_PATH=./data RELAY_STATIC_DIR=apps/client-web/dist RELAY_HTTP_PORT=8080 RELAY_HTTPS_PORT=8443 cargo run --manifest-path apps/server/Cargo.toml -- serve",
         "start:server:release": "RELAY_REPO_PATH=/data RELAY_STATIC_DIR=apps/client-web/dist RELAY_HTTP_PORT=8080 RELAY_HTTPS_PORT=8443 cargo run --manifest-path apps/server/Cargo.toml --release -- serve",
         "build:server": "cargo build --manifest-path apps/server/Cargo.toml",

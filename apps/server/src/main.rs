@@ -131,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
             static_paths.push(PathBuf::from(p));
         }
     }
+    info!(static_paths = ?static_paths, "Static paths configured");
     info!(repo_path = %repo_path.display(), "Repository path resolved");
     // Treat path as repository ROOT directory
     let _ = std::fs::create_dir_all(&repo_path);

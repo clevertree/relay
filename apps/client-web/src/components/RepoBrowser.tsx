@@ -317,22 +317,9 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                 if (looksLikeJsxOrTsx) {
                     console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with SWC (wasm) runtime`)
                     const transformed = await transpileCode(code, {filename: hookPath.split('/').pop() || 'hook.tsx'})
-                    // Inject helpers that reference window.__ctx__
-                    // Use globalThis for better compatibility with blob modules
-                    const preamble = `
-const __ctx_obj__ = (typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : {});
-const React = __ctx_obj__.__ctx__ && __ctx_obj__.__ctx__.React;
-if (!React) {
-  const errorMsg = 'React not available in preamble. __ctx_obj__=' + (typeof __ctx_obj__) + ', __ctx_obj__.__ctx__=' + (typeof __ctx_obj__.__ctx__) + ', React=' + (typeof React);
-  console.error(errorMsg);
-  throw new Error(errorMsg);
-}
-const _jsx_ = (...args) => __ctx_obj__.__ctx__.React.createElement(...args);
-const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
-`
-                    finalCode = preamble + transformed
+                    // transpileCode() already prepends the full preamble with React helpers
+                    finalCode = transformed
                     usedJsx = true
-                    console.debug(`[Hook ${kind}] Preamble:`, preamble)
                     console.debug(`[Hook ${kind}] First 1000 chars of final code:\n${finalCode.substring(0, 1000)}`)
                 }
             } catch (jsxErr) {
@@ -586,15 +573,8 @@ const _jsxFrag_ = __ctx_obj__.__ctx__.React.Fragment;
                 if (looksLikeTsOrJsx) {
                     try {
                         const transformed = await transpileCode(code, {filename: normalizedPath.split('/').pop() || 'module.tsx'})
-                        // Inject _jsx_ and _jsxFrag_ helpers
-                        const preamble = `
-const __globalCtx__ = typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : {};
-const React = __globalCtx__.__ctx__?.React;
-const _jsx_ = (...args) => __globalCtx__.__ctx__?.React?.createElement(...args);
-const _jsxFrag_ = __globalCtx__.__ctx__?.React?.Fragment;
-if (!React) throw new Error('React not available in loadModule preamble');
-`
-                        finalCode = preamble + transformed
+                        // transpileCode() already prepends the full preamble with React helpers
+                        finalCode = transformed
                     } catch (e) {
                         // Throw a structured error so hook UI can present useful information
                         const errMsg = (e as any)?.message || String(e)
