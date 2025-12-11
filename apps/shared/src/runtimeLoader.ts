@@ -238,12 +238,29 @@ try {
       }
 
       await fn(importFn, this.requireShim, module, exports, context)
+      
+      // Ensure module.exports and exports are in sync
+      // If code modified exports, make sure it's reflected in module.exports
+      // If code modified module.exports, make sure it overwrites exports
+      if (module.exports !== exports) {
+        // Code modified module.exports - use that
+        // module.exports already has the right value
+      } else {
+        // Code modified exports but not module.exports - sync them
+        module.exports = exports
+      }
     } catch (err) {
       console.error(`[RNModuleLoader] Failed to execute module ${filename}:`, err)
       throw err
     }
 
-    const mod = (module as any).exports
+    const mod = (module as any).exports || exports
+    
+    // Debug logging
+    console.log('[RNModuleLoader] After execution - mod object:', JSON.stringify(mod, null, 2))
+    console.log('[RNModuleLoader] mod.default type:', typeof (mod?.default))
+    console.log('[RNModuleLoader] module.exports === exports?', (module as any).exports === exports)
+    console.log('[RNModuleLoader] exports object:', JSON.stringify(exports, null, 2))
 
     if (!mod || typeof mod.default !== 'function') {
       throw new Error('Hook module must export default function(ctx)')

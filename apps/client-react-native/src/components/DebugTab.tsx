@@ -547,12 +547,12 @@ export default function DebugTab() {
             const testName = 'dynamicImport'
             setLoading(testName)
             updateResult(testName, { status: 'pending', message: 'Testing dynamic import() delegation...' })
+            let transpiled = ''  // Declare here so catch block can access it
             try {
               const requireShim = (spec: string) => (spec === 'react' ? require('react') : {})
               // Provide a transpiler that converts ESM to CJS and rewrites dynamic import()
               const transpileForTest = (code: string, filename: string): string => {
-                // eslint-disable-next-line @typescript-eslint/no-var-requires
-                const Babel = require('@babel/standalone')
+                // Use Babel already imported at component level
                 const presets: any[] = [['env', { modules: 'commonjs' }]]
                 const out = Babel.transform(code, { filename, presets }).code || code
                 return out.replace(/\bimport\(/g, '__import__(')
@@ -590,22 +590,48 @@ export default function DebugTab() {
                 },
               }
               // Pre-transpile before execution to eliminate ESM export syntax
-              const transpiled = transpileForTest(code, '/hooks/client/test-dynamic.jsx')
+              transpiled = transpileForTest(code, '/hooks/client/test-dynamic.jsx')
+              console.log('[DebugTab][Import] Transpiled code length:', transpiled.length)
+              console.log('[DebugTab][Import] Transpiled code (first 500 chars):', transpiled.substring(0, 500))
               const mod = await moduleLoader.executeModule(transpiled, '/hooks/client/test-dynamic.jsx', ctx)
               const def = mod && (mod as any).default
               console.log('[DebugTab][Import] typeof default =', typeof def, 'keys:', Object.keys(mod || {}))
+              console.log('[DebugTab][Import] mod.default direct access:', def)
+              console.log('[DebugTab][Import] Full module object:', JSON.stringify(mod, null, 2))
+              console.log('[DebugTab][Import] module.exports:', (mod as any).exports)
+              console.log('[DebugTab][Import] Object.getOwnPropertyNames(mod):', Object.getOwnPropertyNames(mod || {}))
+              console.log('[DebugTab][Import] module.exports.default:', (mod as any).exports?.default)
+              
               if (typeof def !== 'function') {
-                throw new Error(`import() test: default export is not a function (got ${typeof def}). Exports keys: ${Object.keys(mod || {}).join(',')}`)
+                const detailedErr = `Default export is not a function (got ${typeof def}). 
+Exports keys: ${Object.keys(mod || {}).join(',')}
+Module.exports: ${JSON.stringify((mod as any).exports || {}, null, 2)}
+Transpiled snippet: ${transpiled.substring(0, 300)}`
+                throw new Error(detailedErr)
               }
               const res = await def(ctx)
               console.log('[DebugTab][Import] Dynamic import delegation success', { result: res })
-              updateResult(testName, { status: 'success', message: 'Dynamic import delegated successfully', details: String(res) })
+              updateResult(testName, { 
+                status: 'success', 
+                message: 'Dynamic import delegated successfully', 
+                details: `Result: ${String(res)}\nTranspiled length: ${transpiled.length}` 
+              })
             } catch (e: any) {
               console.log('[DebugTab][Import] Dynamic import delegation failed', {
                 message: e?.message || String(e),
                 stack: e?.stack,
               })
-              updateResult('dynamicImport', { status: 'error', message: 'Dynamic import delegation failed', details: e?.message || String(e) })
+              const detailedMsg = `${e?.message || String(e)}
+
+Stack: ${e?.stack?.split('\n').slice(0, 5).join('\n') || 'N/A'}
+
+Transpiled Code (first 1000 chars):
+${transpiled?.substring(0, 1000) || 'N/A'}`
+              updateResult('dynamicImport', { 
+                status: 'error', 
+                message: 'Dynamic import delegation failed', 
+                details: detailedMsg 
+              })
             } finally {
               setLoading(null)
             }
