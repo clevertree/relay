@@ -283,221 +283,33 @@ export async function transpileCode(
   options: TransformOptions,
   _toCommonJs: boolean = false
 ): Promise<string> {
-  // Use SWC WASM in the browser to transpile TS/TSX/JSX → modern JS (ESM)
-  // No external network calls; the wasm is bundled by Vite.
-  try {
-    // Extract JSX pragma from source code (e.g., /** @jsx h */ or /** @jsx React.createElement */)
-  // Use internal unique pragma names to avoid colliding with user-land
-  // helpers or multiple injections of the same identifier (e.g. _jsx_)
+  // STRICT MODE: Disable SWC/Babel/server fallbacks.
+  // Only use the new Rust crate WASM binding if available on the page.
+  // The web app must load the crate and expose globalThis.__hook_transpile_jsx(source, filename) => string
+  const filename = options.filename || 'module.tsx'
+  const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : {})
+  const wasmTranspile: any = g.__hook_transpile_jsx
+  if (typeof wasmTranspile !== 'function') {
+    throw new Error('HookTranspiler WASM not loaded: expected globalThis.__hook_transpile_jsx(source, filename)')
+  }
+
+  // Extract JSX pragma (default to h / React.Fragment)
   let pragmaFn = 'h'
   let pragmaFragFn = 'React.Fragment'
-    const pragmaMatch = code.match(/\/\*+\s*@jsx\s+([\w.]+)\s*\*+\//)
-    const pragmaFragMatch = code.match(/\/\*+\s*@jsxFrag\s+([\w.]+)\s*\*+\//)
-    if (pragmaMatch && pragmaMatch[1]) {
-      pragmaFn = pragmaMatch[1]
-      console.log('[transpileCode] Found @jsx pragma:', pragmaFn)
-    }
-    if (pragmaFragMatch && pragmaFragMatch[1]) {
-      pragmaFragFn = pragmaFragMatch[1]
-      console.log('[transpileCode] Found @jsxFrag pragma:', pragmaFragFn)
-    }
-    
-    // **CRITICAL**: Prepend preamble BEFORE transpilation so JSX pragma function is defined
-    // when SWC transpiles JSX syntax to pragma function calls
+  const pragmaMatch = code.match(/\/\*+\s*@jsx\s+([\w.]+)\s*\*+\//)
+  const pragmaFragMatch = code.match(/\/\*+\s*@jsxFrag\s+([\w.]+)\s*\*+\//)
+  if (pragmaMatch && pragmaMatch[1]) pragmaFn = pragmaMatch[1]
+  if (pragmaFragMatch && pragmaFragMatch[1]) pragmaFragFn = pragmaFragMatch[1]
   const preamble = ``
-    const codeWithPreamble = preamble + code
-    console.log('[transpileCode] Prepended preamble with pragma:', pragmaFn)
-    console.log('[transpileCode] First 150 chars of code to transpile:', codeWithPreamble.substring(0, 150))
-    console.log('[transpileCode] Code charCode check:', codeWithPreamble.charCodeAt(0), codeWithPreamble.charCodeAt(1), codeWithPreamble.charCodeAt(2))
-    
-    // 1) Prefer a preloaded SWC instance exposed by the web app
-    const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : (window as any)) || {}
-    let swc: any = g.__swc
-    let swcNs: any = undefined
-    console.log('[transpileCode] Starting transpilation for', options.filename, 'code length:', code.length)
-    console.log('[transpileCode] Global __swc available:', !!g.__swc)
-    
-    if (!swc) {
-      // If the app is preloading SWC, wait a short period for it to finish to avoid a race
-      try {
-        const gAny: any = globalThis as any
-        if (gAny.__swc_ready && typeof gAny.__swc_ready.then === 'function') {
-          console.log('[transpileCode] awaiting global __swc_ready for init')
-          // await but don't block indefinitely - 1200ms grace
-          const p = Promise.race([gAny.__swc_ready, new Promise((res) => setTimeout(res, 1200))])
-          await p
-          swc = (globalThis as any).__swc
-        }
-      } catch (e) {
-        console.warn('[transpileCode] error awaiting __swc_ready (continuing):', e)
-      }
-    }
-    if (!swc) {
-      // 2) Fallback to dynamic import if bridge not present
-      console.log('[transpileCode] __swc not preloaded, importing @swc/wasm-web')
-      // @ts-ignore
-      swcNs = await eval('import("@swc/wasm-web")')
-      console.log('[transpileCode] @swc/wasm-web imported, keys:', Object.keys(swcNs), 'default:', typeof swcNs?.default)
-      
-      // @swc/wasm-web uses wasm-pack, which auto-initializes when you first access
-      // the module. However, the initialization can be finicky. Try explicit init first.
-      try {
-        // Prefer async init if available (better for WASM loading)
-        if (typeof swcNs?.default === 'function') {
-          console.log('[transpileCode] Calling ns.default() for async init')
-          await swcNs.default()
-          console.log('[transpileCode] Async init completed')
-        } else if (typeof swcNs?.init === 'function') {
-          console.log('[transpileCode] Calling ns.init() for async init')
-          await swcNs.init()
-          console.log('[transpileCode] Async init completed')
-        } else if (typeof swcNs?.initSync === 'function') {
-          console.log('[transpileCode] Calling ns.initSync() for sync init')
-          swcNs.initSync()
-          console.log('[transpileCode] Sync init completed')
-        } else {
-          console.log('[transpileCode] No explicit init function found, assuming auto-init')
-        }
-      } catch (e) {
-        console.warn('[transpileCode] Explicit init failed (may auto-init):', e)
-        // Continue - some bundlers handle init automatically
-      }
-      
-      // Use the namespace exports as the SWC module (named exports live here)
-      swc = swcNs
-      try { (globalThis as any).__swc = swc } catch {}
-      console.log('[transpileCode] Cached swc to globalThis.__swc, has transform:', typeof swc?.transform)
-    } else {
-      console.log('[transpileCode] Using preloaded __swc, has transform:', typeof swc.transform)
-    }
+  const codeWithPreamble = preamble + code
 
-    const filename = options.filename || 'module.tsx'
-    const isTs = /\.(tsx?|mts|cts)$/.test(filename)
-    const isJsx = /\.(jsx|tsx)$/.test(filename) || /<([A-Za-z][A-Za-z0-9]*)\s/.test(code)
-    
-    // Infer development mode from environment when not explicitly provided
-    const isDevEnv = (() => {
-      try {
-        // Vite exposes import.meta.env.MODE (but React Native doesn't support import.meta)
-        // Check if we're in a Vite environment before accessing import.meta
-        if (typeof globalThis !== 'undefined' && (globalThis as any).__VITE_ENV__) {
-          const viteMode = (globalThis as any).__VITE_ENV__.MODE
-          if (viteMode) return String(viteMode) === 'development'
-        }
-      } catch {}
-      try {
-        // Fallback to process.env.NODE_ENV if defined by bundler
-        // eslint-disable-next-line no-undef
-        if (typeof process !== 'undefined' && (process as any)?.env?.NODE_ENV) {
-          return (process as any).env.NODE_ENV === 'development'
-        }
-      } catch {}
-      return false
-    })()
-    const reactDev = options.development ?? isDevEnv
-
-    const transformOptions = {
-      jsc: {
-        target: 'es2022',
-        parser: isTs
-          ? { syntax: 'typescript' as const, tsx: isJsx }
-          : { syntax: 'ecmascript' as const, jsx: isJsx },
-        transform: isJsx
-          ? {
-              react: {
-                runtime: 'classic',
-                pragma: pragmaFn,
-                pragmaFrag: pragmaFragFn,
-                development: !!reactDev,
-              },
-            }
-          : undefined,
-      },
-      module: { type: 'es6' as const },
-      sourceMaps: !!reactDev,
-      filename,
-    }
-
-    const transformFn = swc?.transformSync || swcNs?.transformSync || swcNs?.default?.transformSync || swc?.transform || swcNs?.transform || swcNs?.default?.transform
-    console.log('[transpileCode] Found transformFn:', typeof transformFn, 'isSync:', !!(swc?.transformSync || swcNs?.transformSync || swcNs?.default?.transformSync))
-    
-    if (typeof transformFn !== 'function') {
-      const keys = swcNs ? Object.keys(swcNs || {}) : []
-      const dkeys = swcNs ? Object.keys((swcNs as any)?.default || {}) : []
-      const hint = g.__swc ? 'Global __swc exists but lacks transform().' : 'Global __swc not found.'
-      throw new Error(`SWC not available: missing transform(). ${hint} Module keys=${JSON.stringify(keys)}, default keys=${JSON.stringify(dkeys)}`)
-    }
-    // Some environments exhibit a weird error from swc glue: reading 'transform' of undefined.
-    // Normalize options to plain JSON and retry once with a conservative shape if it happens.
-    const callTransform = async (opts: any) => {
-      // Strip undefined and functions
-      const jsonOpts = JSON.parse(JSON.stringify(opts))
-      console.log('[transpileCode] Calling transform with options:', JSON.stringify(jsonOpts).substring(0, 200))
-      try {
-        const res = await transformFn(codeWithPreamble, jsonOpts)
-        console.log('[transpileCode] Transform succeeded, result code length:', res?.code?.length)
-        return res
-      } catch (e) {
-        console.error('[transpileCode] Transform call failed:', e?.message || String(e))
-        throw e
-      }
-    }
-    let result
-    try {
-      result = await callTransform(transformOptions)
-    } catch (e: any) {
-      console.error('[transpileCode] Transform error on first try:', e?.message || String(e), 'stack:', e?.stack)
-      const msg = e?.message || String(e)
-      if (/reading 'transform'|reading '_windgen|reading 'memory'|wasm|WebAssembly/i.test(msg) || /Cannot read properties of undefined/.test(msg)) {
-        console.log('[transpileCode] Retrying with forced jsc.transform (appears to be WASM/init issue)')
-        // Retry with forced jsc.transform object present
-        const retryOpts = {
-          ...transformOptions,
-          jsc: {
-            ...transformOptions.jsc,
-            transform: {
-              react: {
-                runtime: 'classic',
-                // Use the internal pragma names for retry as well
-                pragma: '__relay_jsx__',
-                pragmaFrag: '__relay_jsxFrag__',
-                development: !!reactDev,
-              },
-            },
-          },
-        }
-        try {
-          result = await callTransform(retryOpts)
-        } catch (retryErr: any) {
-          console.error('[transpileCode] Retry also failed:', retryErr?.message || String(retryErr))
-          throw retryErr
-        }
-      } else {
-        throw e
-      }
-    }
-    let out: string = (result && result.code) || ''
-    // Defensive: some inputs or transforms may still emit references or
-    // declarations for the classic runtime helpers named `_jsx_`/_jsxFrag_.
-    // Replace those identifiers with our internal unique names so they
-    // use the single preamble we injected and avoid duplicate declarations.
-    try {
-      out = out.replace(/\b_jsx_\b/g, '__relay_jsx__').replace(/\b_jsxFrag_\b/g, '__relay_jsxFrag__')
-    } catch (e) {
-      // If anything goes wrong with the replace, continue with original output
-      console.warn('[transpileCode] Post-transform replace failed:', e)
-    }
-    return out + `\n//# sourceURL=${filename}`
-  } catch (err) {
-    console.error('[transpileCode] SWC transform failed:', err)
-    const message = (err as any)?.message || String(err)
-    const e: any = new Error(`TranspileError: ${options.filename || 'unknown'}: ${message}`)
-    e.name = 'TranspileError'
-    if ((err as any)?.stack) e.stack = (err as any).stack
-    if ((err as any)?.code) (e as any).code = (err as any).code
-    if ((err as any)?.cause) (e as any).cause = (err as any).cause
-    throw e
+  const out = await wasmTranspile(codeWithPreamble, filename)
+  if (typeof out !== 'string') {
+    throw new Error('HookTranspiler returned non-string output')
   }
+  // Rewrite dynamic import() to helpers.loadModule()
+  const rewritten = out.replace(/\bimport\s*\(/g, 'context.helpers.loadModule(')
+  return rewritten + `\n//# sourceURL=${filename}`
 }
 
 /**

@@ -1,296 +1,3 @@
-use std::{
-    fs::File,
-    io::BufReader,
-    net::SocketAddr,
-    path::{Path as FsPath, PathBuf},
-    str::FromStr,
-};
-
-use axum::{
-    body::{Body, Bytes},
-    extract::{Path as AxPath, Query, State},
-    http::{HeaderMap, Method, Request, StatusCode},
-    middleware::Next,
-    response::{IntoResponse, Response},
-    routing::{get, head, post},
-    Json, Router,
-};
-use base64::{engine::general_purpose, Engine as _};
-use clap::{Args, Parser, Subcommand};
-use git2::{ObjectType, Oid, Repository, Signature};
-use percent_encoding::percent_decode_str as url_decode;
-use pulldown_cmark::{html, Parser as MdParser};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use thiserror::Error;
-use tokio::net::TcpListener;
-use tokio::time::Duration;
-use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info, warn};
-use tracing_appender::rolling;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use axum_server::tls_rustls::RustlsConfig;
-use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
-
-#[derive(Clone)]
-struct AppState {
-    // Now represents the repository ROOT directory that contains one or more bare repos (name.git)
-    repo_path: PathBuf,
-    // Additional static directories to serve from root before Git/IPFS
-    static_paths: Vec<PathBuf>,
-}
-
-const HEADER_BRANCH: &str = "X-Relay-Branch";
-const HEADER_REPO: &str = "X-Relay-Repo";
-const DEFAULT_BRANCH: &str = "main";
-// All repository files are now allowed for read and write operations.
-
-const DEFAULT_IPFS_CACHE_ROOT: &str = "/srv/relay/ipfs-cache";
-
-// IPFS fetch deduplication removed; IPFS resolution is delegated to repo script
-
-#[derive(Parser, Debug)]
-#[command(
-    name = "relay-server",
-    version,
-    about = "Relay Server and CLI utilities",
-    propagate_version = true
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Run the HTTP server
-    Serve(ServeArgs),
-}
-
-#[derive(Args, Debug)]
-struct ServeArgs {
-    /// Bare Git repository path
-    #[arg(long)]
-    repo: Option<PathBuf>,
-    /// Additional static directory to serve files from (may be repeated)
-    #[arg(long = "static", value_name = "DIR")]
-    static_paths: Vec<PathBuf>,
-    /// Bind address (host:port) for HTTP (overrides RELAY_HTTP_PORT if set)
-    #[arg(long)]
-    bind: Option<String>,
-}
-
-// IpfsAdd removed — IPFS logic is delegated to repo scripts
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Initialize rustls crypto provider for TLS support
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    
-    let cli = Cli::parse();
-
-    // Set up logging: stdout + rolling file appender
-    // Ensure logs directory exists
-    let _ = std::fs::create_dir_all("logs");
-    let file_appender = rolling::daily("logs", "server.log");
-    let (file_nb, _guard) = tracing_appender::non_blocking(file_appender);
-    let env_filter = tracing_subscriber::EnvFilter::from_default_env();
-    let stdout_layer = fmt::layer()
-        .with_target(true)
-        .with_thread_ids(false)
-        .with_thread_names(false)
-        .compact();
-    let file_layer = fmt::layer()
-        .with_writer(file_nb)
-        .with_target(true)
-        .compact();
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(stdout_layer)
-        .with(file_layer)
-        .init();
-
-    // Determine serve args from CLI/env
-    let (repo_path, mut static_paths, bind_cli): (PathBuf, Vec<PathBuf>, Option<String>) =
-        match cli.command {
-            Some(Commands::Serve(sa)) => {
-                let rp = sa
-                    .repo
-                    .or_else(|| std::env::var("RELAY_REPO_PATH").ok().map(PathBuf::from))
-                    .unwrap_or_else(|| PathBuf::from("data"));
-                (rp, sa.static_paths, sa.bind)
-            }
-            _ => {
-                let rp = std::env::var("RELAY_REPO_PATH")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| PathBuf::from("data"));
-                (rp, Vec::new(), None)
-            }
-        };
-    // Append RELAY_STATIC_DIR if provided (comma-separated allowed)
-    if let Ok(extra) = std::env::var("RELAY_STATIC_DIR") {
-        for p in extra.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            static_paths.push(PathBuf::from(p));
-        }
-    }
-    info!(static_paths = ?static_paths, "Static paths configured");
-    info!(repo_path = %repo_path.display(), "Repository path resolved");
-    // Treat path as repository ROOT directory
-    let _ = std::fs::create_dir_all(&repo_path);
-
-    // Initialize repos from RELAY_MASTER_REPO_LIST if provided
-    if let Ok(repo_list_str) = std::env::var("RELAY_MASTER_REPO_LIST") {
-        let repos: Vec<&str> = repo_list_str.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-        for repo_url in repos {
-            let repo_name = repo_url
-                .split('/')
-                .last()
-                .and_then(|s| s.strip_suffix(".git"))
-                .unwrap_or(repo_url);
-            let bare_repo_path = repo_path.join(format!("{}.git", repo_name));
-
-            // Skip if already cloned
-            if bare_repo_path.exists() {
-                info!(repo = %repo_name, "Repository already exists, skipping clone");
-                continue;
-            }
-
-            info!(repo = %repo_name, url = %repo_url, "Cloning repository");
-            match std::process::Command::new("git")
-                .arg("clone")
-                .arg("--bare")
-                .arg(repo_url)
-                .arg(&bare_repo_path)
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        info!(repo = %repo_name, "Successfully cloned repository");
-                    } else {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        warn!(repo = %repo_name, error = %stderr, "Failed to clone repository");
-                    }
-                }
-                Err(e) => {
-                    warn!(repo = %repo_name, error = %e, "Failed to execute git clone");
-                }
-            }
-        }
-    }
-
-    let state = AppState {
-        repo_path,
-        static_paths,
-    };
-
-    // Build app (OPTIONS is the discovery endpoint)
-    let acme_route_dir = std::env::var("RELAY_ACME_DIR").unwrap_or_else(|_| "/var/www/certbot".to_string());
-    let app = Router::new()
-        .route("/openapi.yaml", get(get_openapi_yaml))
-        .route("/swagger-ui", get(get_swagger_ui))
-        .route("/api/config", get(get_api_config))
-        .route("/git-pull", post(post_git_pull))
-        // ACME HTTP-01 challenge support (served from RELAY_ACME_DIR)
-        .route(
-            "/.well-known/acme-challenge/*path",
-            get({
-                let dir = acme_route_dir.clone();
-                move |AxPath(path): AxPath<String>| async move {
-                    serve_acme_challenge(&dir, &path).await
-                }
-            }),
-        )
-        .route(
-            "/",
-            get(get_root)
-                .head(head_root)
-                .options(options_capabilities)
-                .method(
-                    Method::from_bytes(b"QUERY").expect("invalid query method"),
-                    post_query,
-                ),
-        )
-        .route(
-            "/*path",
-            get(get_file)
-                .head(head_file)
-                .put(put_file)
-                .delete(delete_file)
-                .options(options_capabilities)
-                .method(
-                    Method::from_bytes(b"QUERY").expect("invalid query method"),
-                    post_query,
-                ),
-        )
-        // Add permissive CORS headers without intercepting OPTIONS
-        .layer(axum::middleware::from_fn(cors_headers))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
-
-    // Peer tracker removed; no background registration
-
-    // Configure listeners: HTTP and optional HTTPS via Rustls
-    let http_addr: SocketAddr = if let Some(bind) = bind_cli.or_else(|| std::env::var("RELAY_BIND").ok()) {
-        SocketAddr::from_str(&bind)?
-    } else {
-        let port = std::env::var("RELAY_HTTP_PORT").ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or(80);
-        SocketAddr::from_str(&format!("0.0.0.0:{}", port))?
-    };
-    let https_port = std::env::var("RELAY_HTTPS_PORT").ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or(443);
-    let tls_cert = std::env::var("RELAY_TLS_CERT").ok()
-        .or_else(|| {
-            for path in &["cert/server.crt", "/srv/relay/cert/server.crt"] {
-                let p = PathBuf::from(path);
-                if p.exists() { return Some(p.to_string_lossy().to_string()); }
-            }
-            None
-        });
-    let tls_key = std::env::var("RELAY_TLS_KEY").ok()
-        .or_else(|| {
-            for path in &["cert/server.key", "/srv/relay/cert/server.key"] {
-                let p = PathBuf::from(path);
-                if p.exists() { return Some(p.to_string_lossy().to_string()); }
-            }
-            None
-        });
-
-    let app_http = app.clone();
-    let http_task = tokio::spawn(async move {
-        info!(%http_addr, "HTTP listening");
-        let listener = TcpListener::bind(&http_addr).await.expect("bind http");
-        if let Err(e) = axum::serve(listener, app_http.into_make_service()).await {
-            error!(?e, "HTTP server error");
-        }
-    });
-
-    // HTTPS with self-signed cert by default
-    let https_task = if let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) {
-        let https_addr: SocketAddr = SocketAddr::from_str(&format!("0.0.0.0:{}", https_port))?;
-        // load_rustls_config is async; await it here in the main async context
-        let config = load_rustls_config(&cert_path, &key_path).await?;
-        let app_https = app;
-        Some(tokio::spawn(async move {
-            info!(%https_addr, cert=%cert_path, key=%key_path, "HTTPS listening");
-            if let Err(e) = axum_server::bind_rustls(https_addr, config)
-                .serve(app_https.into_make_service())
-                .await
-            {
-                error!(?e, "HTTPS server error");
-            }
-        }))
-    } else {
-        info!("TLS is disabled: no cert found at cert/server.crt or RELAY_TLS_CERT/RELAY_TLS_KEY not both set");
-        None
-    };
-
-    if let Some(t) = https_task {
-        let _ = tokio::join!(http_task, t);
-    } else {
-        let _ = tokio::join!(http_task);
-    }
-    Ok(())
-}
 
 // IPFS CLI commands removed; IPFS logic is delegated to repo scripts
 
@@ -2709,4 +2416,58 @@ fn delete_file_in_repo(
             .map_err(|e| ReadError::Other(e.into()))?
     };
     Ok((commit_oid.to_string(), branch.to_string()))
+}
+
+#[derive(Debug, Deserialize)]
+struct TranspileRequest {
+    code: String,
+    filename: Option<String>,
+    #[serde(default)]
+    to_common_js: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TranspileResponse {
+    code: Option<String>,
+    map: Option<String>,
+    diagnostics: Option<String>,
+    ok: bool,
+}
+
+async fn post_transpile(Json(req): Json<TranspileRequest>) -> impl IntoResponse {
+    let opts = TranspileOptions {
+        filename: req.filename.clone(),
+        react_dev: false,
+        to_commonjs: req.to_common_js,
+        pragma: Some("h".to_string()),
+        pragma_frag: None,
+    };
+    match transpile(&req.code, opts) {
+        Ok(out) => (
+            StatusCode::OK,
+            Json(TranspileResponse { code: Some(out.code), map: out.map, diagnostics: None, ok: true }),
+        )
+            .into_response(),
+        Err(e) => {
+            let (status, diag) = match e {
+                TranspileError::ParseError { filename, line, col, message } => (
+                    StatusCode::BAD_REQUEST,
+                    format!("Parse error in {} at {}:{} — {}", filename, line, col, message),
+                ),
+                TranspileError::TransformError(filename, err) => (
+                    StatusCode::BAD_REQUEST,
+                    format!("Transform error in {} — {}", filename, err),
+                ),
+                TranspileError::CodegenError(filename, err) => (
+                    StatusCode::BAD_REQUEST,
+                    format!("Code generation error in {} — {}", filename, err),
+                ),
+            };
+            (
+                status,
+                Json(TranspileResponse { code: None, map: None, diagnostics: Some(diag), ok: false }),
+            )
+                .into_response()
+        }
+    }
 }

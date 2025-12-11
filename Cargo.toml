@@ -5,5 +5,7 @@ members = [
     "crates/relay-cli",
     "crates/streaming-files",
     "apps/client-react-native/rust",
+    "crates/hook-transpiler",
 ]
 resolver = "2"
+# Note: no global patches to avoid conflicting with isolated WASM crate

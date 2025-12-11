@@ -16,32 +16,23 @@ export async function preloadSwc() {
       console.log('[swcBridge] Module keys:', Object.keys(ns))
       console.log('[swcBridge] ns.default:', typeof ns?.default)
       
-      // The @swc/wasm-web module uses wasm-pack which typically exposes:
-      // - A default export that is the init function (for async init)
-      // - Named exports for the actual functions (transform, transformSync, etc.)
-      // - The WASM module is auto-loaded by the wrapper if possible
-      
+      // Robust init without explicit wasm asset import to avoid Vite import-analysis issues
       if (!initialized) {
         try {
-          // Try to call the default export (usually the async init function)
           if (typeof ns?.default === 'function') {
             console.log('[swcBridge] Calling ns.default() (async init)')
             await ns.default()
-            console.log('[swcBridge] Default init completed')
           } else if (typeof ns?.init === 'function') {
-            console.log('[swcBridge] Calling ns.init() (alternate async init)')
+            console.log('[swcBridge] Calling ns.init() (async init)')
             await ns.init()
-            console.log('[swcBridge] ns.init() completed')
           } else if (typeof ns?.initSync === 'function') {
-            console.log('[swcBridge] Only initSync available, attempting call')
+            console.log('[swcBridge] Calling ns.initSync() (sync init)')
             ns.initSync()
-            console.log('[swcBridge] initSync completed')
           }
           initialized = true
           console.log('[swcBridge] WASM initialized successfully')
         } catch (e) {
-          console.error('[swcBridge] WASM initialization error:', e)
-          // Some bundlers auto-init, so continue anyway
+          console.error('[swcBridge] WASM initialization error (continuing, transform() may still work):', e)
         }
       }
       

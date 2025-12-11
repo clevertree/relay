@@ -10,7 +10,7 @@ export default defineConfig({
     middlewareMode: false,
   },
   optimizeDeps: {
-    include: ['@swc/wasm-web'],
+    include: ['@swc/wasm-web', '@babel/standalone'],
   },
   build: {
     minify: false, // Keep bundles readable for debugging
@@ -31,6 +31,8 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@relay/shared': path.resolve(__dirname, '../shared/src'),
+      // Provide a shim alias for Babel-standalone so shared code can import a stable name
+      '@babel-standalone-shim': '@babel/standalone',
     },
   },
 })

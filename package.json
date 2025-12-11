@@ -15,6 +15,8 @@
         "server:ipfs-add": "cargo run --manifest-path apps/server/Cargo.toml -- ipfs-add template-ui",
         "server:host": "cargo run --manifest-path apps/server/Cargo.toml -- serve --repo /data/repo.git --static template-ui",
         "web:dev": "npm --prefix apps/client-web run dev",
+        "build:hook-wasm": "bash ./scripts/build-hook-wasm.sh",
+        "web:dev:wasm": "npm run build:hook-wasm && npm --prefix apps/client-web run dev",
         "web:dev:full": "node scripts/dev-server.cjs",
         "web:build": "npm --prefix apps/client-web run build",
         "web:build:debug": "npm --prefix apps/client-web run build:debug",

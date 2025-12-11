@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@swc/wasm-web": "^1.2.147",
+    "@babel/standalone": "^7.26.2",
     "markdown-to-jsx": "^9.3.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
