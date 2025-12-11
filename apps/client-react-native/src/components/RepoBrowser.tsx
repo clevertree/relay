@@ -78,21 +78,44 @@ function useHookRenderer(host: string) {
           code = sanitized
         }
 
-        // Try primary transpiler (SWC via transpileCode)
+        // Decide whether the file looks like it contains JSX or needs module conversion
+        const looksLikeJsx = /<([A-Za-z][A-Za-z0-9]*)\s/.test(code) || /\.(jsx|tsx)$/.test(filename)
+        const isMjs = filename.endsWith('.mjs') || filename.endsWith('.mts')
+
         let transpiled: string
-        try {
-          transpiled = await transpileCode(code, { filename }, false)
-          console.debug('[transpileWrapper] transpileCode succeeded, length:', transpiled.length)
-        } catch (swcErr) {
-          console.warn('[transpileWrapper] transpileCode failed, falling back to Babel:', swcErr)
-          // Fallback: use @babel/standalone available in the app (like DebugTab)
-          // Importing @babel/standalone dynamically to avoid bundling issues
+        // If it looks like JSX prefer Babel (more predictable in RN environment)
+        if (looksLikeJsx) {
+          console.debug('[transpileWrapper] Detected JSX - using Babel directly')
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const Babel = require('@babel/standalone')
-          // Ensure JSX syntax is enabled by using the react preset
-          const babelResult = Babel.transform(code, { filename, presets: ['react'] })
+          const presets: any[] = ['react']
+          if (isMjs) {
+            presets.push(['env', { modules: 'commonjs' }])
+          }
+          const babelResult = Babel.transform(code, { filename, presets })
           transpiled = (babelResult && (babelResult as any).code) || code
-          console.debug('[transpileWrapper] Babel fallback produced length:', transpiled.length)
+          console.debug('[transpileWrapper] Babel (JSX) produced length:', transpiled.length)
+        } else {
+          try {
+            // Try primary transpiler (SWC via transpileCode)
+            transpiled = await transpileCode(code, { filename }, false)
+            console.debug('[transpileWrapper] transpileCode succeeded, length:', transpiled.length)
+          } catch (swcErr) {
+            console.warn('[transpileWrapper] transpileCode failed, falling back to Babel:', swcErr)
+            // Fallback: use @babel/standalone available in the app (like DebugTab)
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const Babel = require('@babel/standalone')
+            const presets: any[] = []
+            if (isMjs) {
+              // For .mjs modules, ask Babel to output CommonJS so 'export' is converted
+              presets.push(['env', { modules: 'commonjs' }])
+            }
+            // If code contains JSX we still need react preset
+            if (looksLikeJsx) presets.unshift('react')
+            const babelResult = presets.length ? Babel.transform(code, { filename, presets }) : Babel.transform(code, { filename })
+            transpiled = (babelResult && (babelResult as any).code) || code
+            console.debug('[transpileWrapper] Babel fallback produced length:', transpiled.length)
+          }
         }
 
         // Convert ES6 exports to CommonJS for RNModuleLoader execution
