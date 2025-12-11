@@ -1,32 +1,18 @@
 /**
  * Native Repo Browser Component
- * Provides Visit/Search functionality with:
- * - Pagination support for large result sets
- * - Result caching with ETag/Last-Modified headers
- * - Virtualized list rendering (FlatList) for performance
- * - Improved UX with load more functionality
+ * Simple hook host - all UI/search/navigation is handled by the repo hook.
+ * Client is a dumb host that loads and renders the hook module.
  */
 
 import React, {useState, useCallback, useRef, useEffect} from 'react';
 import {
   ActivityIndicator,
-  FlatList,
-  ListRenderItemInfo,
-  RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import MarkdownRenderer from './MarkdownRenderer';
-import { HookLoader, RNModuleLoader, transpileCode, looksLikeTsOrJsx, type HookContext, ES6ImportHandler, buildPeerUrl, buildRepoHeaders } from '../../../shared/src';
-
-/**
- * New lightweight path: render the repository-owned UI by loading the get-hook module
- * Disables legacy Visit/Search UI so the client is a dumb host, same as web.
- */
-const USE_REPO_HOOK = true;
+import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl, buildRepoHeaders } from '../../../shared/src';
 
 type OptionsInfo = {
   client?: { hooks?: { get?: { path: string }; query?: { path: string } } }
@@ -35,7 +21,6 @@ type OptionsInfo = {
 
 /**
  * Helper to normalize host URL - ensures proper protocol is added if missing
- * Matches client-web's implementation for consistency
  */
 function normalizeHostUrl(host: string): string {
   if (host.startsWith('http://') || host.startsWith('https://')) {
@@ -47,8 +32,7 @@ function normalizeHostUrl(host: string): string {
   return `https://${host}` // No port, assume https
 }
 
-function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
-  const [path, setPath] = pathState
+function useHookRenderer(host: string) {
   const [element, setElement] = useState<React.ReactNode | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -57,6 +41,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
   const hookLoaderRef = useRef<HookLoader | null>(null)
 
   const normalizedHost = normalizeHostUrl(host)
+  console.debug(`[useHookRenderer] initialized with host: ${host}, normalized: ${normalizedHost}`)
 
   // Initialize hook loader with RN module executor
   useEffect(() => {
@@ -64,12 +49,64 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
       if (spec === 'react') return require('react')
       return {}
     }
-    
+
     // Wrapper for transpileCode to match the expected signature
-    const transpileWrapper = (code: string, filename: string) => {
-      return transpileCode(code, { filename })
+    // CRITICAL: React Native RNModuleLoader expects CommonJS (module.exports)
+    // transpileCode outputs ES6 modules, so we need to convert to CommonJS
+    const transpileWrapper = async (code: string, filename: string): Promise<string> => {
+      console.debug('[transpileWrapper] Input code length:', code.length, 'filename:', filename)
+      // Log first 50 chars and their char codes for debugging encoding issues
+      const firstChars = code.substring(0, 50)
+      console.debug('[transpileWrapper] First 50 chars:', firstChars)
+      console.debug('[transpileWrapper] First 10 char codes:', 
+        Array.from(firstChars.substring(0, 10)).map(c => c.charCodeAt(0)).join(', '))
+      
+      try {
+        // First, try to detect and fix encoding issues
+        let sanitized = code
+          .replace(/â€"/g, '—')
+          .replace(/â€œ/g, '"')
+          .replace(/â€/g, '"')
+          .replace(/â€™/g, "'")
+          .replace(/ΓÇö/g, '--')
+          .replace(/ΓÇ£/g, '"')
+          .replace(/ΓÇ¥/g, '"')
+          .replace(/ΓÇÖ/g, "'")
+
+        if (sanitized !== code) {
+          console.debug('[transpileWrapper] Fixed encoding issues, code length:', sanitized.length)
+          code = sanitized
+        }
+
+        // Try primary transpiler (SWC via transpileCode)
+        let transpiled: string
+        try {
+          transpiled = await transpileCode(code, { filename }, false)
+          console.debug('[transpileWrapper] transpileCode succeeded, length:', transpiled.length)
+        } catch (swcErr) {
+          console.warn('[transpileWrapper] transpileCode failed, falling back to Babel:', swcErr)
+          // Fallback: use @babel/standalone available in the app (like DebugTab)
+          // Importing @babel/standalone dynamically to avoid bundling issues
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const Babel = require('@babel/standalone')
+          // Ensure JSX syntax is enabled by using the react preset
+          const babelResult = Babel.transform(code, { filename, presets: ['react'] })
+          transpiled = (babelResult && (babelResult as any).code) || code
+          console.debug('[transpileWrapper] Babel fallback produced length:', transpiled.length)
+        }
+
+        // Convert ES6 exports to CommonJS for RNModuleLoader execution
+        transpiled = transpiled.replace(/export\s+default\s+/g, 'module.exports.default = ')
+        transpiled = transpiled.replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ')
+
+        console.debug('[transpileWrapper] After CommonJS conversion, length:', transpiled.length)
+        return transpiled
+      } catch (e) {
+        console.error('[transpileWrapper] Transpilation wrapper failed:', e)
+        throw e
+      }
     }
-    
+
     // Create RN module loader with ES6 import support
     const rnModuleLoader = new RNModuleLoader({
       requireShim,
@@ -79,7 +116,7 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
         console.debug('[RNModuleLoader] Diagnostics:', diag)
       },
     })
-    
+
     // Create ES6 import handler and set it on the loader
     const importHandler = new ES6ImportHandler({
       host: normalizedHost.replace(/^https?:\/\//, ''),
@@ -90,11 +127,17 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
       },
     })
     rnModuleLoader.setImportHandler(importHandler)
-    
+
+    // Extract protocol and host from normalizedHost
+    const urlMatch = normalizedHost.match(/^(https?):\/\/(.+)$/)
+    const protocol: 'https' | 'http' = (urlMatch ? urlMatch[1] : 'https') as 'https' | 'http'
+    const hostOnly = urlMatch ? urlMatch[2] : normalizedHost
+
     hookLoaderRef.current = new HookLoader({
-      host: normalizedHost,
-      protocol: 'http', // Placeholder - HookLoader expects protocol separately
+      host: hostOnly,
+      protocol,
       moduleLoader: rnModuleLoader,
+      transpiler: transpileWrapper,
       onDiagnostics: (diag) => {
         console.debug('[HookLoader] Diagnostics:', diag)
       },
@@ -164,80 +207,110 @@ function useHookRenderer(host: string, pathState: [string, (p: string)=>void]) {
         createElement: require('react').createElement,
         FileRenderer: FileRendererAdapter,
         Layout: undefined,
-        params: { path },
+        params: {},
         helpers: {
-          navigate: (p: string) => setPath(p),
-          setBranch: (_: string) => {},
+          navigate: () => {},
+          setBranch: () => {},
           buildPeerUrl: buildUrl,
           loadModule,
+          buildRepoHeaders: () => ({}),
         },
       }
     },
-    [normalizedHost, path]
+    [normalizedHost]
   )
 
   const tryRender = useCallback(async () => {
+    console.debug('[tryRender] Starting hook rendering...')
     setLoading(true)
     setError(null)
     setDetails(null)
 
-    const opts = optionsRef.current || (await loadOptions())
-    const hookPath = opts?.client?.hooks?.get?.path
-
-    if (!hookPath) {
-      setError('Missing hook path in OPTIONS (client.hooks.get.path)')
-      setDetails({ options: opts })
-      setLoading(false)
-      return
-    }
-
+    let hookPath: string | undefined
     try {
+      // Use default options without fetching - we know the hook path
+      const opts: OptionsInfo = {
+        client: {
+          hooks: {
+            get: { path: '/hooks/client/get-client.jsx' }
+          }
+        }
+      }
+      optionsRef.current = opts
+      console.debug('[tryRender] Got options:', opts)
+      hookPath = opts?.client?.hooks?.get?.path
+
+      // Use default hook path if not provided in OPTIONS
+      if (!hookPath) {
+        console.warn('[RepoBrowser] Hook path not in OPTIONS, using default')
+        hookPath = '/hooks/client/get-client.jsx'
+      }
+
+      // Ensure hookPath starts with /
+      if (hookPath && !hookPath.startsWith('/')) {
+        hookPath = '/' + hookPath
+      }
+
+      if (!hookPath) {
+        setError('Missing hook path in OPTIONS (client.hooks.get.path)')
+        setDetails({ options: opts })
+        setLoading(false)
+        return
+      }
+
       if (!hookLoaderRef.current) {
         throw new Error('Hook loader not initialized')
       }
 
       const ctx = createHookContext(hookPath)
+      const hookUrl = buildPeerUrl(normalizedHost, hookPath)
+      console.debug(`[RepoBrowser] Attempting to load hook from: ${hookUrl}`)
       const el = await hookLoaderRef.current.loadAndExecuteHook(hookPath, ctx)
       setElement(el)
       setError(null)
       setDetails(null)
     } catch (e: any) {
+      const hookUrl = buildPeerUrl(normalizedHost, hookPath || '/hooks/client/get-client.jsx')
       setError('Hook execution failed')
-      setDetails({ message: e?.message || String(e), stack: e?.stack })
+      
+      // Capture detailed error info for debugging network issues
+      let errorType = 'Unknown error'
+      
+      if (e.message) {
+        errorType = e.message
+        // Try to extract error details if available
+        if (e.message.includes('Network') || e.message.includes('fetch')) {
+          errorType = 'Network request failed - Check server connectivity, SSL certificates, or network configuration'
+        }
+      }
+      
+      const errorInfo = { 
+        message: e?.message || String(e),
+        errorType,
+        stack: e?.stack?.split('\n').slice(0, 3).join('\n'),
+        hookPath,
+        attemptedUrl: hookUrl,
+        host: normalizedHost,
+        errorObject: {
+          name: e?.name,
+          code: e?.code,
+          errno: e?.errno,
+        },
+      }
+      console.error(`[RepoBrowser] Hook execution failed for ${hookUrl}:`, errorInfo)
+      setDetails(errorInfo)
       setElement(null)
     } finally {
       setLoading(false)
     }
-  }, [loadOptions, createHookContext])
+  }, [createHookContext])
 
   useEffect(() => {
-    if (USE_REPO_HOOK) {
-      void tryRender()
-    }
-  }, [path, tryRender])
+    console.debug('[useHookRenderer] useEffect hook called (on mount), calling tryRender...')
+    void tryRender()
+  }, [])
 
-  return { element, loading, error, details, setPath }
-}
-
-const DEFAULT_PAGE_SIZE = 50;
-const CACHE_TTL_MS = 300000; // 5 minutes
-
-interface QueryResult {
-  path: string;
-  name: string;
-  type: 'file' | 'directory';
-  size?: number;
-  modified?: string;
-  content?: string;
-  contentType?: string;
-  [key: string]: unknown;
-}
-
-interface CacheEntry {
-  results: QueryResult[];
-  eTag?: string;
-  lastModified?: string;
-  timestamp: number;
+  return { element, loading, error, details }
 }
 
 interface RepoBrowserProps {
@@ -249,624 +322,46 @@ interface RepoBrowserProps {
 
 const RepoBrowser: React.FC<RepoBrowserProps> = ({
   host,
-  branch = 'main',
-  initialPath = '/',
-  onNavigate,
 }) => {
-  // Normalize the host URL to ensure proper protocol
-  const normalizedHost = normalizeHostUrl(host);
-
-  // State management
-  const [path, setPath] = useState(initialPath);
-  const [inputValue, setInputValue] = useState(initialPath);
-  const [results, setResults] = useState<QueryResult[]>([]);
-  const [displayedResults, setDisplayedResults] = useState<QueryResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorDetails, setErrorDetails] = useState<any>(null);
-  const [mode, setMode] = useState<'visit' | 'search'>('visit');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-
-  // Caching
-  const cacheRef = useRef(new Map<string, CacheEntry>());
-
-  const getBaseUrl = useCallback(() => {
-    return normalizedHost;
-  }, [normalizedHost]);
-
-  /**
-   * Get cached results if still fresh
-   */
-  const getCachedResults = useCallback((cacheKey: string): CacheEntry | null => {
-    const cached = cacheRef.current.get(cacheKey);
-    if (!cached) return null;
-
-    const age = Date.now() - cached.timestamp;
-    if (age > CACHE_TTL_MS) {
-      cacheRef.current.delete(cacheKey);
-      return null;
-    }
-
-    return cached;
-  }, []);
-
-  /**
-   * Cache query results
-   */
-  const cacheResults = useCallback(
-    (cacheKey: string, newResults: QueryResult[], eTag?: string, lastModified?: string) => {
-      cacheRef.current.set(cacheKey, {
-        results: newResults,
-        eTag,
-        lastModified,
-        timestamp: Date.now(),
-      });
-    },
-    [],
-  );
-
-  /**
-   * Paginate results for display
-   */
-  const paginateResults = useCallback((allResults: QueryResult[], pageNum: number) => {
-    const startIdx = (pageNum - 1) * DEFAULT_PAGE_SIZE;
-    const endIdx = startIdx + DEFAULT_PAGE_SIZE;
-    const pageResults = allResults.slice(startIdx, endIdx);
-    const hasMorePages = endIdx < allResults.length;
-
-    return {pageResults, hasMorePages};
-  }, []);
-
-  /**
-   * Load more results from current query
-   */
-  const handleLoadMore = useCallback(() => {
-    if (!hasMore || loadingMore) return;
-
-    setLoadingMore(true);
-    const {pageResults, hasMorePages} = paginateResults(results, currentPage + 1);
-
-    setDisplayedResults((prev) => [...prev, ...pageResults]);
-    setCurrentPage((p) => p + 1);
-    setHasMore(hasMorePages);
-    setLoadingMore(false);
-  }, [results, currentPage, hasMore, loadingMore, paginateResults]);
-
-  /**
-   * Perform visit operation (GET)
-   */
-  const handleVisit = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setMode('visit');
-    setResults([]);
-    setDisplayedResults([]);
-    setCurrentPage(1);
-    setHasMore(false);
-
-    try {
-      const baseUrl = getBaseUrl();
-      let targetPath = inputValue.trim();
-
-      // If a directory path is requested, try common index files in order.
-      const candidates: string[] = [];
-      if (targetPath.endsWith('/')) {
-        candidates.push(`${targetPath}index.md`);
-        candidates.push(`${targetPath}README.md`);
-      } else {
-        candidates.push(targetPath);
-      }
-
-      let lastErrorStatus: number | null = null;
-
-      // Try each candidate path (and check cache per-URL) until one succeeds.
-      for (const candidate of candidates) {
-        const urlTry = `${baseUrl}/${candidate.replace(/^\//, '')}`;
-        const cacheKey = `visit:${branch}:${urlTry}`;
-
-        const cached = getCachedResults(cacheKey);
-        if (cached) {
-          const {pageResults, hasMorePages} = paginateResults(cached.results, 1);
-          setResults(cached.results);
-          setDisplayedResults(pageResults);
-          setHasMore(hasMorePages);
-          setPath(candidate);
-          onNavigate?.(candidate);
-          setLoading(false);
-          return;
-        }
-
-        try {
-          const res = await fetch(urlTry, {
-            headers: {
-              'X-Relay-Branch': branch,
-            },
-          });
-
-          if (!res.ok) {
-            lastErrorStatus = res.status;
-            // try next candidate
-            continue;
-          }
-
-          const contentType = res.headers.get('Content-Type') || '';
-          const text = await res.text();
-          const eTag = res.headers.get('ETag') || undefined;
-          const lastModified = res.headers.get('Last-Modified') || undefined;
-
-          const visitResult: QueryResult = {
-            path: candidate,
-            name: candidate.split('/').pop() || candidate,
-            type: 'file',
-            content: text,
-            contentType,
-          };
-
-          setResults([visitResult]);
-          setDisplayedResults([visitResult]);
-          setHasMore(false);
-          cacheResults(cacheKey, [visitResult], eTag, lastModified);
-
-          setPath(candidate);
-          onNavigate?.(candidate);
-          setLoading(false);
-          return;
-        } catch (_e) {
-          // network or other error - record and try next
-          lastErrorStatus = null;
-          continue;
-        }
-      }
-
-      // If none succeeded, surface an error (use last status if available)
-      throw new Error(`GET failed: ${lastErrorStatus ?? 'unknown'}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to fetch');
-    } finally {
-      setLoading(false);
-    }
-  }, [inputValue, branch, getBaseUrl, getCachedResults, paginateResults, cacheResults, onNavigate]);
-
-  /**
-   * Perform search operation (QUERY)
-   */
-  const handleSearch = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setMode('search');
-    setResults([]);
-    setDisplayedResults([]);
-    setCurrentPage(1);
-    setHasMore(false);
-
-    try {
-      const baseUrl = getBaseUrl();
-      const searchQuery = inputValue.trim();
-      const cacheKey = `search:${branch}:${searchQuery}`;
-
-      // Check cache first
-      const cached = getCachedResults(cacheKey);
-      if (cached) {
-        const {pageResults, hasMorePages} = paginateResults(cached.results, 1);
-        setResults(cached.results);
-        setDisplayedResults(pageResults);
-        setHasMore(hasMorePages);
-        setLoading(false);
-        return;
-      }
-
-      const url = baseUrl;
-      const payload = JSON.stringify({
-        query: searchQuery,
-        page: 1,
-        pageSize: 1000, // Fetch large page to support pagination
-      });
-      const res = await fetch(url, {
-        method: 'QUERY',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Relay-Branch': branch,
-        },
-        body: payload,
-      });
-      const bodyText = await res.text();
-
-      if (!res.ok) {
-        const err = new Error(`QUERY failed: ${res.status} ${res.statusText}`);
-        ;(err as any).details = {
-          kind: 'query',
-          url,
-          method: 'QUERY',
-          status: res.status,
-          statusText: res.statusText,
-          responseBody: bodyText,
-          requestBody: payload,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Relay-Branch': branch,
-          },
-        };
-        throw err;
-      }
-
-      let data;
-      try {
-        data = JSON.parse(bodyText || '{}');
-      } catch (parseErr) {
-        const err = new Error('QUERY response parse failed');
-        ;(err as any).details = {
-          kind: 'query',
-          url,
-          method: 'QUERY',
-          status: res.status,
-          statusText: res.statusText,
-          responseBody: bodyText,
-          parseError: parseErr instanceof Error ? parseErr.message : String(parseErr),
-        };
-        throw err;
-      }
-      const eTag = res.headers.get('ETag') || undefined;
-      const lastModified = res.headers.get('Last-Modified') || undefined;
-
-      const items = Array.isArray(data.items)
-        ? data.items
-        : Object.entries(data.items || {}).map(([key, value]) => ({
-            path: key,
-            ...(typeof value === 'object' ? value : {}),
-          }));
-
-      const processedResults: QueryResult[] = items.map((item: unknown) => {
-        const obj = item as Record<string, unknown>;
-        return {
-          path: (obj.path as string) || (obj.name as string) || '',
-          name: ((obj.name as string) || (obj.path as string)?.split('/').pop()) || '',
-          type: ((obj.type as string) || 'file') as 'file' | 'directory',
-          ...obj,
-        };
-      });
-
-      const {pageResults, hasMorePages} = paginateResults(processedResults, 1);
-
-      setResults(processedResults);
-      setDisplayedResults(pageResults);
-      setHasMore(hasMorePages);
-      cacheResults(cacheKey, processedResults, eTag, lastModified);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Search failed');
-      const errorDetails = (e as any)?.details;
-      if (errorDetails) {
-        setErrorDetails({
-          kind: 'query',
-          ...errorDetails,
-        });
-      } else {
-        setErrorDetails({ kind: 'query', reason: 'unknown', error: e instanceof Error ? e.message : String(e) });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [inputValue, branch, getBaseUrl, getCachedResults, paginateResults, cacheResults]);
-
-  /**
-   * Handle pull-to-refresh
-   */
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    if (mode === 'visit') {
-      await handleVisit();
-    } else {
-      await handleSearch();
-    }
-    setRefreshing(false);
-  }, [mode, handleVisit, handleSearch]);
-
-  /**
-   * Handle result item press
-   */
-  const handleResultPress = useCallback(
-    (item: QueryResult) => {
-      const targetPath =
-        item.type === 'directory' ? `${item.path}/` : `${item.path.replace(/\/?$/, '')}/index.md`;
-      setInputValue(item.path);
-      setPath(item.path);
-      onNavigate?.(targetPath);
-    },
-    [onNavigate],
-  );
-
-  /**
-   * Format file size for display
-   */
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-  };
-
-  /**
-   * Render a single result item
-   */
-  const renderResultItem = useCallback(
-    ({item}: ListRenderItemInfo<QueryResult>) => (
-      <TouchableOpacity style={styles.resultItem} onPress={() => handleResultPress(item)}>
-        <View style={styles.resultIcon}>
-          <Text style={styles.resultIconText}>{item.type === 'directory' ? '📁' : '📄'}</Text>
-        </View>
-        <View style={styles.resultContent}>
-          <Text style={styles.resultName} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={styles.resultPath} numberOfLines={1}>
-            {item.path}
-          </Text>
-          {item.size && (
-            <Text style={styles.resultMeta}>
-              {formatFileSize(item.size as number)}
-            </Text>
-          )}
-        </View>
-        <TouchableOpacity
-          style={styles.viewButton}
-          onPress={() => {
-            setInputValue(item.path);
-            handleVisit();
-          }}>
-          <Text style={styles.viewButtonText}>View</Text>
-        </TouchableOpacity>
-      </TouchableOpacity>
-    ),
-    [handleResultPress, handleVisit],
-  );
-
-  /**
-   * Render footer (load more button or loading indicator)
-   */
-  const renderFooter = useCallback(() => {
-    if (!hasMore) return null;
-
-    return (
-      <View style={styles.footerContainer}>
-        {loadingMore ? (
-          <ActivityIndicator size="small" color="#007AFF" />
-        ) : (
-          <TouchableOpacity style={styles.loadMoreButton} onPress={handleLoadMore}>
-            <Text style={styles.loadMoreText}>
-              Load More ({displayedResults.length} of {results.length})
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  }, [hasMore, loadingMore, displayedResults.length, results.length, handleLoadMore]);
-
-  // Determine if search input starts with '/'
-  const isPathInput = inputValue.trim().startsWith('/');
+  const normalizedHost = normalizeHostUrl(host)
+  const hookRenderer = useHookRenderer(normalizedHost)
 
   return (
     <View style={styles.container}>
-      {/* Path input bar with branch label and buttons on same row */}
-      <View style={styles.inputBar}>
-        {/* Branch label badge */}
-        {branch && (
-          <View style={styles.branchBadge}>
-            <Text style={styles.branchText}>{branch}</Text>
-          </View>
-        )}
-
-        {/* Search input - flex to take available space */}
-        <TextInput
-          style={styles.input}
-          value={inputValue}
-          onChangeText={setInputValue}
-          placeholder="Enter path or search query"
-          selectTextOnFocus
-          autoCapitalize="none"
-          autoCorrect={false}
-          onSubmitEditing={isPathInput ? handleSearch : handleVisit}
-        />
-
-        {/* Visit button - only show when input doesn't start with '/' */}
-        {!isPathInput && (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.visitButton]}
-            onPress={handleVisit}
-            disabled={loading || !inputValue.trim()}>
-            <Text style={styles.actionButtonText}>Visit</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Search button - only show when input starts with '/' */}
-        {isPathInput && (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.searchButton]}
-            onPress={handleSearch}
-            disabled={loading || !inputValue.trim()}>
-            <Text style={styles.actionButtonText}>Search</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Current path indicator (only shown for search results) */}
-      {mode === 'search' && (
-        <View style={styles.pathIndicator}>
-          <Text style={styles.pathText} numberOfLines={1}>
-            {`Results (${results.length})`} {path}
-          </Text>
-        </View>
-      )}
-
-      {/* Content area */}
-      {loading && displayedResults.length === 0 ? (
+      {hookRenderer.loading && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>
-            {mode === 'visit' ? 'Fetching...' : 'Searching...'}
-          </Text>
+          <Text style={styles.loadingText}>Loading...</Text>
         </View>
-      ) : error ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          {errorDetails && (
-            <View style={styles.errorDetailsContainer}>
-              {errorDetails.url && (
-                <Text style={styles.errorDetailText}>URL: {errorDetails.url}</Text>
-              )}
-              {errorDetails.status && (
-                <Text style={styles.errorDetailText}>Status: {errorDetails.status} {errorDetails.statusText}</Text>
-              )}
-              {errorDetails.responseBody && (
-                <Text style={styles.errorDetailText} numberOfLines={4} ellipsizeMode="tail">
-                  Response: {errorDetails.responseBody}
-                </Text>
-              )}
-              {errorDetails.requestBody && (
-                <Text style={styles.errorDetailText} numberOfLines={2} ellipsizeMode="tail">
-                  Request: {errorDetails.requestBody}
-                </Text>
-              )}
-            </View>
-          )}
-          <TouchableOpacity style={styles.retryButton} onPress={mode === 'visit' ? handleVisit : handleSearch}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        // If visiting a path and the first result contains file content render
-        // it using the MarkdownView. Otherwise show the search/list view.
-        (mode === 'visit' && displayedResults.length > 0 && displayedResults[0].content) ? (
-          <View style={styles.markdownContainer}>
-            <MarkdownRenderer
-              content={displayedResults[0].content as string}
-              onLinkPress={(url) => {
-                // Navigate to external links in browser
-                // If internal path, set as new input and visit
-                try {
-                  const parsed = new URL(url);
-                  // If host matches base host, convert to relative path
-                  if (parsed.host === new URL(getBaseUrl()).host) {
-                    const relPath = parsed.pathname.replace(/^\//, '');
-                    setInputValue(relPath);
-                    setPath(relPath);
-                    onNavigate?.(relPath);
-                  } else {
-                    // External
-                    // eslint-disable-next-line @typescript-eslint/no-var-requires
-                    const {Linking} = require('react-native');
-                    Linking.openURL(url);
-                  }
-                } catch (_e) {
-                  // Not a full URL - treat as internal path
-                  const rel = url.replace(/^\//, '');
-                  setInputValue(rel);
-                  setPath(rel);
-                  onNavigate?.(rel);
-                }
-              }}
-            />
-          </View>
-        ) : (
-          <FlatList
-            data={displayedResults}
-            keyExtractor={(item, index) => item.path || `${index}`}
-            renderItem={renderResultItem}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={handleRefresh}
-              />
-            }
-            ListFooterComponent={renderFooter}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>
-                  {mode === 'search' ? 'No results found' : 'Enter a path and tap Visit'}
-                </Text>
-              </View>
-            }
-            contentContainerStyle={displayedResults.length === 0 ? styles.emptyList : undefined}
-          />
-        )
       )}
 
-      {/* Bottom status bar */}
-      <View style={styles.statusBar}>
-        {loading ? (
-          <Text style={styles.statusText}>{mode === 'visit' ? 'Fetching...' : 'Searching...'}</Text>
-        ) : error ? (
-          <Text style={[styles.statusText, styles.statusError]} numberOfLines={1}>{error}</Text>
-        ) : (
-          <Text style={styles.statusText}>Ready</Text>
-        )}
-      </View>
+      {hookRenderer.error && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Error</Text>
+          <Text style={styles.errorText}>{hookRenderer.error}</Text>
+          {hookRenderer.details && (
+            <View style={styles.errorDetails}>
+              <Text style={styles.errorDetailText}>
+                {JSON.stringify(hookRenderer.details, null, 2)}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {!hookRenderer.loading && !hookRenderer.error && hookRenderer.element && (
+        <View style={styles.hookContainer}>
+          {hookRenderer.element}
+        </View>
+      )}
     </View>
-  );
-};
+  )
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-  },
-  inputBar: {
-    flexDirection: 'row',
-    padding: 8,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    alignItems: 'center',
-  },
-  branchBadge: {
-    backgroundColor: '#E8E8E8',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  branchText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#333',
-  },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-    backgroundColor: '#fff',
-  },
-  actionButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    justifyContent: 'center',
-  },
-  visitButton: {
-    backgroundColor: '#007AFF',
-  },
-  searchButton: {
-    backgroundColor: '#5856D6',
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  pathIndicator: {
-    padding: 8,
-    backgroundColor: '#f8f9fa',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  pathText: {
-    fontSize: 12,
-    color: '#666',
   },
   loadingContainer: {
     flex: 1,
@@ -878,128 +373,36 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   errorContainer: {
+    flex: 1,
     padding: 20,
-    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#dc3545',
+    marginBottom: 12,
   },
   errorText: {
     color: '#dc3545',
-    textAlign: 'center',
+    fontSize: 14,
+    marginBottom: 12,
   },
-  errorDetailsContainer: {
-    marginTop: 8,
-    alignSelf: 'stretch',
+  errorDetails: {
+    backgroundColor: '#fdf2f2',
     borderWidth: 1,
     borderColor: '#f5c6cb',
-    backgroundColor: '#fdf2f2',
-    padding: 8,
+    padding: 12,
     borderRadius: 6,
   },
   errorDetailText: {
     fontSize: 12,
     color: '#4a4a4a',
+    fontFamily: 'monospace',
   },
-  retryButton: {
-    backgroundColor: '#007AFF',
-    marginTop: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 6,
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  resultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  resultIcon: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  resultIconText: {
-    fontSize: 20,
-  },
-  resultContent: {
+  hookContainer: {
     flex: 1,
-    marginLeft: 8,
   },
-  resultName: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  resultPath: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  resultMeta: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 2,
-  },
-  viewButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-  },
-  viewButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: '#999',
-    textAlign: 'center',
-  },
-  emptyList: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  footerContainer: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  loadMoreButton: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 6,
-  },
-  loadMoreText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#007AFF',
-  },
-  markdownContainer: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  statusBar: {
-    height: 40,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    backgroundColor: '#f8f9fa',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  statusText: {
-    fontSize: 13,
-    color: '#444',
-  },
-  statusError: {
-    color: '#dc3545',
-  },
-});
+})
 
 export default RepoBrowser;

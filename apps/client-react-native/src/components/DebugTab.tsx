@@ -1,0 +1,516 @@
+/**
+ * Debug Tab Component
+ * Diagnostic tests for SSL, fetch, transpilation, and hook execution
+ */
+
+import React, { useState, useRef, useCallback } from 'react'
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  ActivityIndicator,
+} from 'react-native'
+import * as Babel from '@babel/standalone'
+import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl } from '../../../shared/src'
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  section: {
+    marginBottom: 24,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    color: '#333',
+  },
+  testButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    marginVertical: 8,
+  },
+  testButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  testButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  resultBox: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 6,
+    padding: 12,
+    marginTop: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF',
+  },
+  resultBoxError: {
+    borderLeftColor: '#ff3b30',
+    backgroundColor: '#fff5f5',
+  },
+  resultBoxSuccess: {
+    borderLeftColor: '#34c759',
+    backgroundColor: '#f5fff5',
+  },
+  resultText: {
+    fontSize: 12,
+    color: '#333',
+    fontFamily: 'monospace',
+    lineHeight: 18,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  loadingText: {
+    marginLeft: 12,
+    fontSize: 14,
+    color: '#666',
+  },
+})
+
+interface TestResult {
+  status: 'pending' | 'success' | 'error'
+  message: string
+  details?: string
+}
+
+export default function DebugTab() {
+  const [results, setResults] = useState<Record<string, TestResult>>({})
+  const [loading, setLoading] = useState<string | null>(null)
+
+  // Log when DebugTab renders
+  React.useEffect(() => {
+    console.log('[DebugTab] Rendered')
+  }, [])
+
+  const updateResult = (testName: string, result: TestResult) => {
+    setResults(prev => ({ ...prev, [testName]: result }))
+  }
+
+  // Test 1: SSL/HTTPS Certificate Check
+  const testSSL = useCallback(async () => {
+    const testName = 'ssl'
+    setLoading(testName)
+    updateResult(testName, { status: 'pending', message: 'Testing SSL/HTTPS...' })
+
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+      try {
+        const response = await fetch('https://node-dfw1.relaynet.online/', {
+          method: 'HEAD',
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+
+        updateResult(testName, {
+          status: 'success',
+          message: 'SSL certificate verified',
+          details: `Status: ${response.status}, Headers: ${response.headers.get('content-type')}`,
+        })
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    } catch (e: any) {
+      updateResult(testName, {
+        status: 'error',
+        message: 'SSL certificate check failed',
+        details: e?.message || String(e),
+      })
+    } finally {
+      setLoading(null)
+    }
+  }, [])
+
+  // Test 2: Fetch with Timeout
+  const testFetch = useCallback(async () => {
+    const testName = 'fetch'
+    setLoading(testName)
+    updateResult(testName, { status: 'pending', message: 'Testing fetch with timeout...' })
+
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+      try {
+        const response = await fetch('https://node-dfw1.relaynet.online/hooks/client/get-client.jsx', {
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+
+        const text = await response.text()
+        updateResult(testName, {
+          status: 'success',
+          message: 'Fetch successful',
+          details: `Status: ${response.status}, Content-Length: ${text.length} bytes`,
+        })
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    } catch (e: any) {
+      updateResult(testName, {
+        status: 'error',
+        message: 'Fetch failed',
+        details: e?.message || String(e),
+      })
+    } finally {
+      setLoading(null)
+    }
+  }, [])
+
+  // Test 3: Basic Transpilation
+  const testTranspilation = useCallback(async () => {
+    const testName = 'transpile'
+    setLoading(testName)
+    updateResult(testName, { status: 'pending', message: 'Testing transpilation...' })
+
+    try {
+      // Use simple JSX code
+      const testCode = `export default function Test() {
+  return <div>Hello</div>
+}`
+
+      const result = Babel.transform(testCode, {
+        filename: 'test.jsx',
+        presets: ['react'],
+      }).code
+      updateResult(testName, {
+        status: 'success',
+        message: 'Transpilation successful',
+        details: `Output length: ${result.length} chars`,
+      })
+    } catch (e: any) {
+      updateResult(testName, {
+        status: 'error',
+        message: 'Transpilation failed',
+        details: e?.message || String(e),
+      })
+    } finally {
+      setLoading(null)
+    }
+  }, [])
+
+  // Test 4: Local Hook Execution (Bypasses fetch)
+  const testLocalHook = useCallback(async () => {
+    const testName = 'localHook'
+    setLoading(testName)
+    updateResult(testName, { status: 'pending', message: 'Testing local hook execution...' })
+
+    try {
+      // Create a simple hook that doesn't depend on external resources
+      const localHookCode = `
+        export default async function getClient(context) {
+          console.log('[DebugHook] Hook called')
+          console.log('[DebugHook] Context keys:', Object.keys(context))
+          
+          // Just return some test data
+          return {
+            type: 'success',
+            message: 'Local hook executed successfully!',
+            timestamp: new Date().toISOString(),
+          }
+        }
+      `
+
+      // Create module loader
+      const requireShim = (spec: string) => {
+        if (spec === 'react') return require('react')
+        return {}
+      }
+
+      const transpileWrapper = async (code: string, filename: string): Promise<string> => {
+        let sanitized = code
+          .replace(/ΓÇö/g, '--')
+          .replace(/ΓÇ£/g, '"')
+          .replace(/ΓÇ¥/g, '"')
+          .replace(/ΓÇÖ/g, "'")
+
+        let transpiled = Babel.transform(sanitized, {
+          filename,
+        }).code
+
+        // Convert ES6 to CommonJS
+        transpiled = transpiled.replace(/export\s+default\s+/g, 'module.exports.default = ')
+        transpiled = transpiled.replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ')
+
+        return transpiled
+      }
+
+      const moduleLoader = new RNModuleLoader({
+        requireShim,
+        host: 'localhost',
+        transpiler: transpileWrapper,
+        onDiagnostics: () => {},
+      })
+
+      const importHandler = new ES6ImportHandler({
+        host: 'localhost',
+        baseUrl: '/hooks',
+        transpiler: transpileWrapper,
+        onDiagnostics: () => {},
+      })
+      moduleLoader.setImportHandler(importHandler)
+
+      // Create minimal hook context
+      const context: HookContext = {
+        React: require('react'),
+        createElement: require('react').createElement,
+        FileRenderer: () => null as any,
+        params: {},
+        helpers: {
+          navigate: () => {},
+          buildPeerUrl: (path: string) => `https://localhost${path}`,
+          loadModule: async () => ({}),
+          setBranch: () => {},
+          buildRepoHeaders: () => ({}),
+        },
+      }
+
+      // Execute the hook
+      const mod = await moduleLoader.executeModule(localHookCode, '/hooks/client/test-local.jsx', context)
+      const result = await mod.default(context)
+
+      updateResult(testName, {
+        status: 'success',
+        message: 'Local hook executed successfully',
+        details: JSON.stringify(result, null, 2),
+      })
+    } catch (e: any) {
+      updateResult(testName, {
+        status: 'error',
+        message: 'Local hook execution failed',
+        details: e?.message || String(e),
+      })
+    } finally {
+      setLoading(null)
+    }
+  }, [])
+
+  // Test 5: Remote Hook Fetch and Transpile (Full test)
+  const testRemoteHook = useCallback(async () => {
+    const testName = 'remoteHook'
+    setLoading(testName)
+    updateResult(testName, { status: 'pending', message: 'Fetching and transpiling remote hook...' })
+
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      try {
+        const response = await fetch('https://node-dfw1.relaynet.online/hooks/client/get-client.jsx', {
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+          throw new Error(`Fetch failed: ${response.status}`)
+        }
+
+        let code = await response.text()
+
+        // Sanitize encoding
+        code = code
+          .replace(/ΓÇö/g, '--')
+          .replace(/ΓÇ£/g, '"')
+          .replace(/ΓÇ¥/g, '"')
+          .replace(/ΓÇÖ/g, "'")
+
+        // Try transpilation
+        let transpiled = await transpileCode(code, { filename: 'get-client.jsx' }, false)
+
+        // Convert to CommonJS
+        transpiled = transpiled.replace(/export\s+default\s+/g, 'module.exports.default = ')
+        transpiled = transpiled.replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ')
+
+        updateResult(testName, {
+          status: 'success',
+          message: 'Remote hook fetch and transpile successful',
+          details: `Fetched: ${code.length} bytes, Transpiled: ${transpiled.length} bytes`,
+        })
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    } catch (e: any) {
+      updateResult(testName, {
+        status: 'error',
+        message: 'Remote hook test failed',
+        details: e?.message || String(e),
+      })
+    } finally {
+      setLoading(null)
+    }
+  }, [])
+
+  const TestResult = ({ testName, result }: { testName: string; result: TestResult }) => {
+    const isSuccess = result.status === 'success'
+    const isError = result.status === 'error'
+
+    return (
+      <View
+        style={[
+          styles.resultBox,
+          isSuccess && styles.resultBoxSuccess,
+          isError && styles.resultBoxError,
+        ]}
+      >
+        <Text style={[styles.resultText, { fontWeight: 'bold', marginBottom: 4 }]}>
+          {result.message}
+        </Text>
+        {result.details && (
+          <Text style={styles.resultText}>{result.details}</Text>
+        )}
+      </View>
+    )
+  }
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      {/* SSL Test */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🔒 SSL/HTTPS Test</Text>
+        <Text style={styles.resultText}>
+          Verify SSL certificate is trusted and HTTPS connection works
+        </Text>
+        <TouchableOpacity
+          style={[styles.testButton, loading === 'ssl' && styles.testButtonDisabled]}
+          onPress={testSSL}
+          disabled={loading === 'ssl'}
+        >
+          <Text style={styles.testButtonText}>
+            {loading === 'ssl' ? 'Testing...' : 'Test SSL Certificate'}
+          </Text>
+        </TouchableOpacity>
+        {loading === 'ssl' && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#007AFF" />
+            <Text style={styles.loadingText}>Testing SSL...</Text>
+          </View>
+        )}
+        {results.ssl && <TestResult testName="ssl" result={results.ssl} />}
+      </View>
+
+      {/* Fetch Test */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>📡 Fetch Test</Text>
+        <Text style={styles.resultText}>
+          Test fetching the hook file with 5 second timeout
+        </Text>
+        <TouchableOpacity
+          style={[styles.testButton, loading === 'fetch' && styles.testButtonDisabled]}
+          onPress={testFetch}
+          disabled={loading === 'fetch'}
+        >
+          <Text style={styles.testButtonText}>
+            {loading === 'fetch' ? 'Testing...' : 'Test Fetch'}
+          </Text>
+        </TouchableOpacity>
+        {loading === 'fetch' && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#007AFF" />
+            <Text style={styles.loadingText}>Fetching...</Text>
+          </View>
+        )}
+        {results.fetch && <TestResult testName="fetch" result={results.fetch} />}
+      </View>
+
+      {/* Transpilation Test */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>⚙️ Transpilation Test</Text>
+        <Text style={styles.resultText}>
+          Test SWC transpilation of JSX code to ES6
+        </Text>
+        <TouchableOpacity
+          style={[styles.testButton, loading === 'transpile' && styles.testButtonDisabled]}
+          onPress={testTranspilation}
+          disabled={loading === 'transpile'}
+        >
+          <Text style={styles.testButtonText}>
+            {loading === 'transpile' ? 'Testing...' : 'Test Transpilation'}
+          </Text>
+        </TouchableOpacity>
+        {loading === 'transpile' && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#007AFF" />
+            <Text style={styles.loadingText}>Transpiling...</Text>
+          </View>
+        )}
+        {results.transpile && <TestResult testName="transpile" result={results.transpile} />}
+      </View>
+
+      {/* Local Hook Test */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>✅ Local Hook Test</Text>
+        <Text style={styles.resultText}>
+          Execute a local hook (bypasses fetch) to test transpilation and module execution
+        </Text>
+        <TouchableOpacity
+          style={[styles.testButton, loading === 'localHook' && styles.testButtonDisabled]}
+          onPress={testLocalHook}
+          disabled={loading === 'localHook'}
+        >
+          <Text style={styles.testButtonText}>
+            {loading === 'localHook' ? 'Executing...' : 'Test Local Hook'}
+          </Text>
+        </TouchableOpacity>
+        {loading === 'localHook' && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#007AFF" />
+            <Text style={styles.loadingText}>Executing hook...</Text>
+          </View>
+        )}
+        {results.localHook && <TestResult testName="localHook" result={results.localHook} />}
+      </View>
+
+      {/* Remote Hook Test */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🌐 Remote Hook Test</Text>
+        <Text style={styles.resultText}>
+          Fetch, encode-fix, and transpile the actual hook file
+        </Text>
+        <TouchableOpacity
+          style={[styles.testButton, loading === 'remoteHook' && styles.testButtonDisabled]}
+          onPress={testRemoteHook}
+          disabled={loading === 'remoteHook'}
+        >
+          <Text style={styles.testButtonText}>
+            {loading === 'remoteHook' ? 'Testing...' : 'Test Remote Hook'}
+          </Text>
+        </TouchableOpacity>
+        {loading === 'remoteHook' && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#007AFF" />
+            <Text style={styles.loadingText}>Testing remote hook...</Text>
+          </View>
+        )}
+        {results.remoteHook && <TestResult testName="remoteHook" result={results.remoteHook} />}
+      </View>
+    </ScrollView>
+  )
+}

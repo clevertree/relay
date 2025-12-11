@@ -40,23 +40,29 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
 
   const loadOptions = async () => {
     if (!tab) return;
+    console.log('[RepoTab] loadOptions called for host:', tab.host);
     setLoading(true);
     setError(null);
 
     try {
-      const options = await fetchPeerOptions(tab.host);
-      setOptionsInfo(options);
-
-      if (options.branches && options.branches.length > 0 && !tab.currentBranch) {
+      // Skip actual fetch for now - use defaults and let RepoBrowser load
+      console.log('[RepoTab] Using default options (skipping fetch)');
+      setOptionsInfo({
+        branches: ['main'],
+      });
+      
+      if (!tab.currentBranch) {
         updateTab(tabId, (t) => ({
           ...t,
-          branches: options.branches,
-          currentBranch: options.branches![0],
+          branches: ['main'],
+          currentBranch: 'main',
         }));
       }
     } catch (e) {
+      console.error('[RepoTab] Error in loadOptions:', e);
       setError(e instanceof Error ? e.message : 'Failed to load peer info');
     } finally {
+      console.log('[RepoTab] loadOptions finished, setting loading=false');
       setLoading(false);
     }
   };
@@ -76,6 +82,7 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
 
   return (
     <View style={styles.container}>
+      {console.log('[RepoTab] rendering, loading:', loading, 'error:', error)}
       {/* Header with host info */}
       <View style={styles.header}>
         <Text style={styles.hostText}>{tab.host}</Text>

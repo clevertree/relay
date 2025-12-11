@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Default configuration for production (HTTPS by default) -->
+    <!-- Relaynet.online domain configuration -->
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">relaynet.online</domain>
+        <!-- Trust system CA certificates -->
+        <trust-anchors>
+            <certificates src="system" />
+            <!-- Also trust user-installed certificates for debugging on Kindle -->
+            <certificates src="user" />
+        </trust-anchors>
     </domain-config>
     
     <!-- Allow cleartext traffic for local development servers -->

@@ -218,7 +218,33 @@ export const useAppState = create<AppState>((set, get) => ({
 
 // Initialize persisted state
 (async () => {
-    const tabs = await loadPersistedTabs();
-    const activeTabId = await loadPersistedActiveTab();
+    let tabs = await loadPersistedTabs();
+    let activeTabId = await loadPersistedActiveTab();
+    
+    console.log('[Store] Loaded tabs:', tabs.length, 'activeTabId:', activeTabId);
+    
+    // Ensure at least a home tab exists if tabs is empty
+    if (tabs.length === 0) {
+        // Create home tab and auto-open the default relay server
+        tabs = [
+            {
+                id: 'home',
+                title: 'Home',
+                isHome: true,
+            },
+            {
+                id: generateTabId(),
+                host: 'node-dfw1.relaynet.online',
+                path: '/',
+                title: 'node-dfw1.relaynet.online',
+                currentBranch: 'main',
+            }
+        ];
+        activeTabId = tabs[1].id; // Set active to the relay server tab
+        await persistTabs(tabs, activeTabId);
+        console.log('[Store] Created default tabs, activeTabId:', activeTabId);
+    }
+    
+    console.log('[Store] Setting state with tabs:', tabs.map(t => t.id));
     useAppState.setState({tabs, activeTabId});
 })();

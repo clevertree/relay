@@ -7,3 +7,4 @@ export {default as RepoTab} from './RepoTab';
 export {default as RepoBrowser} from './RepoBrowser';
 export {default as MarkdownRenderer} from './MarkdownRenderer';
 export {default as ScriptConsole} from './ScriptConsole';
+export {default as DebugTab} from './DebugTab';

@@ -14,6 +14,7 @@ import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import PeersView from './components/PeersView';
 import RepoTab from './components/RepoTab';
+import DebugTab from './components/DebugTab';
 import {useAppState} from './state/store';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { UpdateModal } from './components/UpdateModal';
@@ -32,8 +33,12 @@ const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
   const closeTab = useAppState((s) => s.closeTab);
   const homeTabId = useAppState((s) => s.homeTabId);
 
-  // Include home tab
-  const allTabs = [{id: homeTabId, title: 'Home', isHome: true}, ...tabs];
+  // Include home tab and debug tab
+  const allTabs = [
+    {id: homeTabId, title: 'Home', isHome: true},
+    ...tabs,
+    {id: 'debug', title: 'Debug', isDebug: true}
+  ];
 
   return (
     <View style={styles.tabBar}>
@@ -46,6 +51,8 @@ const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
                 setActiveTab(tab.id);
                 if (tab.id === homeTabId) {
                   navigation.navigate('Main');
+                } else if (tab.id === 'debug') {
+                  navigation.navigate('Debug');
                 } else {
                   navigation.navigate('RepoTab', {tabId: tab.id});
                 }
@@ -59,7 +66,7 @@ const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
                 {tab.title}
               </Text>
             </TouchableOpacity>
-            {!tab.isHome && (
+            {!tab.isHome && !tab.isDebug && (
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={() => {
@@ -89,6 +96,7 @@ const MainScreen: React.FC<{navigation: any}> = ({navigation}) => {
   // Check for updates on component mount
   useEffect(() => {
     checkForUpdate();
+    console.log('[MainScreen] Mounted, activeTabId:', activeTabId);
   }, [checkForUpdate]);
 
   const handlePeerPress = (host: string) => {
@@ -114,10 +122,21 @@ const MainScreen: React.FC<{navigation: any}> = ({navigation}) => {
       <TabBar navigation={navigation} />
       <View style={isTablet ? styles.splitContainer : styles.fullContainer}>
         <View style={isTablet ? styles.sidePanel : styles.fullPanel}>
-          {activeTabId === homeTabId ? (
-            <PeersView onPeerPress={handlePeerPress} />
+          {!activeTabId || activeTabId === homeTabId ? (
+            <>
+              {console.log('[MainScreen] Rendering PeersView, activeTabId:', activeTabId, 'homeTabId:', homeTabId)}
+              <PeersView onPeerPress={handlePeerPress} />
+            </>
+          ) : activeTabId === 'debug' ? (
+            <>
+              {console.log('[MainScreen] Rendering DebugTab, activeTabId:', activeTabId)}
+              <DebugTab />
+            </>
           ) : (
-            <RepoTab tabId={activeTabId!} />
+            <>
+              {console.log('[MainScreen] Rendering RepoTab, activeTabId:', activeTabId)}
+              <RepoTab tabId={activeTabId} />
+            </>
           )}
         </View>
       </View>
@@ -145,6 +164,25 @@ const RepoTabScreen: React.FC<{route: any; navigation: any}> = ({route, navigati
       <TabBar navigation={navigation} />
       <View style={styles.contentWrapper}>
         <RepoTab tabId={tabId} />
+      </View>
+    </SafeAreaView>
+  );
+};
+
+const DebugScreen: React.FC<{navigation: any}> = ({navigation}) => {
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Text style={styles.backButtonText}>← Home</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Debug Tools</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      <TabBar navigation={navigation} />
+      <View style={styles.contentWrapper}>
+        <DebugTab />
       </View>
     </SafeAreaView>
   );
@@ -202,6 +240,22 @@ const App: React.FC = () => {
                 return (
                   <SafeAreaView style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
                     <Text>Main render error</Text>
+                  </SafeAreaView>
+                );
+              }
+            }}
+          </Stack.Screen>
+          <Stack.Screen
+            name="Debug">
+            {(props) => {
+              try {
+                return <DebugScreen {...props} />;
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('DebugScreen render failed', err);
+                return (
+                  <SafeAreaView style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+                    <Text>Debug render error</Text>
                   </SafeAreaView>
                 );
               }

@@ -260,8 +260,8 @@ export async function transpileCode(
     // Extract JSX pragma from source code (e.g., /** @jsx h */ or /** @jsx React.createElement */)
   // Use internal unique pragma names to avoid colliding with user-land
   // helpers or multiple injections of the same identifier (e.g. _jsx_)
-  let pragmaFn = '__relay_jsx__'
-  let pragmaFragFn = '__relay_jsxFrag__'
+  let pragmaFn = 'h'
+  let pragmaFragFn = 'React.Fragment'
     const pragmaMatch = code.match(/\/\*+\s*@jsx\s+([\w.]+)\s*\*+\//)
     const pragmaFragMatch = code.match(/\/\*+\s*@jsxFrag\s+([\w.]+)\s*\*+\//)
     if (pragmaMatch && pragmaMatch[1]) {
@@ -275,18 +275,11 @@ export async function transpileCode(
     
     // **CRITICAL**: Prepend preamble BEFORE transpilation so JSX pragma function is defined
     // when SWC transpiles JSX syntax to pragma function calls
-  const preamble = `const __globalCtx__ = (typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : {});
-// Safe React accessor: prefer bundler-provided React if available, otherwise fall back to runtime context
-const __getReact__ = () => (typeof React !== 'undefined' ? (React) : (__globalCtx__.__ctx__?.React || __globalCtx__.React));
-// Define internal helpers defensively so multiple injections do not throw
-if (typeof __relay_jsx__ === 'undefined') { var __relay_jsx__ = (...args) => __getReact__()?.createElement(...args); }
-if (typeof __relay_jsxFrag__ === 'undefined') { var __relay_jsxFrag__ = __getReact__()?.Fragment; }
-if (typeof ${pragmaFn} === 'undefined') { var ${pragmaFn} = __relay_jsx__; }
-if (typeof ${pragmaFragFn} === 'undefined') { var ${pragmaFragFn} = __relay_jsxFrag__; }
-if (typeof h === 'undefined') { var h = (...args) => __getReact__()?.createElement(...args); }
-`
+  const preamble = ``
     const codeWithPreamble = preamble + code
     console.log('[transpileCode] Prepended preamble with pragma:', pragmaFn)
+    console.log('[transpileCode] First 150 chars of code to transpile:', codeWithPreamble.substring(0, 150))
+    console.log('[transpileCode] Code charCode check:', codeWithPreamble.charCodeAt(0), codeWithPreamble.charCodeAt(1), codeWithPreamble.charCodeAt(2))
     
     // 1) Prefer a preloaded SWC instance exposed by the web app
     const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : (window as any)) || {}
@@ -356,10 +349,12 @@ if (typeof h === 'undefined') { var h = (...args) => __getReact__()?.createEleme
     // Infer development mode from environment when not explicitly provided
     const isDevEnv = (() => {
       try {
-        // Vite exposes import.meta.env.MODE
-        // eslint-disable-next-line no-undef
-        const viteMode = (import.meta as any)?.env?.MODE
-        if (viteMode) return String(viteMode) === 'development'
+        // Vite exposes import.meta.env.MODE (but React Native doesn't support import.meta)
+        // Check if we're in a Vite environment before accessing import.meta
+        if (typeof globalThis !== 'undefined' && (globalThis as any).__VITE_ENV__) {
+          const viteMode = (globalThis as any).__VITE_ENV__.MODE
+          if (viteMode) return String(viteMode) === 'development'
+        }
       } catch {}
       try {
         // Fallback to process.env.NODE_ENV if defined by bundler
@@ -493,6 +488,7 @@ export interface HookLoaderOptions {
   host: string
   protocol: 'http' | 'https'
   moduleLoader: ModuleLoader
+  transpiler?: (code: string, filename: string) => Promise<string>
   onDiagnostics?: (diag: LoaderDiagnostics) => void
 }
 
@@ -500,6 +496,7 @@ export class HookLoader {
   private host: string
   private protocol: 'http' | 'https'
   private moduleLoader: ModuleLoader
+  private transpiler?: (code: string, filename: string) => Promise<string>
   private onDiagnostics: (diag: LoaderDiagnostics) => void
   private moduleCache: Map<string, any> = new Map()
 
@@ -507,6 +504,7 @@ export class HookLoader {
     this.host = options.host
     this.protocol = options.protocol
     this.moduleLoader = options.moduleLoader
+    this.transpiler = options.transpiler
     this.onDiagnostics = options.onDiagnostics || (() => {})
   }
 
@@ -621,7 +619,19 @@ export class HookLoader {
       const hookUrl = `${this.protocol}://${this.host}${hookPath}`
       console.debug(`[HookLoader] Fetching hook from: ${hookUrl}`)
 
-      const response = await fetch(hookUrl)
+      let response: Response
+      let code: string
+      
+      try {
+        // Try fetch with a timeout using XMLHttpRequest as fallback
+        response = await fetch(hookUrl)
+        code = await response.text()
+      } catch (fetchErr) {
+        console.error('[HookLoader] Fetch failed, got error immediately:', fetchErr)
+        throw fetchErr
+      }
+
+      console.debug(`[HookLoader] Received hook code (${code.length} chars)`)
 
       diag.fetch = {
         status: response.status,
@@ -637,9 +647,7 @@ export class HookLoader {
         throw new Error(`ModuleLoadError: ${hookUrl} returned HTML (content-type=${ct})`)
       }
 
-      const code = await response.text()
       diag.codeLength = code.length
-      console.debug(`[HookLoader] Received hook code (${code.length} chars)`)
 
       // Transpile if needed
       diag.phase = 'transform'
@@ -647,11 +655,17 @@ export class HookLoader {
       if (looksLikeTsOrJsx(code, hookPath)) {
         try {
           console.debug(`[HookLoader] Transpiling ${hookPath}`)
-          finalCode = await transpileCode(
-            code,
-            { filename: hookPath.split('/').pop() || 'hook.tsx', hasJsxPragma: /@jsx\s+h/m.test(code) },
-            false // Web uses dynamic import
-          )
+          
+          // Use custom transpiler if provided (e.g., for React Native with CommonJS conversion)
+          if (this.transpiler) {
+            finalCode = await this.transpiler(code, hookPath.split('/').pop() || 'hook.tsx')
+          } else {
+            finalCode = await transpileCode(
+              code,
+              { filename: hookPath.split('/').pop() || 'hook.tsx', hasJsxPragma: /@jsx\s+h/m.test(code) },
+              false // Web uses dynamic import
+            )
+          }
           console.debug(`[HookLoader] Transpilation complete (${finalCode.length} chars)`)
         } catch (err) {
           console.warn('[HookLoader] JSX transpilation failed, trying raw:', err)
