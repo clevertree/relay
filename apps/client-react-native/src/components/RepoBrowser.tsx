@@ -39,6 +39,7 @@ function useHookRenderer(host: string) {
   const [details, setDetails] = useState<any>(null)
   const optionsRef = useRef<OptionsInfo | null>(null)
   const hookLoaderRef = useRef<HookLoader | null>(null)
+  const importHandlerRef = useRef<ES6ImportHandler | null>(null)
 
   const normalizedHost = normalizeHostUrl(host)
   console.debug(`[useHookRenderer] initialized with host: ${host}, normalized: ${normalizedHost}`)
@@ -49,6 +50,11 @@ function useHookRenderer(host: string) {
       if (spec === 'react') return require('react')
       return {}
     }
+
+    // Extract protocol and host from normalizedHost early for downstream wiring
+    const urlMatch = normalizedHost.match(/^(https?):\/\/(.+)$/)
+    const protocol: 'https' | 'http' = (urlMatch ? urlMatch[1] : 'https') as 'https' | 'http'
+    const hostOnly = urlMatch ? urlMatch[2] : normalizedHost
 
     // Wrapper for transpileCode to match the expected signature
     // CRITICAL: React Native RNModuleLoader expects CommonJS (module.exports)
@@ -81,16 +87,22 @@ function useHookRenderer(host: string) {
         // Decide whether the file looks like it contains JSX or needs module conversion
         const looksLikeJsx = /<([A-Za-z][A-Za-z0-9]*)\s/.test(code) || /\.(jsx|tsx)$/.test(filename)
         const isMjs = filename.endsWith('.mjs') || filename.endsWith('.mts')
+        const hasDynamicImport = /\bimport\(/.test(code)
+        const hasExport = /\bexport\s/.test(code)
+        const maybeTopLevelAwait = /\bawait\s+/.test(code)
 
         let transpiled: string
         // If it looks like JSX prefer Babel (more predictable in RN environment)
-        if (looksLikeJsx) {
+        if (looksLikeJsx || hasDynamicImport || maybeTopLevelAwait || hasExport) {
           console.debug('[transpileWrapper] Detected JSX - using Babel directly')
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const Babel = require('@babel/standalone')
-          const presets: any[] = ['react']
+          const presets: any[] = []
+          if (looksLikeJsx) presets.push('react')
+          // Ensure CommonJS output so exports/imports are compatible with RN executor
+          presets.push(['env', { modules: 'commonjs' }])
           if (isMjs) {
-            presets.push(['env', { modules: 'commonjs' }])
+            // already added env, keep as-is
           }
           const babelResult = Babel.transform(code, { filename, presets })
           transpiled = (babelResult && (babelResult as any).code) || code
@@ -100,6 +112,33 @@ function useHookRenderer(host: string) {
             // Try primary transpiler (SWC via transpileCode)
             transpiled = await transpileCode(code, { filename }, false)
             console.debug('[transpileWrapper] transpileCode succeeded, length:', transpiled.length)
+
+            // If SWC output still contains ESM export or dynamic import, post-process with Babel.
+            const swcStillHasExport = /(^|\s)export\s/.test(transpiled)
+            const swcStillHasImportCall = /\bimport\(/.test(transpiled)
+            if (swcStillHasExport || swcStillHasImportCall) {
+              console.warn('[transpileWrapper] SWC output still has', {
+                exportLeft: swcStillHasExport,
+                importCallLeft: swcStillHasImportCall,
+              }, '— running Babel post-pass')
+              // eslint-disable-next-line @typescript-eslint/no-var-requires
+              const Babel = require('@babel/standalone')
+              const presets: any[] = []
+              if (looksLikeJsx) presets.push('react')
+              presets.push(['env', { modules: 'commonjs' }])
+              const babelOut = Babel.transform(code, { filename, presets })
+              transpiled = (babelOut && (babelOut as any).code) || transpiled
+            }
+
+            // Route dynamic import() calls to our ES6 import handler symbol (__import__)
+            // This is necessary because RN runtime may not support native import() and
+            // our executor wires __import__ to ES6ImportHandler.
+            transpiled = transpiled.replace(/\bimport\(/g, '__import__(')
+
+            // Convert ES module exports to CommonJS for RNModuleLoader execution
+            transpiled = transpiled
+              .replace(/export\s+default\s+/g, 'module.exports.default = ')
+              .replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ')
           } catch (swcErr) {
             console.warn('[transpileWrapper] transpileCode failed, falling back to Babel:', swcErr)
             // Fallback: use @babel/standalone available in the app (like DebugTab)
@@ -143,6 +182,7 @@ function useHookRenderer(host: string) {
     // Create ES6 import handler and set it on the loader
     const importHandler = new ES6ImportHandler({
       host: normalizedHost.replace(/^https?:\/\//, ''),
+      protocol,
       baseUrl: '/hooks',
       transpiler: transpileWrapper,
       onDiagnostics: (diag) => {
@@ -150,11 +190,7 @@ function useHookRenderer(host: string) {
       },
     })
     rnModuleLoader.setImportHandler(importHandler)
-
-    // Extract protocol and host from normalizedHost
-    const urlMatch = normalizedHost.match(/^(https?):\/\/(.+)$/)
-    const protocol: 'https' | 'http' = (urlMatch ? urlMatch[1] : 'https') as 'https' | 'http'
-    const hostOnly = urlMatch ? urlMatch[2] : normalizedHost
+    importHandlerRef.current = importHandler
 
     hookLoaderRef.current = new HookLoader({
       host: hostOnly,
@@ -243,6 +279,19 @@ function useHookRenderer(host: string) {
     [normalizedHost]
   )
 
+  // Keep the ES6 import() handler delegated to HookLoader so dynamic imports can use helpers.loadModule semantics
+  useEffect(() => {
+    if (!importHandlerRef.current) return
+    importHandlerRef.current.setLoadModuleDelegate(async (modulePath: string, fromPath?: string | null, ctxArg?: HookContext) => {
+      if (!hookLoaderRef.current) {
+        throw new Error('Hook loader not initialized')
+      }
+      const base = (typeof fromPath === 'string' && fromPath) ? fromPath : '/hooks/client/get-client.jsx'
+      const ctx = ctxArg || createHookContext(base)
+      return hookLoaderRef.current.loadModule(modulePath, base, ctx)
+    })
+  }, [createHookContext])
+
   const tryRender = useCallback(async () => {
     console.debug('[tryRender] Starting hook rendering...')
     setLoading(true)
@@ -251,23 +300,15 @@ function useHookRenderer(host: string) {
 
     let hookPath: string | undefined
     try {
-      // Use default options without fetching - we know the hook path
-      const opts: OptionsInfo = {
-        client: {
-          hooks: {
-            get: { path: '/hooks/client/get-client.jsx' }
-          }
-        }
+      // Fetch repository OPTIONS to discover hook locations
+      const opts = await loadOptions()
+      if (!opts) {
+        // loadOptions already set error/details
+        return
       }
       optionsRef.current = opts
       console.debug('[tryRender] Got options:', opts)
       hookPath = opts?.client?.hooks?.get?.path
-
-      // Use default hook path if not provided in OPTIONS
-      if (!hookPath) {
-        console.warn('[RepoBrowser] Hook path not in OPTIONS, using default')
-        hookPath = '/hooks/client/get-client.jsx'
-      }
 
       // Ensure hookPath starts with /
       if (hookPath && !hookPath.startsWith('/')) {
@@ -275,8 +316,17 @@ function useHookRenderer(host: string) {
       }
 
       if (!hookPath) {
-        setError('Missing hook path in OPTIONS (client.hooks.get.path)')
-        setDetails({ options: opts })
+        setError('Missing hook path in OPTIONS')
+        setDetails({
+          phase: 'options',
+          message: 'The repository did not advertise the GET hook path in OPTIONS at client.hooks.get.path.',
+          what_to_do: [
+            'Ask the repository owner to add a client GET hook and expose it in OPTIONS as client.hooks.get.path',
+            'Ensure the hook file exists at hooks/client/get-client.jsx in the repository',
+            `Verify that OPTIONS / on ${normalizedHost} returns a JSON object with {"client":{"hooks":{"get":{"path":"/hooks/client/get-client.jsx"}}}}`,
+          ],
+          options: opts,
+        })
         setLoading(false)
         return
       }
@@ -293,7 +343,7 @@ function useHookRenderer(host: string) {
       setError(null)
       setDetails(null)
     } catch (e: any) {
-      const hookUrl = buildPeerUrl(normalizedHost, hookPath || '/hooks/client/get-client.jsx')
+      const hookUrl = buildPeerUrl(normalizedHost, hookPath || '')
       setError('Hook execution failed')
       
       // Capture detailed error info for debugging network issues

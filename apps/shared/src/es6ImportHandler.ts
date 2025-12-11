@@ -11,6 +11,7 @@
 
 export interface ImportHandlerOptions {
   host: string
+  protocol?: 'http' | 'https'
   baseUrl?: string
   onDiagnostics?: (diag: any) => void
   transpiler?: (code: string, filename: string) => Promise<string>
@@ -23,17 +24,45 @@ export class ES6ImportHandler {
   private moduleCache = new Map<string, any>()
   private transpiling = new Map<string, Promise<any>>()
   private host: string
+  private protocol: 'http' | 'https'
   private baseUrl: string
   private onDiagnostics: (diag: any) => void
   private transpiler: (code: string, filename: string) => Promise<string>
+  private currentModulePath: string | null = null
+  private executionContext: any = null
+  private loadModuleDelegate: ((modulePath: string, fromPath?: string | null, ctx?: any) => Promise<any>) | null = null
 
   constructor(options: ImportHandlerOptions) {
     this.host = options.host
+    this.protocol = options.protocol || 'https'
     this.baseUrl = options.baseUrl || '/hooks'
     this.onDiagnostics = options.onDiagnostics || ((diag: any) => {
       console.debug('[ES6ImportHandler] Diagnostics:', diag)
     })
     this.transpiler = options.transpiler || this.defaultTranspiler
+  }
+
+  /**
+   * Allow the host to delegate import() to a provided loader (e.g., helpers.loadModule)
+   */
+  setLoadModuleDelegate(
+    delegate: (modulePath: string, fromPath?: string | null, ctx?: any) => Promise<any>
+  ): void {
+    this.loadModuleDelegate = delegate
+  }
+
+  /**
+   * Inform the handler of the currently executing module path so relative imports resolve correctly
+   */
+  setCurrentModulePath(path: string | null): void {
+    this.currentModulePath = path || null
+  }
+
+  /**
+   * Provide the current execution context so a delegate can use it
+   */
+  setExecutionContext(ctx: any): void {
+    this.executionContext = ctx
   }
 
   /**
@@ -73,8 +102,23 @@ export class ES6ImportHandler {
       return this.transpiling.get(cacheKey)!
     }
 
-    // Fetch and transpile module
-    const promise = this.loadAndTranspile(modulePath, normalizedPath, cacheKey)
+    // If a delegate is provided (e.g., helpers.loadModule), use it first
+    const promise = (async () => {
+      if (this.loadModuleDelegate) {
+        try {
+          const mod = await this.loadModuleDelegate(modulePath, this.currentModulePath, this.executionContext)
+          // Cache the module under the normalized path key if available
+          this.moduleCache.set(cacheKey, mod)
+          this.onDiagnostics({ phase: 'import', action: 'delegate_success', modulePath, normalizedPath })
+          return mod
+        } catch (delegateErr) {
+          // Fall back to direct fetch/transpile below
+          this.onDiagnostics({ phase: 'import', action: 'delegate_failed', modulePath, normalizedPath, error: String(delegateErr) })
+        }
+      }
+      // Fetch and transpile module
+      return this.loadAndTranspile(modulePath, normalizedPath, cacheKey)
+    })()
     this.transpiling.set(cacheKey, promise)
 
     try {
@@ -98,7 +142,7 @@ export class ES6ImportHandler {
 
     try {
       // Fetch module source from host
-      const moduleUrl = `http://${this.host}${normalizedPath}`
+      const moduleUrl = `${this.protocol}://${this.host}${normalizedPath}`
       console.debug('[ES6ImportHandler] Fetching from:', moduleUrl)
 
       const response = await fetch(moduleUrl)
@@ -170,12 +214,15 @@ export class ES6ImportHandler {
         'module',
         'exports',
         `
-try {
-  ${code}
-} catch (err) {
-  console.error('[ES6ImportHandler.executeModule] Code execution error in ${filename}:', err.message || err);
-  throw err;
-}
+// Wrap in async IIFE to allow top-level await patterns in transpiled code
+return (async function(){
+  try {
+    ${code}
+  } catch (err) {
+    console.error('[ES6ImportHandler.executeModule] Code execution error in ${filename}:', err && (err.message || err));
+    throw err;
+  }
+})()
 //# sourceURL=${filename}
       `
       )
@@ -195,14 +242,24 @@ try {
    * Normalize a module path to absolute path
    */
   private normalizePath(modulePath: string): string {
-    // Handle relative imports
+    // Handle relative imports relative to current module path when available
     if (modulePath.startsWith('./') || modulePath.startsWith('../')) {
-      // For now, assume relative to /hooks/
-      // TODO: Track current module path and resolve relative to it
-      const cleaned = modulePath.replace(/^\.\//g, '')
-      const resolved = `/hooks/${cleaned}`
-      console.debug('[ES6ImportHandler] Resolved relative path:', { modulePath, resolved })
-      return resolved
+      try {
+        const base = this.currentModulePath && this.currentModulePath.startsWith('/')
+          ? this.currentModulePath
+          : `${this.baseUrl}/client/get-client.jsx`
+        const baseUrl = new URL(base, 'http://resolver.local')
+        const resolvedUrl = new URL(modulePath, baseUrl)
+        const resolved = resolvedUrl.pathname
+        console.debug('[ES6ImportHandler] Resolved relative path:', { modulePath, from: this.currentModulePath, resolved })
+        return resolved
+      } catch {
+        // Fallback to naive join with baseUrl
+        const cleaned = modulePath.replace(/^\.\//g, '')
+        const resolved = `${this.baseUrl}/${cleaned}`.replace(/\/+/g, '/').replace(/\/\.\//g, '/')
+        console.debug('[ES6ImportHandler] Resolved (fallback) relative path:', { modulePath, resolved })
+        return resolved
+      }
     }
 
     // Handle absolute imports

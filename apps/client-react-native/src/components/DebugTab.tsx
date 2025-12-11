@@ -185,31 +185,93 @@ export default function DebugTab() {
     }
   }, [])
 
-  // Test 3: Basic Transpilation
-  const testTranspilation = useCallback(async () => {
-    const testName = 'transpile'
+  // Test 3A: Local Hook Transpile (SWC)
+  const testTranspileLocalHookSWC = useCallback(async () => {
+    const testName = 'transpileLocalSWC'
     setLoading(testName)
-    updateResult(testName, { status: 'pending', message: 'Testing transpilation...' })
+    updateResult(testName, { status: 'pending', message: 'Transpiling local hook with SWC...' })
 
     try {
-      // Use simple JSX code
-      const testCode = `export default function Test() {
-  return <div>Hello</div>
-}`
+      const localHookCode = `
+        import React from 'react'
+        export default function Test() {
+          return <div>SWC Hello</div>
+        }
+      `
 
-      const result = Babel.transform(testCode, {
-        filename: 'test.jsx',
-        presets: ['react'],
-      }).code
+      console.log('[DebugTab][SWC] Starting transpile for local-hook.jsx')
+      const output = await transpileCode(localHookCode, { filename: 'local-hook.jsx' })
+      // Post-process to match RN executor expectations
+      let patched = output
+        // route dynamic import() to our injected __import__ shim
+        .replace(/\bimport\(/g, '__import__(')
+        // convert ESM exports to CommonJS
+        .replace(/export\s+default\s+/g, 'module.exports.default = ')
+        .replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ')
+
+      console.log('[DebugTab][SWC] Transpile complete', {
+        inputLen: localHookCode.length,
+        swcOutLen: output.length,
+        patchedLen: patched.length,
+        preview: String(patched).slice(0, 160),
+      })
       updateResult(testName, {
         status: 'success',
-        message: 'Transpilation successful',
-        details: `Output length: ${result.length} chars`,
+        message: 'SWC transpilation successful',
+        details: `SWC: ${output.length} bytes; Patched: ${patched.length} bytes`,
       })
     } catch (e: any) {
+      console.log('[DebugTab][SWC] Transpile failed', {
+        message: e?.message || String(e),
+        stack: e?.stack,
+      })
       updateResult(testName, {
         status: 'error',
-        message: 'Transpilation failed',
+        message: 'SWC transpilation failed',
+        details: e?.message || String(e),
+      })
+    } finally {
+      setLoading(null)
+    }
+  }, [])
+
+  // Test 3B: Local Hook Transpile (Babel)
+  const testTranspileLocalHookBabel = useCallback(async () => {
+    const testName = 'transpileLocalBabel'
+    setLoading(testName)
+    updateResult(testName, { status: 'pending', message: 'Transpiling local hook with Babel...' })
+
+    try {
+      const localHookCode = `
+        import React from 'react'
+        export default function Test() {
+          return <div>Babel Hello</div>
+        }
+      `
+
+      console.log('[DebugTab][Babel] Starting transpile for local-hook.jsx')
+      const result = Babel.transform(localHookCode, {
+        filename: 'local-hook.jsx',
+        presets: ['react', ['env', { modules: 'commonjs' }]],
+      }).code
+      console.log('[DebugTab][Babel] Transpile complete', {
+        inputLen: localHookCode.length,
+        outLen: result?.length ?? 0,
+        preview: String(result).slice(0, 160),
+      })
+      updateResult(testName, {
+        status: 'success',
+        message: 'Babel transpilation successful',
+        details: `Output length: ${result?.length ?? 0} chars`,
+      })
+    } catch (e: any) {
+      console.log('[DebugTab][Babel] Transpile failed', {
+        message: e?.message || String(e),
+        stack: e?.stack,
+      })
+      updateResult(testName, {
+        status: 'error',
+        message: 'Babel transpilation failed',
         details: e?.message || String(e),
       })
     } finally {
@@ -440,28 +502,123 @@ export default function DebugTab() {
         {results.fetch && <TestResult testName="fetch" result={results.fetch} />}
       </View>
 
-      {/* Transpilation Test */}
+      {/* Transpilation Tests (Local Hook) */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>⚙️ Transpilation Test</Text>
+        <Text style={styles.sectionTitle}>⚙️ Transpilation Tests (Local Hook)</Text>
         <Text style={styles.resultText}>
-          Test SWC transpilation of JSX code to ES6
+          Compare SWC and Babel transpiling using a small local JSX hook.
         </Text>
         <TouchableOpacity
-          style={[styles.testButton, loading === 'transpile' && styles.testButtonDisabled]}
-          onPress={testTranspilation}
-          disabled={loading === 'transpile'}
+          style={[styles.testButton, loading === 'transpileLocalSWC' && styles.testButtonDisabled]}
+          onPress={testTranspileLocalHookSWC}
+          disabled={loading === 'transpileLocalSWC'}
         >
           <Text style={styles.testButtonText}>
-            {loading === 'transpile' ? 'Testing...' : 'Test Transpilation'}
+            {loading === 'transpileLocalSWC' ? 'Transpiling...' : 'Transpile with SWC'}
           </Text>
         </TouchableOpacity>
-        {loading === 'transpile' && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator color="#007AFF" />
-            <Text style={styles.loadingText}>Transpiling...</Text>
-          </View>
+        {results.transpileLocalSWC && (
+          <TestResult testName="transpileLocalSWC" result={results.transpileLocalSWC} />
         )}
-        {results.transpile && <TestResult testName="transpile" result={results.transpile} />}
+
+        <TouchableOpacity
+          style={[styles.testButton, loading === 'transpileLocalBabel' && styles.testButtonDisabled]}
+          onPress={testTranspileLocalHookBabel}
+          disabled={loading === 'transpileLocalBabel'}
+        >
+          <Text style={styles.testButtonText}>
+            {loading === 'transpileLocalBabel' ? 'Transpiling...' : 'Transpile with Babel'}
+          </Text>
+        </TouchableOpacity>
+        {results.transpileLocalBabel && (
+          <TestResult testName="transpileLocalBabel" result={results.transpileLocalBabel} />
+        )}
+      </View>
+
+      {/* Dynamic import() wrapper test */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🧩 Dynamic import() Wrapper</Text>
+        <Text style={styles.resultText}>
+          Validate that ES6 import() can be delegated to a custom loader (helpers.loadModule).
+        </Text>
+        <TouchableOpacity
+          style={[styles.testButton, loading === 'dynamicImport' && styles.testButtonDisabled]}
+          onPress={async () => {
+            const testName = 'dynamicImport'
+            setLoading(testName)
+            updateResult(testName, { status: 'pending', message: 'Testing dynamic import() delegation...' })
+            try {
+              const requireShim = (spec: string) => (spec === 'react' ? require('react') : {})
+              // Provide a transpiler that converts ESM to CJS and rewrites dynamic import()
+              const transpileForTest = (code: string, filename: string): string => {
+                // eslint-disable-next-line @typescript-eslint/no-var-requires
+                const Babel = require('@babel/standalone')
+                const presets: any[] = [['env', { modules: 'commonjs' }]]
+                const out = Babel.transform(code, { filename, presets }).code || code
+                return out.replace(/\bimport\(/g, '__import__(')
+              }
+
+              const moduleLoader = new RNModuleLoader({ requireShim, host: 'localhost', transpiler: async (c: string, f: string) => transpileForTest(c, f) })
+              const importHandler = new ES6ImportHandler({ host: 'localhost', baseUrl: '/hooks' })
+              // Delegate import() to a fake helpers.loadModule to verify wiring
+              importHandler.setLoadModuleDelegate(async (modulePath: string) => {
+                if (modulePath.endsWith('dummy.mjs')) {
+                  return { default: () => 'dummy-loaded', value: 42 }
+                }
+                throw new Error('Delegate received unexpected path: ' + modulePath)
+              })
+              moduleLoader.setImportHandler(importHandler)
+
+              const code = `
+                export default async function(ctx){
+                  const mod = await import('./dummy.mjs')
+                  return mod.default()
+                }
+              `
+              console.log('[DebugTab][Import] Executing test module with dynamic import')
+              const ctx: HookContext = {
+                React: require('react'),
+                createElement: require('react').createElement,
+                FileRenderer: () => null as any,
+                params: {},
+                helpers: {
+                  navigate: () => {},
+                  buildPeerUrl: (p: string) => p,
+                  loadModule: async () => ({}),
+                  setBranch: () => {},
+                  buildRepoHeaders: () => ({}),
+                },
+              }
+              // Pre-transpile before execution to eliminate ESM export syntax
+              const transpiled = transpileForTest(code, '/hooks/client/test-dynamic.jsx')
+              const mod = await moduleLoader.executeModule(transpiled, '/hooks/client/test-dynamic.jsx', ctx)
+              const def = mod && (mod as any).default
+              console.log('[DebugTab][Import] typeof default =', typeof def, 'keys:', Object.keys(mod || {}))
+              if (typeof def !== 'function') {
+                throw new Error(`import() test: default export is not a function (got ${typeof def}). Exports keys: ${Object.keys(mod || {}).join(',')}`)
+              }
+              const res = await def(ctx)
+              console.log('[DebugTab][Import] Dynamic import delegation success', { result: res })
+              updateResult(testName, { status: 'success', message: 'Dynamic import delegated successfully', details: String(res) })
+            } catch (e: any) {
+              console.log('[DebugTab][Import] Dynamic import delegation failed', {
+                message: e?.message || String(e),
+                stack: e?.stack,
+              })
+              updateResult('dynamicImport', { status: 'error', message: 'Dynamic import delegation failed', details: e?.message || String(e) })
+            } finally {
+              setLoading(null)
+            }
+          }}
+          disabled={loading === 'dynamicImport'}
+        >
+          <Text style={styles.testButtonText}>
+            {loading === 'dynamicImport' ? 'Running...' : 'Test dynamic import()'}
+          </Text>
+        </TouchableOpacity>
+        {results.dynamicImport && (
+          <TestResult testName="dynamicImport" result={results.dynamicImport} />
+        )}
       </View>
 
       {/* Local Hook Test */}

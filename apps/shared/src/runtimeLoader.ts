@@ -217,6 +217,18 @@ try {
     )
 
     try {
+      // Provide current execution context and filename to import handler so it can
+      // resolve relative paths and optionally delegate to helpers.loadModule
+      if (this.importHandler) {
+        try {
+          // @ts-ignore - methods exist on ES6ImportHandler
+          this.importHandler.setCurrentModulePath?.(filename)
+          // @ts-ignore
+          this.importHandler.setExecutionContext?.(context)
+        } catch (e) {
+          console.warn('[RNModuleLoader] Failed to set import handler context:', e)
+        }
+      }
       // Pass ES6 import handler as first parameter (or dummy if not available)
       let importFn = this.importHandler?.handle.bind(this.importHandler)
       if (!importFn) {
