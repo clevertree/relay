@@ -312,25 +312,63 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
             let finalCode = code
             let usedJsx = false
             try {
+                // DEBUG: Always log the detection attempt
+                console.debug(`[Hook ${kind}] Checking if code looks like JSX/TSX. Hook path: ${hookPath}, Code length: ${code.length}`)
+                
                 const looksLikeJsxOrTsx = /\/\s*@use-jsx|\/\s*@use-ts|<([A-Za-z][A-Za-z0-9]*)\s|jsxRuntime\s*:\s*['\"]automatic['\"]/m.test(code)
                     || hookPath.endsWith('.jsx') || hookPath.endsWith('.tsx') || hookPath.endsWith('.ts')
+                
+                console.debug(`[Hook ${kind}] JSX/TSX detection result: ${looksLikeJsxOrTsx}`)
+                
                 if (looksLikeJsxOrTsx) {
-                    console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with SWC (wasm) runtime`)
+                    console.debug(`[Hook ${kind}] JSX/TSX detected, transforming with WASM transpiler`)
+                    console.log(`[Hook ${kind}] *** ABOUT TO CALL transpileCode ***`)
                     const transformed = await transpileCode(code, {filename: hookPath.split('/').pop() || 'hook.tsx'})
+                    console.log(`[Hook ${kind}] *** transpileCode RETURNED successfully ***`)
                     // transpileCode() already prepends the full preamble with React helpers
                     finalCode = transformed
                     usedJsx = true
-                    console.debug(`[Hook ${kind}] First 1000 chars of final code:\n${finalCode.substring(0, 1000)}`)
+                    
+                    // DEBUG: Check if transpilation actually happened
+                    const hasJsxBefore = /<[A-Z]/.test(code);
+                    const hasJsxAfter = /<[A-Z]/.test(finalCode);
+                    const hasHAfter = /\bh\(/.test(finalCode);
+                    
+                    console.debug(`[Hook ${kind}] Transpilation results:`, {
+                        originalLength: code.length,
+                        transformedLength: finalCode.length,
+                        hadJsxBefore: hasJsxBefore,
+                        hasJsxAfter: hasJsxAfter,
+                        hasHCalls: hasHAfter,
+                    })
+                    console.debug(`[Hook ${kind}] First 500 chars of original:\n${code.substring(0, 500)}`)
+                    console.debug(`[Hook ${kind}] First 500 chars of transformed:\n${finalCode.substring(0, 500)}`)
                 }
             } catch (jsxErr) {
                 console.warn(`[Hook ${kind}] JSX transform failed`, jsxErr)
                 const msg = jsxErr instanceof Error ? jsxErr.message : String(jsxErr)
+                
+                // Detect specific transpiler issues
+                const isWasmNotLoaded = msg.includes('WASM not loaded') || msg.includes('__hook_transpile_jsx')
+                const isJsxError = msg.includes('TranspileError') || msg.includes('JSX')
+                
+                let userFriendlyMsg = msg
+                if (isWasmNotLoaded) {
+                    userFriendlyMsg = 'JSX Transpiler (WASM) failed to load. The application may not have fully initialized. Try refreshing the page.'
+                } else if (isJsxError) {
+                    userFriendlyMsg = `JSX syntax error in hook file: ${msg.replace('TranspileError: ', '')}`
+                } else {
+                    userFriendlyMsg = `Hook transpilation failed: ${msg}. Ensure the file extension is .jsx/.tsx or add '// @use-jsx' at the top.`
+                }
+                
                 // Surface a clear transpile error instead of proceeding to raw import (which causes 'Unexpected token')
-                setError(`Hook transpilation failed: ${msg}. Ensure the file extension is .jsx/.tsx or add '// @use-jsx' at the top.`)
+                setError(userFriendlyMsg)
                 setErrorDetails({
                     ...diagnostics,
                     reason: 'transpile-failed',
                     error: msg,
+                    isWasmNotLoaded,
+                    isJsxError,
                     jsxError: jsxErr instanceof Error ? {
                         message: jsxErr.message,
                         name: jsxErr.name,
@@ -346,6 +384,8 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
             const blob = new Blob([finalCode], {type: 'text/javascript'})
             const blobUrl = URL.createObjectURL(blob)
             console.debug(`[Hook ${kind}] Created blob URL: ${blobUrl}`)
+            console.log(`[Hook ${kind}] *** BLOB CONTENTS (first 200 chars) ***`)
+            console.log(finalCode.substring(0, 200))
 
             try {
                 // Build context first so we can inject it as global for JSX transpiled code
@@ -409,13 +449,33 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                 console.debug(`[Hook ${kind}] Execution failed:`, errMsg)
                 console.error(`[Hook ${kind}] Full error:`, err)
                 console.error(`[Hook ${kind}] Stack:`, errStack)
+                
+                // Log diagnostic info about transpilation
+                console.log(`[Hook ${kind}] *** DIAGNOSTIC INFO ***`)
+                console.log(`[Hook ${kind}] usedJsx=${usedJsx}, codeLength=${code.length}, finalCodeLength=${finalCode.length}`)
+                console.log(`[Hook ${kind}] finalCode first 300 chars: ${finalCode.substring(0, 300)}`)
+                
+                // Detect JSX transpilation failures masquerading as syntax errors
+                const isJsxSyntaxError = errMsg.includes("Unexpected token '<") || errMsg.includes('SyntaxError')
+                const diagnosticMsg = isJsxSyntaxError 
+                    ? `JSX syntax detected but transpilation may have failed.\nusedJsx=${usedJsx}, finalCodeLength=${finalCode.length}\nFirst chars: ${finalCode.substring(0, 50)}\n\nThis usually means:\n1. The WASM transpiler failed to load\n2. The JSX syntax is invalid\n3. The hook file format is not supported`
+                    : errMsg
+                
                 // If this came from helpers.fetchJson (repo-aware), surface its diagnostic details
                 const fetchJsonDetails = (err as any)?.name === 'RepoFetchJsonError' ? (err as any).details : undefined
-                setError(`Hook execution failed: ${errMsg}.`)
+                setError(`Hook execution failed: ${isJsxSyntaxError ? 'JSX Transpilation Issue' : 'Execution Error'}.`)
                 setErrorDetails({
                     ...diagnostics,
                     reason: 'execution-failed',
                     error: errMsg,
+                    diagnosticMsg,
+                    isJsxSyntaxError,
+                    usedJsx,
+                    finalCodeLength: finalCode.length,
+                    finalCodeSnippet: finalCode.substring(0, 500),
+                    transpilerVersion: (window as any).__hook_transpiler_version || 'unknown',
+                    transpilerDiagnostic: (window as any).__lastTranspileError || '',
+                    transpiledCodeSnippet: ((window as any).__lastTranspiledCode || '').toString().substring(0, 600),
                     stack: errStack.split('\n').slice(0, 5),
                     ...(fetchJsonDetails ? {fetchJson: fetchJsonDetails} : {}),
                 })
@@ -764,28 +824,123 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                                             </div>
                                         )}
 
-                                        {/* Show JSX transpilation errors */}
-                                        {errorDetails.jsxError && (
-                                            <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
-                                                <div className="font-semibold text-xs mb-2">JSX Transpilation Error:
+                                        {/* Show JSX transpilation errors (from transpileCode failure) */}
+                                        {(errorDetails.reason === 'transpile-failed' || errorDetails.jsxError) && (
+                                            <div className="bg-red-600/10 p-3 rounded border border-red-400/50 space-y-2">
+                                                <div className="font-semibold text-xs">
+                                                    {errorDetails.isWasmNotLoaded ? '🔌 WASM Transpiler Not Available' : '❌ JSX Transpilation Failed'}
                                                 </div>
-                                                <pre
-                                                    className="text-xs overflow-auto max-h-32 whitespace-pre-wrap font-mono bg-black/20 p-2 rounded">
-{typeof errorDetails.jsxError === 'string' ? errorDetails.jsxError : JSON.stringify(errorDetails.jsxError, null, 2)}
-                                        </pre>
+                                                
+                                                {errorDetails.isWasmNotLoaded && (
+                                                    <div className="text-xs bg-red-900/20 border border-red-400/30 rounded p-2 space-y-1">
+                                                        <p className="font-semibold">The JSX transpiler (WASM) is not available</p>
+                                                        <p>This usually means:</p>
+                                                        <ul className="list-disc list-inside ml-2 space-y-1">
+                                                            <li>The app didn't fully load when you started browsing</li>
+                                                            <li>Your browser blocked WASM module loading</li>
+                                                            <li>Network issue prevented transpiler from downloading</li>
+                                                        </ul>
+                                                        <p className="mt-2"><strong>Fix:</strong> Refresh the page and try again. Check browser console (F12) for errors.</p>
+                                                    </div>
+                                                )}
+                                                
+                                                {!errorDetails.isWasmNotLoaded && (
+                                                    <div className="text-xs bg-red-900/20 border border-red-400/30 rounded p-2 space-y-1">
+                                                        <p className="font-semibold">Invalid JSX syntax detected</p>
+                                                        <p>The transpiler encountered syntax it couldn't convert. Check:</p>
+                                                        <ul className="list-disc list-inside ml-2 space-y-1">
+                                                            <li>All JSX tags are properly closed</li>
+                                                            <li>Attributes are correctly formatted</li>
+                                                            <li>No special characters in tag names</li>
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                                
+                                                <div className="font-mono text-xs bg-black/20 p-2 rounded overflow-auto max-h-32 whitespace-pre-wrap">
+                                                    {typeof errorDetails.jsxError === 'string' ? errorDetails.jsxError : (errorDetails.jsxError?.message || JSON.stringify(errorDetails.jsxError, null, 2))}
+                                                </div>
                                             </div>
                                         )}
 
                                         {/* Show execution errors */}
                                         {errorDetails.reason === 'execution-failed' && errorDetails.error && (
-                                            <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
-                                                <div className="font-semibold text-xs mb-2">Execution Error:</div>
-                                                <div className="font-mono text-xs">{errorDetails.error}</div>
+                                            <div className={`p-3 rounded border ${errorDetails.isJsxSyntaxError ? 'bg-orange-600/10 border-orange-400/50' : 'bg-red-600/10 border-red-400/50'}`}>
+                                                <div className="font-semibold text-xs mb-3">
+                                                    {errorDetails.isJsxSyntaxError ? '⚠️ JSX Transpilation Issue' : '❌ Execution Error'}
+                                                </div>
+                                                
+                                                {/* For JSX syntax errors, provide detailed help */}
+                                                {errorDetails.isJsxSyntaxError && (
+                                                    <div className="space-y-2 mb-3">
+                                                        <div className="text-xs bg-orange-900/20 border border-orange-400/30 rounded p-2">
+                                                            <p className="font-semibold mb-2">What went wrong:</p>
+                                                            <p className="mb-2">The code contains JSX syntax (<code>&lt;</code> character), but it wasn't converted to regular JavaScript before execution.</p>
+                                                        </div>
+                                                        <div className="text-xs bg-blue-900/20 border border-blue-400/30 rounded p-2">
+                                                            <p className="font-semibold mb-2">Common causes:</p>
+                                                            <ul className="list-disc list-inside space-y-1">
+                                                                <li><strong>WASM transpiler failed to load:</strong> Check browser console for WASM errors</li>
+                                                                <li><strong>Invalid JSX syntax:</strong> Ensure JSX tags are properly closed (e.g., <code>&lt;div&gt;content&lt;/div&gt;</code>)</li>
+                                                                <li><strong>Missing React import:</strong> Add <code>const h = React.createElement</code> or equivalent</li>
+                                                                <li><strong>Wrong file type:</strong> Use .jsx or .tsx extension, or add <code>// @use-jsx</code> comment at the top</li>
+                                                            </ul>
+                                                        </div>
+                                                        <div className="text-xs bg-green-900/20 border border-green-400/30 rounded p-2">
+                                                            <p className="font-semibold mb-2">How to fix:</p>
+                                                            <ul className="list-disc list-inside space-y-1">
+                                                                <li>Verify the hook file has .jsx or .tsx extension</li>
+                                                                <li>Check the browser's developer console (F12) for detailed transpiler errors</li>
+                                                                <li>Ensure JSX is properly formatted: <code>&lt;ComponentName prop="value"&gt;</code></li>
+                                                                <li>For debugging, try uploading a simple JSX file first: <code>&lt;div&gt;Hello&lt;/div&gt;</code></li>
+                                                            </ul>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                
+                                                <div className="font-mono text-xs mb-2">
+                                                    <strong>Error Message:</strong> {errorDetails.error}
+                                                </div>
+                                                {errorDetails.diagnosticMsg && (
+                                                    <div className="font-mono text-xs mb-2 bg-black/20 p-2 rounded whitespace-pre-wrap">
+                                                        <strong>Diagnostic:</strong>
+                                                        <div className="mt-1">
+                                                            {errorDetails.diagnosticMsg}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {errorDetails.transpilerVersion && (
+                                                    <div className="font-mono text-xs mb-2 text-blue-100">
+                                                        <strong>Hook transpiler:</strong> v{errorDetails.transpilerVersion}
+                                                    </div>
+                                                )}
+                                                {errorDetails.transpilerDiagnostic && (
+                                                    <div className="font-mono text-xs bg-black/30 rounded p-2 mb-2 break-words">
+                                                        <strong>Transpiler error:</strong>
+                                                        <div className="mt-1 text-[11px] whitespace-pre-wrap">
+                                                            {errorDetails.transpilerDiagnostic}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {errorDetails.finalCodeSnippet && (
+                                                    <details className="text-xs bg-black/10 border border-black/20 rounded p-2 mb-2">
+                                                        <summary className="cursor-pointer">Transpiled preview (first 500 chars)</summary>
+                                                        <pre className="overflow-auto max-h-32 text-[11px] mt-1 whitespace-pre-wrap">{errorDetails.finalCodeSnippet}</pre>
+                                                    </details>
+                                                )}
+                                                {errorDetails.transpiledCodeSnippet && (
+                                                    <details className="text-xs bg-black/10 border border-black/20 rounded p-2 mb-2">
+                                                        <summary className="cursor-pointer">Last transpiler output (window.__lastTranspiledCode)</summary>
+                                                        <pre className="overflow-auto max-h-32 text-[11px] mt-1 whitespace-pre-wrap">{errorDetails.transpiledCodeSnippet}</pre>
+                                                    </details>
+                                                )}
                                                 {errorDetails.stack && Array.isArray(errorDetails.stack) && (
-                                                    <pre
-                                                        className="text-xs mt-2 overflow-auto max-h-16 whitespace-pre-wrap opacity-80">
+                                                    <details className="text-xs">
+                                                        <summary className="cursor-pointer hover:underline opacity-70 mb-1">Stack trace</summary>
+                                                        <pre
+                                                            className="overflow-auto max-h-24 whitespace-pre-wrap opacity-60 bg-black/20 p-2 rounded">
 {errorDetails.stack.join('\n')}
                                             </pre>
+                                                    </details>
                                                 )}
                                             </div>
                                         )}

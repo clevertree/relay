@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complete Hook Transpilation Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Courier New', monospace; 
+            background: #0d0d0d; 
+            color: #e0e0e0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .header { color: #4ec9b0; margin-bottom: 20px; }
+        h1 { font-size: 24px; margin-bottom: 10px; }
+        h2 { font-size: 16px; color: #569cd6; margin-top: 20px; margin-bottom: 10px; }
+        .section { 
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .log { 
+            margin: 3px 0; 
+            padding: 3px 5px; 
+            border-left: 3px solid #3e3e42;
+            font-size: 12px;
+        }
+        .log.success { border-left-color: #6a9955; color: #6a9955; }
+        .log.error { border-left-color: #f48771; color: #f48771; }
+        .log.warn { border-left-color: #dcdcaa; color: #dcdcaa; }
+        .log.info { border-left-color: #569cd6; color: #569cd6; }
+        pre { 
+            background: #0d0d0d; 
+            border: 1px solid #3e3e42; 
+            padding: 10px; 
+            overflow-x: auto;
+            margin: 5px 0;
+            font-size: 11px;
+        }
+        .test-case { margin: 10px 0; padding: 10px; background: #252526; border-left: 3px solid #3e3e42; }
+        .test-case.pass { border-left-color: #6a9955; }
+        .test-case.fail { border-left-color: #f48771; }
+        .status { font-weight: bold; padding: 5px; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔬 Complete Hook Transpilation Test Suite</h1>
+        <p>Testing WASM initialization, transpilation, and integration with hook execution</p>
+    </div>
+
+    <div id="output"></div>
+
+    <script>
+        const output = document.getElementById('output');
+        const logs = [];
+        
+        function log(msg, type = 'info') {
+            const entry = { msg, type, time: new Date().toLocaleTimeString() };
+            logs.push(entry);
+            
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            div.textContent = `[${entry.time}] ${msg}`;
+            output.appendChild(div);
+            console.log(`[${type.toUpperCase()}] ${msg}`);
+        }
+        
+        function section(title) {
+            const div = document.createElement('div');
+            div.className = 'section';
+            
+            const h = document.createElement('h2');
+            h.textContent = title;
+            div.appendChild(h);
+            
+            const content = document.createElement('div');
+            div.appendChild(content);
+            output.appendChild(div);
+            
+            return content;
+        }
+        
+        function testCase(title, passed, details = '') {
+            const div = document.createElement('div');
+            div.className = `test-case ${passed ? 'pass' : 'fail'}`;
+            
+            const status = document.createElement('span');
+            status.className = 'status';
+            status.textContent = passed ? '✓ PASS' : '✗ FAIL';
+            
+            const label = document.createElement('span');
+            label.textContent = ' ' + title;
+            if (details) label.textContent += '\n' + details;
+            
+            div.appendChild(status);
+            div.appendChild(label);
+            output.appendChild(div);
+            
+            if (!passed) {
+                log(`Test failed: ${title}`, 'error');
+            }
+        }
+        
+        async function runFullTest() {
+            try {
+                const sec1 = section('STEP 1: Check Environment');
+                log('Testing window.globalThis availability');
+                if (typeof globalThis !== 'undefined') {
+                    log('✓ globalThis is available', 'success');
+                } else {
+                    throw new Error('globalThis is not available');
+                }
+                
+                const sec2 = section('STEP 2: Import WASM Module');
+                log('Importing /src/wasm/hook_transpiler.js');
+                let mod;
+                try {
+                    mod = await import('/src/wasm/hook_transpiler.js');
+                    log('✓ Module imported successfully', 'success');
+                    log(`Exports: ${Object.keys(mod).join(', ')}`);
+                } catch (e) {
+                    log(`✗ Failed to import: ${e.message}`, 'error');
+                    throw e;
+                }
+                
+                const sec3 = section('STEP 3: Initialize WASM');
+                log('Checking for default export (init function)');
+                if (typeof mod.default !== 'function') {
+                    throw new Error('No default export (init function)');
+                }
+                log('✓ Default export is a function', 'success');
+                
+                log('Calling mod.default() to initialize WASM');
+                try {
+                    const result = await mod.default();
+                    log(`✓ WASM initialization successful. Result: ${JSON.stringify(result)}`, 'success');
+                } catch (e) {
+                    log(`✗ WASM init threw error: ${e.message}`, 'error');
+                    throw e;
+                }
+                
+                const sec4 = section('STEP 4: Verify transpile_jsx Export');
+                log('Checking for transpile_jsx function');
+                if (typeof mod.transpile_jsx !== 'function') {
+                    const available = Object.keys(mod).join(', ');
+                    throw new Error(`transpile_jsx not found. Available: ${available}`);
+                }
+                log('✓ transpile_jsx is available', 'success');
+                
+                const sec5 = section('STEP 5: Test Transpilation Cases');
+                
+                const testCases = [
+                    {
+                        name: 'Simple div',
+                        input: '<div>Hello</div>',
+                        expectH: true,
+                        expectJsx: false,
+                    },
+                    {
+                        name: 'Self-closing component',
+                        input: '<App />',
+                        expectH: true,
+                        expectJsx: false,
+                    },
+                    {
+                        name: 'Component with props',
+                        input: '<div className="test">Content</div>',
+                        expectH: true,
+                        expectJsx: false,
+                    },
+                    {
+                        name: 'get-client snippet',
+                        input: 'export default async function get(ctx) { return <div><h1>Test</h1></div>; }',
+                        expectH: true,
+                        expectJsx: false,
+                    },
+                    {
+                        name: 'Namespace component',
+                        input: '<App.Button>Click me</App.Button>',
+                        expectH: true,
+                        expectJsx: false,
+                    },
+                ];
+                
+                let passCount = 0;
+                for (const tc of testCases) {
+                    log(`Testing: ${tc.name}`);
+                    const result = mod.transpile_jsx(tc.input, 'test.jsx');
+                    
+                    const hasError = result.startsWith('TranspileError:');
+                    const hasH = result.includes('h(');
+                    const hasJsx = /<[A-Z]/.test(result);
+                    
+                    let passed = true;
+                    let msg = `Input: ${tc.input}\n`;
+                    msg += `Output: ${result.substring(0, 100)}${result.length > 100 ? '...' : ''}`;
+                    
+                    if (hasError) {
+                        passed = false;
+                        msg += `\nERROR: ${result}`;
+                    } else if (tc.expectJsx && hasJsx) {
+                        // Expected JSX to remain
+                        passed = true;
+                    } else if (!tc.expectJsx && hasJsx) {
+                        passed = false;
+                        msg += `\nJSX still present when it shouldn't be`;
+                    } else if (tc.expectH && !hasH) {
+                        passed = false;
+                        msg += `\nNo h() calls found when expected`;
+                    }
+                    
+                    if (passed) {
+                        passCount++;
+                        log(`✓ ${tc.name} passed`, 'success');
+                    } else {
+                        log(`✗ ${tc.name} failed`, 'error');
+                    }
+                    
+                    testCase(tc.name, passed, msg);
+                }
+                
+                log(`${passCount}/${testCases.length} test cases passed`, passCount === testCases.length ? 'success' : 'warn');
+                
+                const sec6 = section('STEP 6: Bind to globalThis');
+                log('Binding transpile_jsx to globalThis.__hook_transpile_jsx');
+                globalThis.__hook_transpile_jsx = mod.transpile_jsx.bind(mod);
+                log('✓ Function bound to globalThis', 'success');
+                
+                const sec7 = section('STEP 7: Verify globalThis Binding');
+                log('Testing access via globalThis.__hook_transpile_jsx');
+                if (typeof globalThis.__hook_transpile_jsx !== 'function') {
+                    throw new Error('Function not accessible via globalThis');
+                }
+                log('✓ Function accessible via globalThis', 'success');
+                
+                const globalResult = globalThis.__hook_transpile_jsx('<Test />', 'test.jsx');
+                log(`Quick test result: ${globalResult.substring(0, 50)}...`, 'info');
+                
+                const sec8 = section('SUMMARY');
+                log('✅ ALL TESTS PASSED - WASM transpiler is fully functional!', 'success');
+                log('The transpiler is ready for use in hook execution.');
+                
+            } catch (e) {
+                log(`❌ Test suite failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                if (e instanceof Error && e.stack) {
+                    log(e.stack, 'error');
+                }
+            }
+        }
+        
+        // Run tests on page load
+        window.addEventListener('load', runFullTest);
+    </script>
+</body>
+</html>

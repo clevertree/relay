@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSX Transpiler Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #f0f0f0; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        .test { margin: 10px 0; padding: 10px; border-left: 4px solid #ccc; }
+        .pass { border-color: green; background: #f0fff0; }
+        .fail { border-color: red; background: #fff0f0; }
+        .input { color: #0066cc; }
+        .output { color: #006600; }
+        .error { color: #cc0000; }
+        h1 { color: #333; }
+        .stats { margin-top: 20px; padding: 10px; background: #f9f9f9; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>JSX Transpiler Test Suite</h1>
+        <div id="test-output" style="min-height: 300px;"></div>
+        <div class="stats" id="stats" style="display:none;"></div>
+    </div>
+
+    <script type="module">
+        async function runTests() {
+            try {
+                // Import the WASM module (served by Vite)
+                const wasmModule = await import('/src/wasm/hook_transpiler.js');
+                await wasmModule.default();
+                const { transpile_jsx } = wasmModule;
+                
+                const testCases = [
+                    { name: 'Simple div', code: '<div>Hello</div>', expectH: true },
+                    { name: 'Self-closing div', code: '<div />', expectH: true },
+                    { name: 'With className', code: '<div className="container">Test</div>', expectH: true },
+                    { name: 'With id', code: '<div id="app">Content</div>', expectH: true },
+                    { name: 'Component uppercase', code: '<MyComponent />', expectH: true },
+                    { name: 'Component with props', code: '<Button onClick={handler} />', expectH: true },
+                    { name: 'Nested elements', code: '<div><span>text</span></div>', expectH: true },
+                    { name: 'With pragma', code: '/** @jsx h */\n<div>Test</div>', expectH: true },
+                ];
+
+                const output = document.getElementById('test-output');
+                let passed = 0;
+                let failed = 0;
+                
+                for (const test of testCases) {
+                    const testEl = document.createElement('div');
+                    try {
+                        const result = transpile_jsx(test.code);
+                        const hasH = result.code.includes('h(');
+                        const success = hasH === test.expectH;
+                        
+                        if (success) {
+                            testEl.className = 'test pass';
+                            passed++;
+                        } else {
+                            testEl.className = 'test fail';
+                            failed++;
+                        }
+                        
+                        testEl.innerHTML = `
+                            <strong>${success ? '✓' : '✗'} ${test.name}</strong><br>
+                            <span class="input">Input:</span> ${escapeHtml(test.code.substring(0, 80))}<br>
+                            <span class="output">Output:</span> ${escapeHtml(result.code.substring(0, 100))}...
+                        `;
+                    } catch (err) {
+                        testEl.className = 'test fail';
+                        testEl.innerHTML = `
+                            <strong>✗ ${test.name}</strong><br>
+                            <span class="error">Error:</span> ${escapeHtml(err.message)}
+                        `;
+                        failed++;
+                    }
+                    output.appendChild(testEl);
+                }
+                
+                // Display stats
+                const stats = document.getElementById('stats');
+                stats.style.display = 'block';
+                stats.innerHTML = `<strong>Results:</strong> ${passed} passed, ${failed} failed`;
+                
+                console.log(`JSX Transpiler Tests: ${passed} passed, ${failed} failed`);
+            } catch (err) {
+                console.error('Test setup error:', err);
+                document.getElementById('test-output').innerHTML = 
+                    `<div class="test fail"><strong>✗ Test Setup Failed</strong><br>${escapeHtml(err.message)}</div>`;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Run tests on page load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', runTests);
+        } else {
+            runTests();
+        }
+    </script>
+</body>
+</html>

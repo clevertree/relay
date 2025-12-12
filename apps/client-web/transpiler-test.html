@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Transpiler Integration Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .card h2 { color: #333; margin-bottom: 15px; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+        .test-result { margin: 15px 0; padding: 12px; border-radius: 4px; border-left: 4px solid #ccc; background: #f9f9f9; }
+        .test-result.pass { border-left-color: #4caf50; background: #f1f8f6; }
+        .test-result.fail { border-left-color: #f44336; background: #fff3f3; }
+        .code-input, .code-output { font-family: 'Courier New', monospace; padding: 10px; background: #f5f5f5; border-radius: 4px; margin: 5px 0; }
+        .code-input { border: 1px solid #ddd; }
+        .code-output { background: #e8f5e9; border: 1px solid #81c784; }
+        .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .status { padding: 15px; border-radius: 4px; margin-bottom: 20px; font-weight: bold; }
+        .status.loading { background: #e3f2fd; color: #1976d2; }
+        .status.success { background: #e8f5e9; color: #2e7d32; }
+        .status.error { background: #fff3cd; color: #856404; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 Transpiler Integration Test</h1>
+            <p>Verifying JSX transpilation in browser context</p>
+        </div>
+
+        <div id="status" class="status loading">
+            <span class="spinner"></span> Loading transpiler...
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script type="module">
+        const resultsDiv = document.getElementById('results');
+        const statusDiv = document.getElementById('status');
+
+        function updateStatus(message, type = 'loading') {
+            statusDiv.className = `status ${type}`;
+            statusDiv.innerHTML = message;
+        }
+
+        function addResult(title, passed, input, output, details = '') {
+            const result = document.createElement('div');
+            result.className = `test-result ${passed ? 'pass' : 'fail'}`;
+            result.innerHTML = `
+                <div style="font-weight: bold; color: ${passed ? '#2e7d32' : '#c62828'};">
+                    ${passed ? '✓' : '✗'} ${title}
+                </div>
+                <div class="code-input"><strong>Input:</strong><br>${escapeHtml(input)}</div>
+                <div class="code-output"><strong>Output:</strong><br>${escapeHtml(output)}</div>
+                ${details ? `<div style="margin-top: 10px; color: #666; font-size: 14px;">${details}</div>` : ''}
+            `;
+            resultsDiv.appendChild(result);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        (async () => {
+            try {
+                updateStatus('⏳ Importing WASM module...', 'loading');
+                const wasmMod = await import('/src/wasm/hook_transpiler.js');
+                
+                updateStatus('⏳ Initializing WASM...', 'loading');
+                if (typeof wasmMod.default === 'function') {
+                    await wasmMod.default();
+                }
+
+                if (typeof wasmMod.transpile_jsx !== 'function') {
+                    throw new Error('transpile_jsx function not found in module');
+                }
+
+                updateStatus('✓ Transpiler ready', 'success');
+
+                const tests = [
+                    {
+                        title: 'Simple div element',
+                        input: '<div>Hello World</div>',
+                        expectH: true
+                    },
+                    {
+                        title: 'Self-closing element',
+                        input: '<Button />',
+                        expectH: true
+                    },
+                    {
+                        title: 'With className attribute',
+                        input: '<div className="container" id="app">Content</div>',
+                        expectH: true
+                    },
+                    {
+                        title: 'Nested elements',
+                        input: '<div><span>Text</span></div>',
+                        expectH: true
+                    },
+                    {
+                        title: 'With pragma comment',
+                        input: '/** @jsx h */\n<Form />',
+                        expectH: true
+                    },
+                    {
+                        title: 'Component with multiple attributes',
+                        input: '<MyButton onClick={handler} disabled={true} className="btn" />',
+                        expectH: true
+                    }
+                ];
+
+                let passed = 0;
+                let failed = 0;
+
+                for (const test of tests) {
+                    try {
+                        const result = wasmMod.transpile_jsx(test.input);
+                        const success = result.code.includes('h(') === test.expectH;
+                        
+                        if (success) {
+                            passed++;
+                        } else {
+                            failed++;
+                        }
+
+                        addResult(
+                            test.title,
+                            success,
+                            test.input,
+                            result.code,
+                            success ? '✓ Transpiled correctly' : '✗ Expected h() calls not found'
+                        );
+                    } catch (err) {
+                        failed++;
+                        addResult(test.title, false, test.input, `ERROR: ${err.message}`);
+                    }
+                }
+
+                const summary = document.createElement('div');
+                summary.className = `card`;
+                summary.innerHTML = `
+                    <h2>📊 Test Summary</h2>
+                    <p style="font-size: 18px; margin: 10px 0;">
+                        <span style="color: #2e7d32; font-weight: bold;">✓ Passed: ${passed}</span>
+                        <span style="color: #f44336; font-weight: bold; margin-left: 20px;">✗ Failed: ${failed}</span>
+                    </p>
+                    <p style="color: #666; margin-top: 15px;">
+                        All JSX transpilation tests ${failed === 0 ? '✓ PASSED' : '❌ had issues'}. The transpiler is ${failed === 0 ? 'working correctly' : 'needs debugging'}.
+                    </p>
+                `;
+                resultsDiv.appendChild(summary);
+
+            } catch (err) {
+                updateStatus(`✗ Error: ${err.message}`, 'error');
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'card';
+                errorDiv.innerHTML = `<h2>Error Details</h2><pre>${escapeHtml(err.stack)}</pre>`;
+                resultsDiv.appendChild(errorDiv);
+            }
+        })();
+    </script>
+</body>
+</html>

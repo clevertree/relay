@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WASM Load Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #f0f0f0; }
+        .box { background: white; padding: 15px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #007acc; }
+        .success { border-left-color: #4ec9b0; background: #f0fff0; }
+        .error { border-left-color: #f48771; background: #fff0f0; }
+        .warning { border-left-color: #dcdcaa; background: #fffaf0; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 2px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Hook Transpiler WASM Load Test</h1>
+    <div id="output"></div>
+
+    <script type="module">
+        const output = document.getElementById('output');
+
+        function log(title, message, type = 'info') {
+            const box = document.createElement('div');
+            box.className = `box ${type === 'success' ? 'success' : type === 'error' ? 'error' : 'warning'}`;
+            box.innerHTML = `<strong>${title}</strong><br><pre>${escapeHtml(message)}</pre>`;
+            output.appendChild(box);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        try {
+            log('Step 1', 'Importing hook_transpiler module from /src/wasm/hook_transpiler.js...', 'warning');
+            
+            const wasmModule = await import('/src/wasm/hook_transpiler.js');
+            log('Step 1 ✓', `Module imported successfully. Exports: ${Object.keys(wasmModule).join(', ')}`, 'success');
+
+            log('Step 2', 'Initializing WASM...', 'warning');
+            const mod = wasmModule.default || wasmModule;
+            
+            // Try to call init if it exists
+            if (typeof mod === 'function') {
+                log('Step 2 ✓', 'Module default export is a function, calling it...', 'warning');
+                await mod();
+                log('Step 2 ✓', 'Init function called successfully', 'success');
+            } else {
+                log('Step 2 ⚠', `Module default is not a function, it's: ${typeof mod}`, 'warning');
+            }
+
+            log('Step 3', 'Checking for transpile_jsx export...', 'warning');
+            const { transpile_jsx } = wasmModule;
+            
+            if (typeof transpile_jsx !== 'function') {
+                throw new Error(`transpile_jsx is not a function, it's: ${typeof transpile_jsx}`);
+            }
+            log('Step 3 ✓', 'transpile_jsx function found', 'success');
+
+            log('Step 4', 'Testing transpilation with simple JSX...', 'warning');
+            const input = '<div>Hello World</div>';
+            const result = transpile_jsx(input);
+            log('Step 4 ✓', `Input: ${input}\nOutput: ${result.code}`, 'success');
+
+            if (result.code.includes('h(div')) {
+                log('Final Result', '✅ JSX transpilation is WORKING!', 'success');
+            } else {
+                log('Final Result', '❌ JSX not converted to h() calls\nThis might indicate an issue with the transpiler logic', 'error');
+            }
+
+        } catch (err) {
+            log('ERROR', `${err.message}\n\nStack:\n${err.stack}`, 'error');
+        }
+    </script>
+</body>
+</html>

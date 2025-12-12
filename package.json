@@ -4,7 +4,7 @@
     "private": true,
     "version": "0.1.0",
     "scripts": {
-        "dev": "npm --prefix apps/client run dev",
+        "dev": "npm --prefix apps/client-web run dev",
         "dev:client": "cargo run --manifest-path apps/client/Cargo.toml",
         "build:client": "cargo build --manifest-path apps/client/Cargo.toml",
         "dev:server": "cargo run --manifest-path apps/server/Cargo.toml -- serve",
@@ -15,7 +15,7 @@
         "server:ipfs-add": "cargo run --manifest-path apps/server/Cargo.toml -- ipfs-add template-ui",
         "server:host": "cargo run --manifest-path apps/server/Cargo.toml -- serve --repo /data/repo.git --static template-ui",
         "web:dev": "npm --prefix apps/client-web run dev",
-        "build:hook-wasm": "bash ./scripts/build-hook-wasm.sh",
+        "build:hook-wasm": "powershell .\\scripts\\build-hook-wasm.ps1",
         "web:dev:wasm": "npm run build:hook-wasm && npm --prefix apps/client-web run dev",
         "web:dev:full": "node scripts/dev-server.cjs",
         "web:build": "npm --prefix apps/client-web run build",

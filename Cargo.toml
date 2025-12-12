@@ -8,4 +8,3 @@ members = [
     "crates/hook-transpiler",
 ]
 resolver = "2"
-# Note: no global patches to avoid conflicting with isolated WASM crate

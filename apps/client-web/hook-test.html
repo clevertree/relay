@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hook Transpiler Test</title>
+    <style>
+        body { font-family: 'Courier New', monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .test-section { margin: 20px 0; padding: 15px; background: #252526; border-left: 3px solid #007acc; }
+        .pass { border-left-color: #4ec9b0; }
+        .fail { border-left-color: #f48771; }
+        .title { font-weight: bold; color: #4ec9b0; margin-bottom: 10px; }
+        .code { background: #1e1e1e; padding: 10px; margin: 5px 0; border-radius: 3px; overflow-x: auto; }
+        .input { color: #9cdcfe; }
+        .output { color: #4ec9b0; }
+        pre { margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 style="color: #007acc;">Hook Transpiler Test Suite</h1>
+        <div id="results"></div>
+    </div>
+
+    <script type="module">
+        (async () => {
+            const resultsDiv = document.getElementById('results');
+            const log = (html) => {
+                resultsDiv.innerHTML += html;
+            };
+
+            try {
+                // Load WASM
+                const { default: init, transpile_jsx } = await import('/src/wasm/hook_transpiler.js');
+                await init();
+                
+                log(`<div class="test-section" style="border-left-color: #007acc;"><div class="title">✓ WASM initialized successfully</div></div>`);
+
+                // Test real hook code snippet
+                const hookCode = `
+export default async function getClient(ctx) {
+    const { React, createElement: h, helpers } = ctx;
+    const data = await helpers.loadModule('./query-client.jsx');
+    
+    return <div className="container">
+        <h1>My App</h1>
+        <p>Welcome</p>
+    </div>;
+}`;
+
+                log(`<div class="test-section"><div class="title">Real Hook Code Transpilation</div>`);
+                log(`<div class="code"><span class="input">Input Code:</span><pre>${escapeHtml(hookCode)}</pre></div>`);
+                
+                try {
+                    const result = transpile_jsx(hookCode);
+                    const hasH = result.code.includes('h(');
+                    const hasLoadModule = result.code.includes('helpers.loadModule');
+                    const hasNoJsx = !/<[A-Za-z]/.test(result.code);
+                    
+                    if (hasH && hasLoadModule) {
+                        log(`<div class="code" style="border-left: 2px solid #4ec9b0;"><span class="output">✓ Output (transpiled correctly):</span><pre>${escapeHtml(result.code)}</pre></div>`);
+                    } else {
+                        log(`<div class="code" style="border-left: 2px solid #f48771;"><span class="output">✗ Output (issues detected):</span>`);
+                        log(`<p>Has h() calls: ${hasH ? '✓' : '✗'}</p>`);
+                        log(`<p>Has loadModule: ${hasLoadModule ? '✓' : '✗'}</p>`);
+                        log(`<p>No JSX remaining: ${hasNoJsx ? '✓' : '✗'}</p>`);
+                        log(`<pre>${escapeHtml(result.code)}</pre></div>`);
+                    }
+                } catch (err) {
+                    log(`<div class="code" style="border-left: 2px solid #f48771;">✗ Transpilation failed: ${err.message}</div>`);
+                }
+                
+                log(`</div>`);
+
+                // Test individual JSX patterns
+                const tests = [
+                    { pattern: '<div>Content</div>', desc: 'Simple div with text' },
+                    { pattern: '<Component prop="value" />', desc: 'Self-closing component' },
+                    { pattern: '<div className="test">Inside</div>', desc: 'Div with className' },
+                    { pattern: '/** @jsx h */\n<App />', desc: 'With pragma comment' },
+                ];
+
+                log(`<div class="test-section"><div class="title">JSX Pattern Tests</div>`);
+                
+                for (const test of tests) {
+                    const result = transpile_jsx(test.pattern);
+                    const success = result.code.includes('h(');
+                    
+                    log(`<div style="margin: 10px 0; padding: 5px; background: #2d2d30; border-radius: 2px;">`);
+                    log(`<div style="color: ${success ? '#4ec9b0' : '#f48771'};">${success ? '✓' : '✗'} ${test.desc}</div>`);
+                    log(`<div class="code"><span class="input">Input:</span> <code>${escapeHtml(test.pattern.substring(0, 60))}</code></div>`);
+                    log(`<div class="code"><span class="output">Output:</span> <code>${escapeHtml(result.code.substring(0, 80))}</code></div>`);
+                    log(`</div>`);
+                }
+                
+                log(`</div>`);
+
+            } catch (err) {
+                log(`<div class="test-section fail"><div class="title">✗ Fatal Error</div>`);
+                log(`<div>${err.message}</div>`);
+                log(`<pre>${err.stack}</pre></div>`);
+            }
+
+            function escapeHtml(text) {
+                const map = {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                };
+                return text.replace(/[&<>"']/g, m => map[m]);
+            }
+        })();
+    </script>
+</body>
+</html>

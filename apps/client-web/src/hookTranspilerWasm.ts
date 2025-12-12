@@ -8,27 +8,40 @@
 declare const global: any
 
 export async function initHookTranspilerWasm(): Promise<void> {
-  if ((globalThis as any).__hook_transpile_jsx) return
+  if ((globalThis as any).__hook_transpile_jsx) {
+    console.log('[hookWasm] WASM already initialized')
+    return
+  }
   try {
-    console.log('[hookWasm] Loading hook-transpiler WASM')
-    // The following path assumes you copy wasm-bindgen output to public/wasm/
-    // Files expected: hook_transpiler_bg.wasm, hook_transpiler.js
-    // Vite will serve them at /wasm/*
-    // Use vite-ignore so dev server doesn't try to pre-resolve it at build time.
-    // This path must exist at runtime under apps/client-web/public/wasm.
-    const mod: any = await import(/* @vite-ignore */ '/wasm/hook_transpiler.js')
+    console.log('[hookWasm] Loading hook-transpiler WASM module')
+    // Import the wasm-bindgen generated module
+    const mod: any = await import('./wasm/hook_transpiler.js')
+    
+    console.log('[hookWasm] WASM module imported, initializing...')
+    
+    // Initialize WASM - the default export handles finding the .wasm file
+    // It will look for hook_transpiler_bg.wasm relative to hook_transpiler.js
     if (typeof mod?.default === 'function') {
-      // Initialize with explicit WASM url; adjust filename if different
-      await mod.default('/wasm/hook_transpiler_bg.wasm')
-    } else if (typeof (mod as any)?.init === 'function') {
-      await (mod as any).init('/wasm/hook_transpiler_bg.wasm')
+      await mod.default()
+      console.log('[hookWasm] WASM initialization complete')
+    } else {
+      throw new Error('WASM module missing default export (init function)')
     }
-    const transpileFn = (mod as any)?.transpile_jsx || (mod as any)?.transpileJsx
+
+    // Get the transpile_jsx function
+    const transpileFn = mod?.transpile_jsx
     if (typeof transpileFn !== 'function') {
-      throw new Error('hook-transpiler wasm: transpile_jsx export not found')
+      throw new Error(`transpile_jsx export not found. Available: ${Object.keys(mod).join(', ')}`)
     }
-    ;(globalThis as any).__hook_transpile_jsx = transpileFn
-    console.log('[hookWasm] Hook transpiler WASM ready')
+
+    // Get the version
+    const versionFn = mod?.get_version
+    const version = typeof versionFn === 'function' ? versionFn() : 'unknown'
+
+    // Bind to globalThis for use by runtimeLoader.ts
+    ;(globalThis as any).__hook_transpile_jsx = transpileFn.bind(mod)
+    ;(globalThis as any).__hook_transpiler_version = version
+    console.log('[hookWasm] Hook transpiler WASM ready - v' + version + ' - transpile_jsx available')
   } catch (e) {
     console.error('[hookWasm] Failed to load hook-transpiler WASM:', e)
     throw e

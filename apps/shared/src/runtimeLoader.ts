@@ -286,11 +286,23 @@ export async function transpileCode(
   // STRICT MODE: Disable SWC/Babel/server fallbacks.
   // Only use the new Rust crate WASM binding if available on the page.
   // The web app must load the crate and expose globalThis.__hook_transpile_jsx(source, filename) => string
+  
+  console.log('[transpileCode] *** TRANSPILE CODE CALLED ***', {filename: options.filename || 'module.tsx', codeLength: code.length})
+  
   const filename = options.filename || 'module.tsx'
   const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : {})
   const wasmTranspile: any = g.__hook_transpile_jsx
+  const version = g.__hook_transpiler_version || 'unknown'
+  
   if (typeof wasmTranspile !== 'function') {
-    throw new Error('HookTranspiler WASM not loaded: expected globalThis.__hook_transpile_jsx(source, filename)')
+    const availableKeys = Object.keys(g).filter(k => k.startsWith('__')).join(', ')
+    console.error('[transpileCode] WASM not ready:', {
+      hasGlobalThis: typeof globalThis !== 'undefined',
+      hasHook: '__hook_transpile_jsx' in g,
+      type: typeof wasmTranspile,
+      globalKeys: availableKeys || '(none)'
+    })
+    throw new Error(`HookTranspiler WASM not loaded (v${version}): expected globalThis.__hook_transpile_jsx(source, filename)`)
   }
 
   // Extract JSX pragma (default to h / React.Fragment)
@@ -303,10 +315,62 @@ export async function transpileCode(
   const preamble = ``
   const codeWithPreamble = preamble + code
 
-  const out = await wasmTranspile(codeWithPreamble, filename)
+  console.log('[transpileCode] Calling WASM transpiler for', filename, '(' + codeWithPreamble.length + ' bytes)')
+  
+  // DEBUG: Check if function is actually callable
+  let out: any;
+  try {
+    out = await wasmTranspile(codeWithPreamble, filename)
+  } catch (callError) {
+    console.error('[transpileCode] WASM call threw exception:', callError)
+    throw callError
+  }
+  
+  console.log('[transpileCode] WASM transpilation returned', out.length, 'bytes')
+  
+  // Log first 200 chars to see if transpilation happened
+  const sample = out.substring(0, 200);
+  console.log('[transpileCode] Output sample:', sample)
+  
+  // IMPORTANT: Log larger sample for debugging
+  const largeSample = out.substring(0, 1500);
+  if (!largeSample.includes('TranspileError') && !largeSample.includes('<')) {
+    console.log('[transpileCode] First 1500 chars (transpilation successful):', largeSample);
+  } else if (largeSample.includes('<')) {
+    console.warn('[transpileCode] WARNING: First 1500 chars STILL CONTAINS JSX:', largeSample.substring(0, 800));
+  }
+  
   if (typeof out !== 'string') {
     throw new Error('HookTranspiler returned non-string output')
   }
+  
+  // Check if WASM returned a transpilation error
+  if (out.startsWith('TranspileError:')) {
+    const errorMsg = `${out} (v${version})`
+    console.error('[transpileCode] JSX transpilation failed:', {
+      filename,
+      inputSize: code.length,
+      errorMessage: errorMsg,
+      codePreview: code.substring(0, 200)
+    })
+    // Make transpiled code available for debugging
+    ;(globalThis as any).__lastTranspiledCode = out
+    ;(globalThis as any).__lastTranspileError = errorMsg
+    throw new Error(errorMsg)
+  }
+  
+  // Store transpiled code for debugging
+  ;(globalThis as any).__lastTranspiledCode = out
+  
+  // Check if output still has JSX syntax (< followed by uppercase letter)
+  const stillHasJsx = /<[A-Z]/.test(out);
+  if (stillHasJsx) {
+    console.warn('[transpileCode] WARNING: Output still contains JSX syntax! Transpilation may have failed silently.');
+    console.warn('[transpileCode] Transpiled code available at: window.__lastTranspiledCode');
+  } else if (out.includes('h(')) {
+    console.log('[transpileCode] ✓ Output contains h() calls - transpilation successful')
+  }
+  
   // Rewrite dynamic import() to helpers.loadModule()
   const rewritten = out.replace(/\bimport\s*\(/g, 'context.helpers.loadModule(')
   return rewritten + `\n//# sourceURL=${filename}`
@@ -430,11 +494,22 @@ export class HookLoader {
         mod = await this.moduleLoader.executeModule(finalCode, normalizedPath, context)
       } catch (execErr) {
         const execMsg = (execErr as any)?.message || String(execErr)
+        const syntaxMatch = execMsg.match(/Unexpected token|missing \)|SyntaxError/)
         const diag: LoaderDiagnostics = {
           phase: 'import',
           error: execMsg,
-          details: { filename: normalizedPath }
+          details: {
+            filename: normalizedPath,
+            isSyntaxError: !!syntaxMatch,
+            transpilerVersion: (globalThis as any).__hook_transpiler_version || 'unknown'
+          }
         }
+        console.error('[RuntimeLoader] Module execution failed:', {
+          filename: normalizedPath,
+          error: execMsg,
+          isSyntaxError: !!syntaxMatch,
+          transpilerVersion: (globalThis as any).__hook_transpiler_version
+        })
         this.onDiagnostics(diag)
         throw execErr
       }

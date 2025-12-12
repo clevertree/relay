@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM Init Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .log { margin: 5px 0; padding: 5px; background: #f5f5f5; border-left: 3px solid #ccc; }
+        .success { border-left-color: green; }
+        .error { border-left-color: red; color: red; }
+        .info { border-left-color: blue; color: blue; }
+    </style>
+</head>
+<body>
+    <h1>WASM Initialization Test</h1>
+    <div id="logs"></div>
+
+    <script>
+        const logsDiv = document.getElementById('logs');
+        
+        function log(msg, type = 'info') {
+            console.log('[TEST]', msg);
+            const div = document.createElement('div');
+            div.className = 'log ' + type;
+            div.textContent = msg;
+            logsDiv.appendChild(div);
+        }
+
+        async function test() {
+            try {
+                log('Starting WASM init test...', 'info');
+                
+                // Manually test what hookTranspilerWasm.ts does
+                log('Step 1: Importing ./src/wasm/hook_transpiler.js', 'info');
+                const mod = await import('/src/wasm/hook_transpiler.js');
+                log('✓ Module imported. Keys: ' + Object.keys(mod).join(', '), 'success');
+                
+                log('Step 2: Checking for default export (init function)', 'info');
+                if (typeof mod.default !== 'function') {
+                    throw new Error('No default export found');
+                }
+                log('✓ Default export is a function', 'success');
+                
+                log('Step 3: Calling default() to initialize WASM', 'info');
+                const initResult = await mod.default();
+                log('✓ Initialization complete. Result: ' + JSON.stringify(initResult), 'success');
+                
+                log('Step 4: Checking for transpile_jsx export', 'info');
+                if (typeof mod.transpile_jsx !== 'function') {
+                    throw new Error('transpile_jsx not found. Available: ' + Object.keys(mod).join(', '));
+                }
+                log('✓ transpile_jsx is available', 'success');
+                
+                log('Step 5: Testing transpile_jsx with JSX code', 'info');
+                const testCode = 'const x = <h1>Hello</h1>;';
+                const result = mod.transpile_jsx(testCode, 'test.jsx');
+                log('Input: ' + testCode, 'info');
+                log('Output: ' + result, 'info');
+                
+                if (result.includes('h(')) {
+                    log('✓ JSX was transpiled to h() call', 'success');
+                } else if (result.startsWith('TranspileError:')) {
+                    log('✗ Transpilation error: ' + result, 'error');
+                } else {
+                    log('⚠ Output does not contain h() - might be unchanged?', 'error');
+                }
+                
+                log('Step 6: Binding to globalThis', 'info');
+                globalThis.__hook_transpile_jsx = mod.transpile_jsx.bind(mod);
+                log('✓ Bound to globalThis.__hook_transpile_jsx', 'success');
+                
+                log('Step 7: Testing via globalThis', 'info');
+                const result2 = globalThis.__hook_transpile_jsx('<App />', 'app.jsx');
+                log('transpile_jsx("<App />") = ' + result2, 'info');
+                
+                if (result2.includes('h(')) {
+                    log('✓ WASM initialization fully successful!', 'success');
+                } else {
+                    log('✗ Something went wrong', 'error');
+                }
+                
+            } catch (e) {
+                log('ERROR: ' + e.message, 'error');
+                console.error(e);
+            }
+        }
+
+        test();
+    </script>
+</body>
+</html>
