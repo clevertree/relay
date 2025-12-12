@@ -1,3 +1,4 @@
+use hook_transpiler::{transpile, TranspileError, TranspileOptions, version as transpiler_version};
 
 // IPFS CLI commands removed; IPFS logic is delegated to repo scripts
 
@@ -1486,6 +1487,18 @@ async fn get_file(
     } else {
         repo_name = repo_name_opt.unwrap();
     }
+    let normalized_path = decoded.trim_start_matches('/').to_string();
+
+    if should_transpile_request(&headers, &query)
+        && is_transpilable_hook_path(&normalized_path)
+    {
+        if let Some(transpiled) =
+            transpile_hook_file(&state.repo_path, &branch, &repo_name, &normalized_path)
+        {
+            return transpiled;
+        }
+    }
+
     info!(%branch, "resolved branch");
 
     // Resolve via Git first for all file types
@@ -2079,6 +2092,141 @@ fn read_file_from_repo(
     Ok(blob.content().to_vec())
 }
 
+fn parse_bool_like(value: &str) -> bool {
+    matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
+fn should_transpile_request(
+    headers: &HeaderMap,
+    query: &Option<Query<HashMap<String, String>>>,
+) -> bool {
+    if let Some(q) = query {
+        if let Some(val) = q.get("transpile") {
+            if parse_bool_like(val) {
+                return true;
+            }
+        }
+    }
+    if let Some(header) = headers.get("x-relay-transpile").and_then(|v| v.to_str().ok()) {
+        if parse_bool_like(header) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_transpilable_hook_path(path: &str) -> bool {
+    let normalized = path.trim_start_matches('/').to_ascii_lowercase();
+    if !normalized.starts_with("hooks/") {
+        return false;
+    }
+    normalized.ends_with(".jsx")
+        || normalized.ends_with(".tsx")
+        || normalized.ends_with(".ts")
+        || normalized.ends_with(".mts")
+        || normalized.ends_with(".mjs")
+}
+
+fn add_transpiler_version_header(resp: &mut Response) {
+    if let Ok(val) = axum::http::HeaderValue::from_str(transpiler_version()) {
+        resp.headers_mut().insert(
+            axum::http::header::HeaderName::from_static("x-relay-transpiler-version"),
+            val,
+        );
+    }
+}
+
+fn map_transpile_error(err: TranspileError) -> (StatusCode, String) {
+    match err {
+        TranspileError::ParseError {
+            filename,
+            line,
+            col,
+            message,
+        } => (
+            StatusCode::BAD_REQUEST,
+            format!("Parse error in {} at {}:{} — {}", filename, line, col, message),
+        ),
+        TranspileError::TransformError(filename, source) => (
+            StatusCode::BAD_REQUEST,
+            format!("Transform error in {} — {}", filename, source),
+        ),
+        TranspileError::CodegenError(filename, source) => (
+            StatusCode::BAD_REQUEST,
+            format!("Code generation error in {} — {}", filename, source),
+        ),
+    }
+}
+
+fn build_transpile_error_response(
+    err: TranspileError,
+    branch: Option<&str>,
+    repo: Option<&str>,
+) -> Response {
+    let (status, diag) = map_transpile_error(err);
+    let mut resp = (
+        status,
+        Json(TranspileResponse {
+            code: None,
+            map: None,
+            diagnostics: Some(diag),
+            ok: false,
+        }),
+    )
+        .into_response();
+    let headers = resp.headers_mut();
+    if let Some(branch_value) = branch {
+        if let Ok(val) = axum::http::HeaderValue::from_str(branch_value) {
+            headers.insert(HEADER_BRANCH, val);
+        }
+    }
+    if let Some(repo_value) = repo {
+        if let Ok(val) = axum::http::HeaderValue::from_str(repo_value) {
+            headers.insert(HEADER_REPO, val);
+        }
+    }
+    add_transpiler_version_header(&mut resp);
+    resp
+}
+
+fn transpile_hook_file(
+    repo_path: &PathBuf,
+    branch: &str,
+    repo_name: &str,
+    normalized_path: &str,
+) -> Option<Response> {
+    let source_bytes = read_file_from_repo(repo_path, branch, normalized_path).ok()?;
+    let source = String::from_utf8(source_bytes).ok()?;
+    let filename = std::path::Path::new(normalized_path)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .map(|s| s.to_string());
+    let opts = TranspileOptions {
+        filename,
+        react_dev: cfg!(debug_assertions),
+        to_commonjs: false,
+        pragma: Some("h".to_string()),
+        pragma_frag: None,
+    };
+    match transpile(&source, opts) {
+        Ok(out) => {
+            let mut resp = (
+                StatusCode::OK,
+                [
+                    ("Content-Type", "text/javascript".to_string()),
+                    (HEADER_BRANCH, branch.to_string()),
+                    (HEADER_REPO, repo_name.to_string()),
+                ],
+                out.code,
+            )
+                .into_response();
+            add_transpiler_version_header(&mut resp);
+            Some(resp)
+        }
+        Err(err) => Some(build_transpile_error_response(err, Some(branch), Some(repo_name))),
+    }
+}
+
 fn render_directory_markdown(tree: &git2::Tree, base_path: &str) -> Vec<u8> {
     let mut lines: Vec<String> = Vec::new();
     let title_path = if base_path.is_empty() {
@@ -2443,31 +2591,20 @@ async fn post_transpile(Json(req): Json<TranspileRequest>) -> impl IntoResponse 
         pragma_frag: None,
     };
     match transpile(&req.code, opts) {
-        Ok(out) => (
-            StatusCode::OK,
-            Json(TranspileResponse { code: Some(out.code), map: out.map, diagnostics: None, ok: true }),
-        )
-            .into_response(),
-        Err(e) => {
-            let (status, diag) = match e {
-                TranspileError::ParseError { filename, line, col, message } => (
-                    StatusCode::BAD_REQUEST,
-                    format!("Parse error in {} at {}:{} — {}", filename, line, col, message),
-                ),
-                TranspileError::TransformError(filename, err) => (
-                    StatusCode::BAD_REQUEST,
-                    format!("Transform error in {} — {}", filename, err),
-                ),
-                TranspileError::CodegenError(filename, err) => (
-                    StatusCode::BAD_REQUEST,
-                    format!("Code generation error in {} — {}", filename, err),
-                ),
-            };
-            (
-                status,
-                Json(TranspileResponse { code: None, map: None, diagnostics: Some(diag), ok: false }),
+        Ok(out) => {
+            let mut resp = (
+                StatusCode::OK,
+                Json(TranspileResponse {
+                    code: Some(out.code),
+                    map: out.map,
+                    diagnostics: None,
+                    ok: true,
+                }),
             )
-                .into_response()
+                .into_response();
+            add_transpiler_version_header(&mut resp);
+            resp
         }
+        Err(err) => build_transpile_error_response(err, None, None),
     }
 }

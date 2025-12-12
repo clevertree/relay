@@ -1,3 +1,4 @@
+import React from 'react'
 import { useAppState } from '../state/store'
 
 interface TabBarProps {
@@ -17,38 +18,64 @@ export function TabBar({ onTabChange }: TabBarProps) {
     onTabChange?.(tabId)
   }
 
-  const handleCloseTab = (e: React.MouseEvent, tabId: string) => {
-    e.stopPropagation()
+  const handleCloseTab = (event: React.MouseEvent<HTMLButtonElement>, tabId: string) => {
+    event.stopPropagation()
     closeTab(tabId)
+  }
+
+  const handleSettingsClick = () => {
+    setActiveTab('settings')
+    onTabChange?.('settings')
   }
 
   return (
     <div className="border-b border-gray-300 dark:border-gray-700 overflow-x-auto overflow-y-hidden">
       <div className="flex gap-1 p-0 min-h-11 items-center">
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={`flex items-center gap-2 px-4 py-2 border border-gray-300 border-b-2 rounded-t-lg cursor-pointer transition-all flex-shrink-0 min-w-32 max-w-60 ${
-              activeTabId === tab.id
-                ? 'border-b-blue-500 font-semibold'
-                : 'border-b-transparent hover:bg-gray-200 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-600'
-            }`}
-            onClick={() => handleTabClick(tab.id)}
-          >
-            <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-gray-900 dark:text-gray-100" title={tab.title}>
-              {tab.title}
-            </span>
-            {!tab.isHome && (
-              <button
-                className="bg-none border-none text-xl cursor-pointer text-gray-500 dark:text-gray-400 p-0 w-6 h-6 flex items-center justify-center rounded transition-all flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-300"
-                onClick={(e) => handleCloseTab(e, tab.id)}
-                aria-label="Close tab"
+        <div className="flex gap-1">
+          {tabs.map((tab) => {
+            const isActive = tab.id === activeTabId
+            return (
+              <div
+                key={tab.id}
+                className={`flex items-center gap-2 px-4 py-2 border border-gray-300 border-b-2 rounded-t-lg cursor-pointer transition-all flex-shrink-0 min-w-32 max-w-60 ${
+                  isActive
+                    ? 'border-b-blue-500 font-semibold bg-white dark:bg-gray-900'
+                    : 'border-b-transparent hover:bg-gray-200 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-600'
+                }`}
+                onClick={() => handleTabClick(tab.id)}
               >
-                ×
-              </button>
-            )}
-          </div>
-        ))}
+                <span
+                  className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-gray-900 dark:text-gray-100"
+                  title={tab.title}
+                >
+                  {tab.title}
+                </span>
+                {!tab.isHome && (
+                  <button
+                    className="border-none bg-transparent text-xl cursor-pointer text-gray-500 dark:text-gray-400 p-0 w-6 h-6 flex items-center justify-center rounded transition-all flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-300"
+                    onClick={(event) => handleCloseTab(event, tab.id)}
+                    aria-label="Close tab"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <div className="ml-auto flex items-center pr-2">
+          <button
+            type="button"
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition border ${
+              activeTabId === 'settings'
+                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                : 'border-transparent text-gray-600 hover:border-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+            onClick={handleSettingsClick}
+          >
+            Settings
+          </button>
+        </div>
       </div>
     </div>
   )

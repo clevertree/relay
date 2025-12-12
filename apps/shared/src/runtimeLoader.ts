@@ -30,11 +30,13 @@ export interface TransformResult {
 /**
  * Context passed to executed hooks
  */
+export type ComponentType<P = any> = (props: P) => any
+
 export interface HookContext {
   React: any
   createElement: any
-  FileRenderer: React.ComponentType<{ path: string }>
-  Layout?: React.ComponentType<any>
+  FileRenderer: ComponentType<{ path: string }>
+  Layout?: ComponentType<any>
   params: Record<string, any>
   helpers: HookHelpers
 }
@@ -113,7 +115,7 @@ try {
           // Basic require shim for web
           if (spec === 'react') {
             // eslint-disable-next-line no-undef
-            return window.React || {}
+            return (window as any).React || {}
           }
           return {}
         },
@@ -395,6 +397,7 @@ export interface HookLoaderOptions {
   moduleLoader: ModuleLoader
   transpiler?: (code: string, filename: string) => Promise<string>
   onDiagnostics?: (diag: LoaderDiagnostics) => void
+  allowServerFallback?: boolean
 }
 
 export class HookLoader {
@@ -404,6 +407,7 @@ export class HookLoader {
   private transpiler?: (code: string, filename: string) => Promise<string>
   private onDiagnostics: (diag: LoaderDiagnostics) => void
   private moduleCache: Map<string, any> = new Map()
+  private allowServerFallback: boolean
 
   constructor(options: HookLoaderOptions) {
     this.host = options.host
@@ -411,6 +415,60 @@ export class HookLoader {
     this.moduleLoader = options.moduleLoader
     this.transpiler = options.transpiler
     this.onDiagnostics = options.onDiagnostics || (() => {})
+    this.allowServerFallback = options.allowServerFallback ?? false
+  }
+
+  private buildRequestHeaders(context: HookContext): Record<string, string> {
+    const builder = context?.helpers?.buildRepoHeaders
+    if (!builder) return {}
+    return { ...builder() }
+  }
+
+  private appendTranspileParam(url: string): string {
+    if (url.includes('?')) {
+      return `${url}&transpile=1`
+    }
+    return `${url}?transpile=1`
+  }
+
+  private hasTranspilerLoadFailure(err?: unknown): boolean {
+    const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : {})
+    if (g.__hook_transpiler_error) {
+      return true
+    }
+    const msg = err instanceof Error ? err.message : String(err || '')
+    return msg.includes('HookTranspiler WASM not loaded') || msg.includes('HookTranspiler returned non-string output')
+  }
+
+  private shouldUseServerFallback(err?: unknown): boolean {
+    if (!this.allowServerFallback) return false
+    return this.hasTranspilerLoadFailure(err)
+  }
+
+  private async requestServerTranspiledCode(
+    url: string,
+    normalizedPath: string,
+    context: HookContext
+  ): Promise<string> {
+    const transpileUrl = this.appendTranspileParam(url)
+    const headers = {
+      ...this.buildRequestHeaders(context),
+      'x-relay-transpile': '1',
+    }
+    const resp = await fetch(transpileUrl, { headers })
+    const body = await resp.text()
+    if (!resp.ok) {
+      throw new Error(
+        `Server transpiler failed for ${normalizedPath}: ${resp.status} ${resp.statusText} — ${body}`
+      )
+    }
+    const ct = (resp.headers.get('content-type') || '').toLowerCase()
+    if (!ct.includes('javascript')) {
+      throw new Error(
+        `Server transpiler returned unexpected content type for ${normalizedPath}: ${ct}`
+      )
+    }
+    return body
   }
 
   /**
@@ -452,9 +510,11 @@ export class HookLoader {
     }
 
     const moduleUrl = `${this.protocol}://${this.host}${normalizedPath}`
+    const requestHeaders = this.buildRequestHeaders(context)
+    const fetchOptions = Object.keys(requestHeaders).length ? { headers: requestHeaders } : undefined
 
     try {
-      const response = await fetch(moduleUrl)
+      const response = await fetch(moduleUrl, fetchOptions)
       if (!response.ok) {
         throw new Error(`ModuleLoadError: ${moduleUrl} → ${response.status} ${response.statusText}`)
       }
@@ -472,7 +532,7 @@ export class HookLoader {
         try {
           finalCode = await transpileCode(
             code,
-            { filename: normalizedPath.split('/').pop() || 'module.tsx' },
+            { filename: normalizedPath },
             false // Web uses import, not CommonJS
           )
         } catch (err) {
@@ -482,9 +542,22 @@ export class HookLoader {
             error: msg,
             details: { moduleUrl, filename: normalizedPath, ...(err as any) }
           }
-          this.onDiagnostics(diag)
-          // Do NOT execute raw JSX; surface a clear error to the caller/UI
-          throw new Error(`TranspileError: ${normalizedPath}: ${msg}`)
+          if (this.shouldUseServerFallback(err)) {
+            diag.details = { ...diag.details, fallback: 'server' }
+            this.onDiagnostics(diag)
+            try {
+              finalCode = await this.requestServerTranspiledCode(moduleUrl, normalizedPath, context)
+            } catch (fallbackErr) {
+              const fallbackMsg = (fallbackErr as any)?.message || String(fallbackErr)
+              diag.error = fallbackMsg
+              this.onDiagnostics(diag)
+              throw fallbackErr
+            }
+          } else {
+            this.onDiagnostics(diag)
+            // Do NOT execute raw JSX; surface a clear error to the caller/UI
+            throw new Error(`TranspileError: ${normalizedPath}: ${msg}`)
+          }
         }
       }
 
@@ -534,13 +607,15 @@ export class HookLoader {
       diag.phase = 'fetch'
       const hookUrl = `${this.protocol}://${this.host}${hookPath}`
       console.debug(`[HookLoader] Fetching hook from: ${hookUrl}`)
+      const requestHeaders = this.buildRequestHeaders(context)
+      const fetchOptions = Object.keys(requestHeaders).length ? { headers: requestHeaders } : undefined
 
       let response: Response
       let code: string
       
       try {
         // Try fetch with a timeout using XMLHttpRequest as fallback
-        response = await fetch(hookUrl)
+        response = await fetch(hookUrl, fetchOptions)
         code = await response.text()
       } catch (fetchErr) {
         console.error('[HookLoader] Fetch failed, got error immediately:', fetchErr)
@@ -574,18 +649,36 @@ export class HookLoader {
           
           // Use custom transpiler if provided (e.g., for React Native with CommonJS conversion)
           if (this.transpiler) {
-            finalCode = await this.transpiler(code, hookPath.split('/').pop() || 'hook.tsx')
+            finalCode = await this.transpiler(code, hookPath)
           } else {
             finalCode = await transpileCode(
               code,
-              { filename: hookPath.split('/').pop() || 'hook.tsx', hasJsxPragma: /@jsx\s+h/m.test(code) },
+              { filename: hookPath, hasJsxPragma: /@jsx\s+h/m.test(code) },
               false // Web uses dynamic import
             )
           }
           console.debug(`[HookLoader] Transpilation complete (${finalCode.length} chars)`)
         } catch (err) {
-          console.warn('[HookLoader] JSX transpilation failed, trying raw:', err)
-          diag.transpileWarn = err instanceof Error ? err.message : String(err)
+          const msg = (err as any)?.message || String(err)
+          console.warn('[HookLoader] JSX transpilation failed', { hookPath, error: msg })
+          diag.transpileWarn = msg
+          diag.details = { ...(diag.details || {}), filename: hookPath }
+          if (this.shouldUseServerFallback(err)) {
+            diag.details.fallback = 'server'
+            this.onDiagnostics(diag)
+            try {
+              finalCode = await this.requestServerTranspiledCode(hookUrl, hookPath, context)
+            } catch (fallbackErr) {
+              const fallbackMsg = (fallbackErr as any)?.message || String(fallbackErr)
+              diag.error = fallbackMsg
+              this.onDiagnostics(diag)
+              throw fallbackErr
+            }
+          } else {
+            diag.error = msg
+            this.onDiagnostics(diag)
+            throw new Error(`TranspileError: ${hookPath}: ${msg}`)
+          }
         }
       }
 
