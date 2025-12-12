@@ -17,3 +17,8 @@ pub fn transpile_jsx(source: &str, filename: &str) -> String {
         Err(err) => format!("TranspileError: {}", err),
     }
 }
+
+#[wasm_bindgen]
+pub fn get_version() -> String {
+    hook_transpiler::version().to_string()
+}

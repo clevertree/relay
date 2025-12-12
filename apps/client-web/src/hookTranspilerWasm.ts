@@ -5,8 +5,6 @@
 // and the JS glue to be available for import from /wasm/hook_transpiler.js (or similar).
 // For dev, you can place the generated files under apps/client-web/public/wasm/.
 
-declare const global: any
-
 export async function initHookTranspilerWasm(): Promise<void> {
   if ((globalThis as any).__hook_transpile_jsx) {
     console.log('[hookWasm] WASM already initialized')
@@ -42,7 +40,10 @@ export async function initHookTranspilerWasm(): Promise<void> {
     ;(globalThis as any).__hook_transpile_jsx = transpileFn.bind(mod)
     ;(globalThis as any).__hook_transpiler_version = version
     console.log('[hookWasm] Hook transpiler WASM ready - v' + version + ' - transpile_jsx available')
+    delete (globalThis as any).__hook_transpiler_error
   } catch (e) {
+    const error = e instanceof Error ? e : new Error(String(e))
+    ;(globalThis as any).__hook_transpiler_error = error
     console.error('[hookWasm] Failed to load hook-transpiler WASM:', e)
     throw e
   }
