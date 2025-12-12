@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import * as Babel from '@babel/standalone'
+import { useRNTranspilerSetting } from '../state/transpilerSettings'
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl } from '../../../shared/src'
 
 const styles = StyleSheet.create({
@@ -99,6 +100,8 @@ interface TestResult {
 export default function DebugTab() {
   const [results, setResults] = useState<Record<string, TestResult>>({})
   const [loading, setLoading] = useState<string | null>(null)
+  const mode = useRNTranspilerSetting((s) => s.mode)
+  const setMode = useRNTranspilerSetting((s) => s.setMode)
 
   // Log when DebugTab renders
   React.useEffect(() => {
@@ -108,6 +111,39 @@ export default function DebugTab() {
   const updateResult = (testName: string, result: TestResult) => {
     setResults(prev => ({ ...prev, [testName]: result }))
   }
+
+  // Single client-side transpiler test (JSX -> CommonJS via Babel in RN)
+  const runClientTranspilerTest = useCallback(async () => {
+    const testName = 'clientTranspiler'
+    setLoading(testName)
+    updateResult(testName, { status: 'pending', message: 'Transpiling JSX in-client (RN)...' })
+    try {
+      const source = `
+        import React from 'react'
+        export default function Demo(){ return <View><Text>Hi</Text></View> }
+      `
+      const out = Babel.transform(source, {
+        filename: 'demo.jsx',
+        presets: [['env', { modules: 'commonjs' }], 'react'],
+      }).code || ''
+      if (!/module\.exports/.test(out) && !/exports\./.test(out)) {
+        throw new Error('Output is not CommonJS')
+      }
+      updateResult(testName, {
+        status: 'success',
+        message: 'Client-side transpiler produced CommonJS output',
+        details: out.substring(0, 300) + (out.length > 300 ? '...':'')
+      })
+    } catch (e: any) {
+      updateResult(testName, {
+        status: 'error',
+        message: 'Client-side transpiler failed',
+        details: e?.message || String(e),
+      })
+    } finally {
+      setLoading(null)
+    }
+  }, [])
 
   // Test 1: SSL/HTTPS Certificate Check
   const testSSL = useCallback(async () => {
@@ -452,8 +488,100 @@ export default function DebugTab() {
     )
   }
 
+  // Simplified Debug tab per requirements: only settings and a single client transpiler test
+  if (true) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+        {/* Settings: switch transpiler mode (client/server) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>⚙️ Transpiler Settings</Text>
+          <Text style={styles.resultText}>Choose which transpiler path to use in React Native.</Text>
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+            <TouchableOpacity
+              style={[styles.testButton, mode === 'client' ? {} : styles.testButtonDisabled]}
+              onPress={() => setMode('client')}
+            >
+              <Text style={styles.testButtonText}>Client (default)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.testButton, mode === 'server' ? {} : styles.testButtonDisabled]}
+              onPress={() => setMode('server')}
+            >
+              <Text style={styles.testButtonText}>Server</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={[styles.resultBox, styles.resultBoxSuccess]}>
+            <Text style={styles.resultText}>Current mode: {mode}</Text>
+          </View>
+        </View>
+
+        {/* Single client-side transpiler test */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🧪 Client Transpiler Test</Text>
+          <Text style={styles.resultText}>
+            Runs a small JSX snippet through the client-side transpiler (Babel in RN for now).
+          </Text>
+          <TouchableOpacity
+            style={[styles.testButton, loading === 'clientTranspiler' && styles.testButtonDisabled]}
+            onPress={runClientTranspilerTest}
+            disabled={loading === 'clientTranspiler'}
+          >
+            <Text style={styles.testButtonText}>
+              {loading === 'clientTranspiler' ? 'Transpiling...' : 'Run Client Transpiler Test'}
+            </Text>
+          </TouchableOpacity>
+          {results.clientTranspiler && (
+            <TestResult testName="clientTranspiler" result={results.clientTranspiler} />
+          )}
+        </View>
+      </ScrollView>
+    )
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      {/* Settings merge: allow switching transpiler mode (client/server) */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>⚙️ Transpiler Settings</Text>
+        <Text style={styles.resultText}>Choose which transpiler path to use in React Native.</Text>
+        <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+          <TouchableOpacity
+            style={[styles.testButton, mode === 'client' ? {} : styles.testButtonDisabled]}
+            onPress={() => setMode('client')}
+          >
+            <Text style={styles.testButtonText}>Client (default)</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.testButton, mode === 'server' ? {} : styles.testButtonDisabled]}
+            onPress={() => setMode('server')}
+          >
+            <Text style={styles.testButtonText}>Server</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={[styles.resultBox, styles.resultBoxSuccess]}>
+          <Text style={styles.resultText}>Current mode: {mode}</Text>
+        </View>
+      </View>
+
+      {/* Single client-side transpiler test */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🧪 Client Transpiler Test</Text>
+        <Text style={styles.resultText}>
+          Runs a small JSX snippet through the client-side transpiler (Babel in RN for now).
+        </Text>
+        <TouchableOpacity
+          style={[styles.testButton, loading === 'clientTranspiler' && styles.testButtonDisabled]}
+          onPress={runClientTranspilerTest}
+          disabled={loading === 'clientTranspiler'}
+        >
+          <Text style={styles.testButtonText}>
+            {loading === 'clientTranspiler' ? 'Transpiling...' : 'Run Client Transpiler Test'}
+          </Text>
+        </TouchableOpacity>
+        {results.clientTranspiler && (
+          <TestResult testName="clientTranspiler" result={results.clientTranspiler} />
+        )}
+      </View>
       {/* SSL Test */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>🔒 SSL/HTTPS Test</Text>

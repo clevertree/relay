@@ -9,7 +9,11 @@
   "scripts": {
     "start": "react-native start",
     "android": "react-native run-android",
-    "android:release": "cd android && gradlew.bat installRelease",
+    "android:assembleDebug": "cd android && ./gradlew assembleDebug",
+    "android:installDebug": "cd android && ./gradlew installDebug",
+    "android:assembleRelease": "cd android && ./gradlew assembleRelease",
+    "android:installRelease": "cd android && ./gradlew installRelease",
+    "android:release": "npm run android:assembleRelease && npm run android:installRelease",
     "ios": "react-native run-ios",
     "typecheck": "tsc --noEmit",
     "test": "jest"

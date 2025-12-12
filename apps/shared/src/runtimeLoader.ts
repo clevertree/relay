@@ -295,6 +295,31 @@ export async function transpileCode(
   const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : {})
   const wasmTranspile: any = g.__hook_transpile_jsx
   const version = g.__hook_transpiler_version || 'unknown'
+  const forceServer: boolean = !!g.__forceServerTranspile
+
+  // If Settings forces server-side transpiler, bypass WASM and call server
+  if (forceServer) {
+    try {
+      const resp = await fetch('/api/transpile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code, filename, to_common_js: false }),
+      } as any)
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => '')
+        throw new Error(`ServerTranspileError: ${resp.status} ${resp.statusText} ${txt}`)
+      }
+      const data: any = await resp.json()
+      if (!data?.ok || !data?.code) {
+        throw new Error(`ServerTranspileError: ${data?.diagnostics || 'unknown error'}`)
+      }
+      const out = String(data.code)
+      const rewritten = out.replace(/\bimport\s*\(/g, 'context.helpers.loadModule(')
+      return rewritten + `\n//# sourceURL=${filename}`
+    } catch (e) {
+      throw e
+    }
+  }
   
   if (typeof wasmTranspile !== 'function') {
     const availableKeys = Object.keys(g).filter(k => k.startsWith('__')).join(', ')
@@ -304,6 +329,30 @@ export async function transpileCode(
       type: typeof wasmTranspile,
       globalKeys: availableKeys || '(none)'
     })
+    // Optional server fallback when enabled via Settings
+    if ((g as any).__allowServerTranspile) {
+      console.warn('[transpileCode] WASM not ready; attempting server fallback /api/transpile')
+      try {
+        const resp = await fetch('/api/transpile', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code, filename, to_common_js: false }),
+        } as any)
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => '')
+          throw new Error(`ServerTranspileError: ${resp.status} ${resp.statusText} ${txt}`)
+        }
+        const data: any = await resp.json()
+        if (!data?.ok || !data?.code) {
+          throw new Error(`ServerTranspileError: ${data?.diagnostics || 'unknown error'}`)
+        }
+        const out = String(data.code)
+        const rewritten = out.replace(/\bimport\s*\(/g, 'context.helpers.loadModule(')
+        return rewritten + `\n//# sourceURL=${filename}`
+      } catch (e) {
+        console.error('[transpileCode] Server fallback failed:', e)
+      }
+    }
     throw new Error(`HookTranspiler WASM not loaded (v${version}): expected globalThis.__hook_transpile_jsx(source, filename)`)
   }
 
@@ -325,6 +374,30 @@ export async function transpileCode(
     out = await wasmTranspile(codeWithPreamble, filename)
   } catch (callError) {
     console.error('[transpileCode] WASM call threw exception:', callError)
+    // Optional server fallback when enabled
+    if ((g as any).__allowServerTranspile) {
+      console.warn('[transpileCode] Attempting server fallback due to WASM exception')
+      try {
+        const resp = await fetch('/api/transpile', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code, filename, to_common_js: false }),
+        } as any)
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => '')
+          throw new Error(`ServerTranspileError: ${resp.status} ${resp.statusText} ${txt}`)
+        }
+        const data: any = await resp.json()
+        if (!data?.ok || !data?.code) {
+          throw new Error(`ServerTranspileError: ${data?.diagnostics || 'unknown error'}`)
+        }
+        const out = String(data.code)
+        const rewritten = out.replace(/\bimport\s*\(/g, 'context.helpers.loadModule(')
+        return rewritten + `\n//# sourceURL=${filename}`
+      } catch (e) {
+        console.error('[transpileCode] Server fallback failed after WASM exception:', e)
+      }
+    }
     throw callError
   }
   
@@ -358,6 +431,30 @@ export async function transpileCode(
     // Make transpiled code available for debugging
     ;(globalThis as any).__lastTranspiledCode = out
     ;(globalThis as any).__lastTranspileError = errorMsg
+    // Optional server fallback for user-enabled path
+    if ((g as any).__allowServerTranspile) {
+      console.warn('[transpileCode] WASM returned TranspileError; attempting server fallback')
+      try {
+        const resp = await fetch('/api/transpile', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code, filename, to_common_js: false }),
+        } as any)
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => '')
+          throw new Error(`ServerTranspileError: ${resp.status} ${resp.statusText} ${txt}`)
+        }
+        const data: any = await resp.json()
+        if (!data?.ok || !data?.code) {
+          throw new Error(`ServerTranspileError: ${data?.diagnostics || 'unknown error'}`)
+        }
+        const out2 = String(data.code)
+        const rewritten = out2.replace(/\bimport\s*\(/g, 'context.helpers.loadModule(')
+        return rewritten + `\n//# sourceURL=${filename}`
+      } catch (e) {
+        console.error('[transpileCode] Server fallback failed after TranspileError:', e)
+      }
+    }
     throw new Error(errorMsg)
   }
   

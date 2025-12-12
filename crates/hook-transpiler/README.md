@@ -1,6 +1,6 @@
 # hook-transpiler — Rust Crate for Cross‑Platform JSX/TSX Transpiling and Loading
 
-Last updated: 2025-12-11 15:13 (local)
+Last updated: 2025-12-12 10:02 (local)
 
 ## Purpose
 Minimal, reliable transpiler used by Relay clients (web and React Native) to:
@@ -17,8 +17,9 @@ This crate is the foundation for client‑side (WASM) and server‑side transpil
 - Friendly error types implemented (parse/transform/codegen)
 - Initial unit tests included (JSX basics, dynamic import rewrite, minimal get‑client snippet)
 - Server fallback route implemented and calling this crate: `POST /api/transpile`
-- Client‑web wired for strict crate‑WASM usage (no SWC/Babel/server fallback while validating)
-- A separate isolated WASM crate for the browser is being aligned to `swc_core v50.x` APIs (in progress)
+- Client‑web wired for strict crate‑WASM usage (no SWC/Babel/server fallback while validating) — confirmed working
+- RN integration next: choose native binding approach (JSI) or use server fallback initially
+- A separate isolated WASM crate for the browser is aligned to `swc_core v50.x` APIs (in progress; usable subset already powering client‑web)
 
 ## Task List and Status
 
@@ -36,9 +37,9 @@ This crate is the foundation for client‑side (WASM) and server‑side transpil
 2. Web/WASM build (client‑first)
    - [x] Add build script to emit wasm + JS glue to client‑web public assets (`scripts/build-hook-wasm.sh`)
    - [x] Client‑web loader that initializes the WASM and exposes `globalThis.__hook_transpile_jsx`
-   - [ ] Align and finalize WASM build against `swc_core v50.x` (isolated browser crate) — in progress
-   - [ ] Add minimal wasm‑exposed API shape: `transpile_jsx(source, filename) -> { code, map?, diagnostics? }`
-   - [ ] Document WASM loading behavior and troubleshooting
+   - [*] Align and finalize WASM build against `swc_core v50.x` (isolated browser crate) — in progress
+   - [x] Minimal wasm‑exposed API shape: `transpile_jsx(source, filename) -> { code, map?, diagnostics? }`
+   - [x] Document WASM loading behavior and troubleshooting — see Release Validation doc
 
 3. Server fallback (apps/server)
    - [x] Implement `POST /api/transpile` endpoint invoking this crate
@@ -48,15 +49,21 @@ This crate is the foundation for client‑side (WASM) and server‑side transpil
 
 4. Client‑web integration (apps/client‑web)
    - [x] Strict mode using only crate‑WASM during bring‑up (no SWC/Babel/server fallback)
-   - [ ] Re‑enable server fallback after WASM is green (client‑first strategy)
+   - [x] Settings option to allow server fallback or force server‑only
+   - [*] Re‑enable server fallback after WASM is green (client‑first strategy) — available via Settings
    - [ ] Surface diagnostics in the UI where hooks are rendered
    - [ ] E2E test: load `get-client.jsx`, verify lazy imports route via `helpers.loadModule`
 
 5. Client‑React‑Native integration (apps/client‑react‑native)
-   - [ ] Use server endpoint initially for transpilation
+   - [ ] Decide native integration path (modern & efficient):
+     - [ ] Phase 1: Use server endpoint for reliability on all devices
+     - [ ] Phase 2: Add native JSI/TurboModule binding to Rust (C++ shim), compile crate as shared lib (.so/.a) via NDK/clang
+       - [ ] Android: cargo-ndk build, Gradle packaging, Hermes compatibility
+       - [ ] iOS: Xcode build settings, CocoaPods or Swift Package linking
+   - [ ] Expose minimal API to JS: `transpileJsx(source, filename) -> string | { code }`
    - [ ] Optionally request CommonJS output until ESM path is uniform
-   - [ ] Debug tab: run a small set of transpiler self‑tests and show diagnostics
-   - [ ] Explore RN‑side transpilation (WASM/JSI) if feasible (later)
+   - [ ] Replace Debug tab tests with a single “Client Transpiler Test”
+   - [ ] Settings toggle to choose Client vs Server transpiler (default: Client)
 
 6. Fetch handling utilities
    - [ ] Server/native: `reqwest` TLS‑enabled fetch helper (optional feature)
@@ -66,7 +73,19 @@ This crate is the foundation for client‑side (WASM) and server‑side transpil
 7. Documentation
    - [x] This README with tasks and status
    - [ ] Crate API examples and diagnostics format
+   - [x] Update READMEs: hook‑transpiler, client‑react‑native, client‑web, and project root with transpiler details
+   - [x] Release Validation guide: `docs/RELEASE_VALIDATION.md`
    - [ ] Migration notes for client‑web and RN
+
+8. Server GET fallback behavior (integration & tests)
+   - [x] Implement fallback option in server for GET that need transpile (route available)
+   - [ ] Ensure middleware/handlers invoke transpiler where appropriate
+   - [ ] Unit/integration tests for fallback path (success and diagnostics)
+
+9. Release & Distribution
+   - [ ] Android APK (release) build with RN client using the latest transpiler path
+   - [ ] Install on device and smoke‑test: load `get-client.jsx`, verify lazy `import()` via `helpers.loadModule`
+   - [ ] Document release steps and troubleshooting
 
 ## Build (Server/Native)
 This crate is part of the Cargo workspace. To build and run tests:
@@ -81,10 +100,11 @@ Artifacts are generated into the web app’s public folder so Vite can serve the
 
 ```bash
 # From repo root
+# Windows PowerShell
 npm run build:hook-wasm
 
-# Or explicitly
-scripts/build-hook-wasm.sh
+# Linux/macOS
+npm run build:hook-wasm:sh
 
 # Dev cycle (build then start web dev server)
 npm run web:dev:wasm
@@ -98,6 +118,8 @@ Client‑web loads these at startup via `apps/client-web/src/hookTranspilerWasm.
 ```
 globalThis.__hook_transpile_jsx(source: string, filename: string) => string | { code: string }
 ```
+
+See also: Release validation steps in `docs/RELEASE_VALIDATION.md`.
 
 ## Minimal Public API (Rust)
 The crate exposes a Rust API consumed by the server and unit tests:

@@ -2,23 +2,44 @@
 
 This is the React Native client for Relay. It targets Android and iOS first, with optional desktop later.
 
-Status: early scaffold. See `PLAN.md` for the full implementation plan and milestones.
+Status: Debug and Settings tabs are merged. The Debug tab contains a single "Client Transpiler Test". Transpiler mode toggle (Client/Server) is available.
 
-Quick start (UI only; no native modules yet):
+Quick start
 
-1. Install dependencies at repo root:
-   - Node.js >= 20, pnpm
-2. From repo root, run Metro or platform commands via pnpm filters:
-   - `pnpm rn:start` — start Metro
-   - `pnpm rn:android` — run on Android (requires generated `android/` project; TODO)
-   - `pnpm rn:ios` — run on iOS (requires generated `ios/` project; TODO)
+1. Install dependencies at the repo root (Node.js >= 20, Android SDK/adb for Android builds).
+2. From repo root, start Metro and run Android:
+   - `npm run rn:start` — start Metro
+   - `npm run rn:android` — run on Android (debug)
 
-Environment:
-- Master peer list is taken from a global `RN$RELAY_MASTER_PEER_LIST` (semicolon-separated, full URLs with scheme like `http://localhost:3000;https://node1.example.com`) if present, or defaults to emulator-localhost: `http://10.0.2.2:8080` (Android) / `http://localhost:8080` (iOS).
+Transpiler Modes
 
-Next steps:
-- Generate `android/` and `ios/` projects via React Native CLI (no Expo) and wire the Rust cdylib via JNI/Swift native modules.
-- Implement peers probing via the Rust core bridge.
+- Client (default): run a small JSX snippet on-device for diagnostics.
+- Server: POST `/api/transpile` to the connected server and execute returned CommonJS (`to_common_js=true`).
 
-References:
-- `apps/client-react-native/PLAN.md`
+You can toggle mode in the Debug tab under "Transpiler Settings".
+
+Release APK (Android)
+
+Devices are online and ready to accept APKs. Use the provided scripts to assemble and install the release build:
+
+```
+# Optional: start Metro in another terminal
+npm run rn:start
+
+# Build + install (requires adb)
+npm run rn:build:release
+
+# Alternatively:
+npm run rn:android:assembleRelease
+npm run rn:android:installRelease
+```
+
+If installation fails due to signing, configure signing in `apps/client-react-native/android/app/build.gradle` and re-run the install command.
+
+Environment
+
+Master peer list can be provided via a global `RN$RELAY_MASTER_PEER_LIST` (semicolon-separated URLs, e.g., `http://10.0.2.2:8080;https://node.example.com`). Defaults are emulator-localhost for Android (`http://10.0.2.2:8080`) and `http://localhost:8080` for iOS.
+
+See also
+
+- Release validation steps: `docs/RELEASE_VALIDATION.md`

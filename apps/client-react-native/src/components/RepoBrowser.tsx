@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import MarkdownRenderer from './MarkdownRenderer';
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl, buildRepoHeaders } from '../../../shared/src';
+import { useRNTranspilerSetting } from '../state/transpilerSettings'
 
 type OptionsInfo = {
   client?: { hooks?: { get?: { path: string }; query?: { path: string } } }
@@ -40,6 +41,7 @@ function useHookRenderer(host: string) {
   const optionsRef = useRef<OptionsInfo | null>(null)
   const hookLoaderRef = useRef<HookLoader | null>(null)
   const importHandlerRef = useRef<ES6ImportHandler | null>(null)
+  const transpilerMode = useRNTranspilerSetting((s) => s.mode)
 
   const normalizedHost = normalizeHostUrl(host)
   console.debug(`[useHookRenderer] initialized with host: ${host}, normalized: ${normalizedHost}`)
@@ -68,6 +70,28 @@ function useHookRenderer(host: string) {
         Array.from(firstChars.substring(0, 10)).map(c => c.charCodeAt(0)).join(', '))
       
       try {
+        // If settings prefer server transpiler, call server endpoint to transpile to CommonJS for RN
+        if (transpilerMode === 'server') {
+          const endpoint = `${normalizedHost.replace(/\/$/, '')}/api/transpile`
+          console.debug('[transpileWrapper] Using server transpiler at', endpoint)
+          const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ code, filename, to_common_js: true }),
+          } as any)
+          if (!resp.ok) {
+            const txt = await resp.text()
+            throw new Error(`Server transpile failed: ${resp.status} ${resp.statusText} ${txt}`)
+          }
+          const data: any = await resp.json()
+          if (!data?.ok || !data?.code) {
+            throw new Error(`Server transpile returned error: ${data?.diagnostics || 'unknown error'}`)
+          }
+          // Server already rewrites dynamic import() to helpers.loadModule()
+          console.debug('[transpileWrapper] Server transpile ok, code length:', data.code.length)
+          return String(data.code)
+        }
+
         // First, try to detect and fix encoding issues
         let sanitized = code
           .replace(/â€"/g, '—')

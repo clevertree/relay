@@ -14,6 +14,12 @@ const OPTIONS: Array<{ value: TranspilerSetting; label: string; description: str
     description:
       'If the WASM loader fails to initialize, request the server to transpile the hook instead. This is only executed when the local transpiler fails to load, not when a hook contains syntax problems.',
   },
+  {
+    value: 'server-only',
+    label: 'Force server-side transpiler',
+    description:
+      'Always call the server /api/transpile endpoint for hooks. Useful for validating server diagnostics and for environments where WASM is unavailable.',
+  },
 ]
 
 export function SettingsTab() {

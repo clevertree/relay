@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-type TranspilerSetting = 'client-only' | 'allow-server-fallback'
+type TranspilerSetting = 'client-only' | 'allow-server-fallback' | 'server-only'
 
 const STORAGE_KEY = 'relay_transpiler_setting'
 const DEFAULT_SETTING: TranspilerSetting = 'client-only'
@@ -11,9 +11,8 @@ function readStoredSetting(): TranspilerSetting {
   }
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY)
-    if (stored === 'allow-server-fallback') {
-      return 'allow-server-fallback'
-    }
+    if (stored === 'allow-server-fallback') return 'allow-server-fallback'
+    if (stored === 'server-only') return 'server-only'
   } catch (e) {
     console.warn('[transpilerSettings] Failed to read stored setting', e)
   }
@@ -44,6 +43,14 @@ export function useTranspilerSetting() {
     window.addEventListener('storage', handleStorage)
     return () => window.removeEventListener('storage', handleStorage)
   }, [])
+
+  // Reflect current setting to a global flag so shared runtime can honor it without React imports
+  useEffect(() => {
+    try {
+      ;(window as any).__allowServerTranspile = setting === 'allow-server-fallback'
+      ;(window as any).__forceServerTranspile = setting === 'server-only'
+    } catch {}
+  }, [setting])
 
   return {
     setting,

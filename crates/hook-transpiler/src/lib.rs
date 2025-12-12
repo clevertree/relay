@@ -7,6 +7,9 @@ use swc_core::ecma::parser::{lexer::Lexer, EsSyntax, Parser, StringInput, Syntax
 use swc_core::ecma::transforms::{base::resolver, react, typescript::strip as ts_strip};
 use swc_core::ecma::visit::{VisitMut, VisitMutWith};
 
+/// Returns the crate version as embedded at compile time.
+// version() already defined above
+
 #[derive(Debug, thiserror::Error)]
 pub enum TranspileError {
     #[error("Parse error in {filename} at {line}:{col} — {message}")]

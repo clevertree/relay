@@ -1,27 +1,3 @@
-# Relay - Distributed Repository Protocol Implementation
-
-A modern, cross-platform implementation of the Relay protocol for distributed file management, search, and content delivery. Built with React, TypeScript, and Rust.
-
-## Quick Start
-
-### Prerequisites
-- Node.js 18+ and npm (for local development)
-- Docker (for containerized deployment)
-
-### Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Start development server (Vite + template server via proxy)
-npm run web:dev:full
-
-# Run tests
-npm run test
-
-# Build for production
-npm run build
 ```
 
 ## Containerized Deployment (Nginx + Certbot, unified config)
@@ -347,3 +323,31 @@ See LICENSE file for details.
 - GitHub Issues: Report bugs and request features
 - Documentation: See `/docs/` directory
 - Vision Document: `/docs/relay_project_vision.md`
+
+## React Native (Android) — Build and Install Release APK
+
+Devices are online and ready to accept APKs. Use the provided scripts to assemble and install the Android release build:
+
+```bash
+# From repo root
+
+# 1) Start Metro in a separate terminal if needed
+npm run rn:start
+
+# 2) Build and install the release APK to a connected device (requires adb)
+npm run rn:build:release
+
+# Alternatively, run steps manually:
+npm run rn:android:assembleRelease
+npm run rn:android:installRelease
+```
+
+Notes:
+- If installation fails with an unsigned APK error, configure signing in `apps/client-react-native/android/app/build.gradle`.
+- The RN client includes a Settings toggle (in Debug tab) to choose Client or Server transpiler mode. Default is Client. Server mode posts to `/api/transpile` and executes returned CommonJS.
+
+## Release Validation
+
+For end-to-end validation steps across the hook-transpiler crate, server `/api/transpile`, client‑web (WASM and server modes), and React Native (Android) release APK, see:
+
+- docs/RELEASE_VALIDATION.md
