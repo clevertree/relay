@@ -19,6 +19,12 @@ import {useAppState} from './state/store';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { UpdateModal } from './components/UpdateModal';
 import { initNativeRustTranspiler } from './nativeRustTranspiler';
+import { NativeWindStyleSheet } from 'nativewind';
+
+// Ensure NativeWind outputs React Native StyleSheet objects at runtime
+NativeWindStyleSheet.setOutput({
+  default: 'native',
+});
 
 type RootStackParamList = {
   Main: undefined;

@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HOOK_CRATE_DIR="$ROOT_DIR/crates/hook-transpiler"
+CARGO_TARGET_DIR="$HOOK_CRATE_DIR/target"
+export CARGO_TARGET_DIR
 JNI_LIBS_DIR="$ROOT_DIR/apps/client-react-native/android/app/src/main/jniLibs"
 
 TARGETS=(
@@ -18,7 +20,7 @@ ABI_DIRS=(
 
 if ! command -v cargo-ndk >/dev/null 2>&1; then
   echo "[rn-prepare-hook-transpiler] cargo-ndk is not installed. Install it via 'cargo install cargo-ndk' and ensure Android targets are configured." >&2
-  exit 1
+  exit
 fi
 
 pushd "$HOOK_CRATE_DIR" >/dev/null
@@ -26,7 +28,10 @@ NDK_ARGS=()
 for target in "${TARGETS[@]}"; do
   NDK_ARGS+=("-t" "$target")
 done
-NDK_ARGS+=(build --release)
+# Enable the Android feature so JNI symbols are exported from the cdylib
+# Without this, the library loads but methods like
+# Java_com_relay_client_RustTranspilerModule_nativeTranspile are missing.
+NDK_ARGS+=(build --release --features android)
 
 cargo ndk "${NDK_ARGS[@]}"
 popd >/dev/null

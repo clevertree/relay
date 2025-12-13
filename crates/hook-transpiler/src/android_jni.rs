@@ -1,6 +1,6 @@
 use crate::{TranspileOptions, transpile, version};
 use jni::JNIEnv;
-use jni::objects::{JClass, JString};
+use jni::objects::{JObject, JString};
 use jni::sys::jstring;
 
 fn jstring_to_string(env: &mut JNIEnv, input: JString) -> Option<String> {
@@ -21,7 +21,7 @@ fn new_jstring(env: &mut JNIEnv, value: &str) -> jstring {
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_relay_client_RustTranspilerModule_nativeTranspile(
     mut env: JNIEnv,
-    _class: JClass,
+    _this: JObject,
     code: JString,
     filename: JString,
 ) -> jstring {
@@ -58,7 +58,7 @@ pub extern "C" fn Java_com_relay_client_RustTranspilerModule_nativeTranspile(
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_relay_client_RustTranspilerModule_nativeGetVersion(
     mut env: JNIEnv,
-    _class: JClass,
+    _this: JObject,
 ) -> jstring {
     new_jstring(&mut env, version())
 }
