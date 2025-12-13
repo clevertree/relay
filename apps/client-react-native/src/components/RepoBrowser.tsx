@@ -12,8 +12,9 @@ import {
   View,
 } from 'react-native';
 import MarkdownRenderer from './MarkdownRenderer';
+import { createHookReact } from './HookDomAdapter';
+import { HookErrorBoundary } from './HookErrorBoundary';
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl, buildRepoHeaders } from '../../../shared/src';
-import { useRNTranspilerSetting } from '../state/transpilerSettings'
 
 type OptionsInfo = {
   client?: { hooks?: { get?: { path: string }; query?: { path: string } } }
@@ -33,23 +34,31 @@ function normalizeHostUrl(host: string): string {
   return `https://${host}` // No port, assume https
 }
 
+const HookReact = createHookReact(React)
+
 function useHookRenderer(host: string) {
   const [element, setElement] = useState<React.ReactNode | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [details, setDetails] = useState<any>(null)
+  const [activeHookPath, setActiveHookPath] = useState<string | null>(null)
   const optionsRef = useRef<OptionsInfo | null>(null)
   const hookLoaderRef = useRef<HookLoader | null>(null)
   const importHandlerRef = useRef<ES6ImportHandler | null>(null)
-  const transpilerMode = useRNTranspilerSetting((s) => s.mode)
-
   const normalizedHost = normalizeHostUrl(host)
   console.debug(`[useHookRenderer] initialized with host: ${host}, normalized: ${normalizedHost}`)
 
   // Initialize hook loader with RN module executor
   useEffect(() => {
+    const jsxRuntimeShim = {
+      jsx: HookReact.createElement,
+      jsxs: HookReact.createElement,
+      jsxDEV: HookReact.createElement,
+    }
+
     const requireShim = (spec: string) => {
-      if (spec === 'react') return require('react')
+      if (spec === 'react') return HookReact
+      if (spec === 'react/jsx-runtime' || spec === 'react/jsx-dev-runtime') return jsxRuntimeShim
       return {}
     }
 
@@ -63,37 +72,13 @@ function useHookRenderer(host: string) {
     // transpileCode outputs ES6 modules, so we need to convert to CommonJS
     const transpileWrapper = async (code: string, filename: string): Promise<string> => {
       console.debug('[transpileWrapper] Input code length:', code.length, 'filename:', filename)
-      // Log first 50 chars and their char codes for debugging encoding issues
       const firstChars = code.substring(0, 50)
       console.debug('[transpileWrapper] First 50 chars:', firstChars)
-      console.debug('[transpileWrapper] First 10 char codes:', 
-        Array.from(firstChars.substring(0, 10)).map(c => c.charCodeAt(0)).join(', '))
-      
-      try {
-        // If settings prefer server transpiler, call server endpoint to transpile to CommonJS for RN
-        if (transpilerMode === 'server') {
-          const endpoint = `${normalizedHost.replace(/\/$/, '')}/api/transpile`
-          console.debug('[transpileWrapper] Using server transpiler at', endpoint)
-          const resp = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ code, filename, to_common_js: true }),
-          } as any)
-          if (!resp.ok) {
-            const txt = await resp.text()
-            throw new Error(`Server transpile failed: ${resp.status} ${resp.statusText} ${txt}`)
-          }
-          const data: any = await resp.json()
-          if (!data?.ok || !data?.code) {
-            throw new Error(`Server transpile returned error: ${data?.diagnostics || 'unknown error'}`)
-          }
-          // Server already rewrites dynamic import() to helpers.loadModule()
-          console.debug('[transpileWrapper] Server transpile ok, code length:', data.code.length)
-          return String(data.code)
-        }
+      console.debug('[transpileWrapper] First 10 char codes:',
+        Array.from(firstChars.substring(0, 10)).map((c) => c.charCodeAt(0)).join(', '))
 
-        // First, try to detect and fix encoding issues
-        let sanitized = code
+      const sanitizeEncoding = (input: string): string =>
+        input
           .replace(/â€"/g, '—')
           .replace(/â€œ/g, '"')
           .replace(/â€/g, '"')
@@ -103,93 +88,23 @@ function useHookRenderer(host: string) {
           .replace(/ΓÇ¥/g, '"')
           .replace(/ΓÇÖ/g, "'")
 
-        if (sanitized !== code) {
-          console.debug('[transpileWrapper] Fixed encoding issues, code length:', sanitized.length)
-          code = sanitized
-        }
+      let sanitizedCode = sanitizeEncoding(code)
+      if (sanitizedCode !== code) {
+        console.debug('[transpileWrapper] Fixed encoding issues, code length:', sanitizedCode.length)
+      }
 
-        // Decide whether the file looks like it contains JSX or needs module conversion
-        const looksLikeJsx = /<([A-Za-z][A-Za-z0-9]*)\s/.test(code) || /\.(jsx|tsx)$/.test(filename)
-        const isMjs = filename.endsWith('.mjs') || filename.endsWith('.mts')
-        const hasDynamicImport = /\bimport\(/.test(code)
-        const hasExport = /\bexport\s/.test(code)
-        const maybeTopLevelAwait = /\bawait\s+/.test(code)
+      const resolvedFilename = filename || 'module.tsx'
 
-        let transpiled: string
-        // If it looks like JSX prefer Babel (more predictable in RN environment)
-        if (looksLikeJsx || hasDynamicImport || maybeTopLevelAwait || hasExport) {
-          console.debug('[transpileWrapper] Detected JSX - using Babel directly')
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const Babel = require('@babel/standalone')
-          const presets: any[] = []
-          if (looksLikeJsx) presets.push('react')
-          // Ensure CommonJS output so exports/imports are compatible with RN executor
-          presets.push(['env', { modules: 'commonjs' }])
-          if (isMjs) {
-            // already added env, keep as-is
-          }
-          const babelResult = Babel.transform(code, { filename, presets })
-          transpiled = (babelResult && (babelResult as any).code) || code
-          console.debug('[transpileWrapper] Babel (JSX) produced length:', transpiled.length)
-        } else {
-          try {
-            // Try primary transpiler (SWC via transpileCode)
-            transpiled = await transpileCode(code, { filename }, false)
-            console.debug('[transpileWrapper] transpileCode succeeded, length:', transpiled.length)
-
-            // If SWC output still contains ESM export or dynamic import, post-process with Babel.
-            const swcStillHasExport = /(^|\s)export\s/.test(transpiled)
-            const swcStillHasImportCall = /\bimport\(/.test(transpiled)
-            if (swcStillHasExport || swcStillHasImportCall) {
-              console.warn('[transpileWrapper] SWC output still has', {
-                exportLeft: swcStillHasExport,
-                importCallLeft: swcStillHasImportCall,
-              }, '— running Babel post-pass')
-              // eslint-disable-next-line @typescript-eslint/no-var-requires
-              const Babel = require('@babel/standalone')
-              const presets: any[] = []
-              if (looksLikeJsx) presets.push('react')
-              presets.push(['env', { modules: 'commonjs' }])
-              const babelOut = Babel.transform(code, { filename, presets })
-              transpiled = (babelOut && (babelOut as any).code) || transpiled
-            }
-
-            // Route dynamic import() calls to our ES6 import handler symbol (__import__)
-            // This is necessary because RN runtime may not support native import() and
-            // our executor wires __import__ to ES6ImportHandler.
-            transpiled = transpiled.replace(/\bimport\(/g, '__import__(')
-
-            // Convert ES module exports to CommonJS for RNModuleLoader execution
-            transpiled = transpiled
-              .replace(/export\s+default\s+/g, 'module.exports.default = ')
-              .replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ')
-          } catch (swcErr) {
-            console.warn('[transpileWrapper] transpileCode failed, falling back to Babel:', swcErr)
-            // Fallback: use @babel/standalone available in the app (like DebugTab)
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const Babel = require('@babel/standalone')
-            const presets: any[] = []
-            if (isMjs) {
-              // For .mjs modules, ask Babel to output CommonJS so 'export' is converted
-              presets.push(['env', { modules: 'commonjs' }])
-            }
-            // If code contains JSX we still need react preset
-            if (looksLikeJsx) presets.unshift('react')
-            const babelResult = presets.length ? Babel.transform(code, { filename, presets }) : Babel.transform(code, { filename })
-            transpiled = (babelResult && (babelResult as any).code) || code
-            console.debug('[transpileWrapper] Babel fallback produced length:', transpiled.length)
-          }
-        }
-
-        // Convert ES6 exports to CommonJS for RNModuleLoader execution
-        transpiled = transpiled.replace(/export\s+default\s+/g, 'module.exports.default = ')
-        transpiled = transpiled.replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ')
-
-        console.debug('[transpileWrapper] After CommonJS conversion, length:', transpiled.length)
-        return transpiled
-      } catch (e) {
-        console.error('[transpileWrapper] Transpilation wrapper failed:', e)
-        throw e
+      try {
+        const transpiled = await transpileCode(sanitizedCode, { filename: resolvedFilename })
+        const converted = transpiled
+          .replace(/export\s+default\s+/g, 'module.exports.default = ')
+          .replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ')
+        console.debug('[transpileWrapper] Native transpilation produced length:', converted.length)
+        return converted
+      } catch (internalErr) {
+        console.error('[transpileWrapper] Native transpiler failed:', internalErr)
+        throw internalErr
       }
     }
 
@@ -286,8 +201,8 @@ function useHookRenderer(host: string) {
       }
 
       return {
-        React: require('react'),
-        createElement: require('react').createElement,
+        React: HookReact,
+        createElement: HookReact.createElement,
         FileRenderer: FileRendererAdapter,
         Layout: undefined,
         params: {},
@@ -321,6 +236,7 @@ function useHookRenderer(host: string) {
     setLoading(true)
     setError(null)
     setDetails(null)
+    setActiveHookPath(null)
 
     let hookPath: string | undefined
     try {
@@ -338,6 +254,8 @@ function useHookRenderer(host: string) {
       if (hookPath && !hookPath.startsWith('/')) {
         hookPath = '/' + hookPath
       }
+
+      setActiveHookPath(hookPath ?? null)
 
       if (!hookPath) {
         setError('Missing hook path in OPTIONS')
@@ -407,7 +325,7 @@ function useHookRenderer(host: string) {
     void tryRender()
   }, [])
 
-  return { element, loading, error, details }
+  return { element, loading, error, details, activeHookPath }
 }
 
 interface RepoBrowserProps {
@@ -448,7 +366,17 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({
 
       {!hookRenderer.loading && !hookRenderer.error && hookRenderer.element && (
         <View style={styles.hookContainer}>
-          {hookRenderer.element}
+          <HookErrorBoundary
+            scriptPath={hookRenderer.activeHookPath}
+            onError={(error) =>
+              console.error('[RepoBrowser] Hook child threw during render', {
+                script: hookRenderer.activeHookPath ?? 'unknown',
+                error,
+              })
+            }
+          >
+            {hookRenderer.element}
+          </HookErrorBoundary>
         </View>
       )}
     </View>

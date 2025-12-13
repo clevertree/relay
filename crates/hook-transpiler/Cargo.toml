@@ -5,9 +5,14 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Minimal JSX/TSX transpiler for Relay hooks with dynamic import() rewrite to context.helpers.loadModule and friendly errors"
 
+[lib]
+name = "relay_hook_transpiler"
+crate-type = ["cdylib"]
+
 [features]
 default = []
 wasm = ["wasm-bindgen", "serde-wasm-bindgen"]
+android = ["jni"]
 
 [dependencies]
 anyhow = "1.0.100"
@@ -27,9 +32,11 @@ swc_core = { version = "50.2.0", features = [
 	"ecma_transforms_typescript",
 	"swc_atoms",
 ] }
+swc_ecma_transforms_module = "35.0.0"
 
 # Native-only HTTP client (for potential future use)
 reqwest = { version = "0.12.25", features = ["json", "rustls-tls", "gzip"], optional = true }
+jni = { version = "0.21", optional = true, default-features = false }
 
 # WASM bindings (optional)
 wasm-bindgen = { version = "0.2.106", optional = true }

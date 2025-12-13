@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 pub const HEADER_BRANCH: &str = "X-Relay-Branch";
 
-pub mod db;
 pub mod assets;
+pub mod db;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {
@@ -49,7 +49,10 @@ fn normalize_socket(socket: &str) -> String {
 pub async fn connect_status(socket: &str) -> Result<StatusResponse> {
     let base = normalize_socket(socket);
     let url = format!("{}/", base.trim_end_matches('/'));
-    let res = reqwest::Client::new().request(reqwest::Method::OPTIONS, url).send().await?;
+    let res = reqwest::Client::new()
+        .request(reqwest::Method::OPTIONS, url)
+        .send()
+        .await?;
     if !res.status().is_success() {
         return Err(anyhow!("status failed: {}", res.status()));
     }
@@ -58,7 +61,11 @@ pub async fn connect_status(socket: &str) -> Result<StatusResponse> {
 
 pub async fn get_file(socket: &str, path: &str, branch: &str) -> Result<Bytes> {
     let base = normalize_socket(socket);
-    let url = format!("{}/{}", base.trim_end_matches('/'), urlencoding::encode(path));
+    let url = format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        urlencoding::encode(path)
+    );
     let res = reqwest::Client::new()
         .get(url)
         .header(HEADER_BRANCH, branch)
@@ -70,9 +77,18 @@ pub async fn get_file(socket: &str, path: &str, branch: &str) -> Result<Bytes> {
     Ok(res.bytes().await?)
 }
 
-pub async fn put_file(socket: &str, path: &str, branch: &str, body: Bytes) -> Result<WriteResponse> {
+pub async fn put_file(
+    socket: &str,
+    path: &str,
+    branch: &str,
+    body: Bytes,
+) -> Result<WriteResponse> {
     let base = normalize_socket(socket);
-    let url = format!("{}/{}", base.trim_end_matches('/'), urlencoding::encode(path));
+    let url = format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        urlencoding::encode(path)
+    );
     let res = reqwest::Client::new()
         .put(url)
         .header(HEADER_BRANCH, branch)
@@ -87,14 +103,26 @@ pub async fn put_file(socket: &str, path: &str, branch: &str, body: Bytes) -> Re
     Ok(res.json::<WriteResponse>().await?)
 }
 
-pub async fn post_query(socket: &str, branch: &str, path: Option<&str>, body: Option<serde_json::Value>) -> Result<QueryResponse> {
+pub async fn post_query(
+    socket: &str,
+    branch: &str,
+    path: Option<&str>,
+    body: Option<serde_json::Value>,
+) -> Result<QueryResponse> {
     let base = normalize_socket(socket);
     let mut url = base.trim_end_matches('/').to_string();
-    if let Some(p) = path { url.push('/'); url.push_str(&urlencoding::encode(p)); }
+    if let Some(p) = path {
+        url.push('/');
+        url.push_str(&urlencoding::encode(p));
+    }
     let client = reqwest::Client::new();
     let method = reqwest::Method::from_bytes(b"QUERY").expect("invalid query method");
     let req = client.request(method, url).header(HEADER_BRANCH, branch);
-    let req = if let Some(b) = body { req.json(&b) } else { req };
+    let req = if let Some(b) = body {
+        req.json(&b)
+    } else {
+        req
+    };
     let res = req.send().await?;
     if !res.status().is_success() {
         return Err(anyhow!("QUERY failed: {}", res.status()));

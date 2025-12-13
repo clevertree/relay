@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, View, Image, TouchableOpacity, ViewProps, TextProps } from 'react-native';
+import { Text, View, Image, TouchableOpacity, ViewProps, TextProps, StyleSheet } from 'react-native';
 // @ts-ignore - markdown-to-jsx types not available
 import Markdown from 'markdown-to-jsx';
 import { ThemeManager } from '../utils/themeManager';
@@ -51,6 +51,46 @@ StyledTouchable.displayName = 'StyledTouchable';
 const StyledImage: React.FC<StyledImageProps> = ({ className, ...props }) => (
   <Image {...(props as any)} />
 );
+
+type MarkdownErrorBoundaryProps = {
+  children: React.ReactNode
+  content: string
+}
+
+type MarkdownErrorBoundaryState = {
+  error: Error | null
+}
+
+class MarkdownErrorBoundary extends React.Component<MarkdownErrorBoundaryProps, MarkdownErrorBoundaryState> {
+  state: MarkdownErrorBoundaryState = { error: null }
+
+  static getDerivedStateFromError(error: Error): MarkdownErrorBoundaryState {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[MarkdownRenderer] Rendering error', { error, info })
+  }
+
+  componentDidUpdate(prevProps: MarkdownErrorBoundaryProps) {
+    if (prevProps.content !== this.props.content && this.state.error) {
+      this.setState({ error: null })
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      const colors = ThemeManager.getColors()
+      return (
+        <StyledView style={styles.errorContainer}>
+          <Text style={[styles.errorTitle, { color: colors.error ?? '#b91c1c' }]}>Failed to render markdown</Text>
+          <Text style={[styles.errorMessage, { color: colors.textSecondary }]}>{this.state.error.message}</Text>
+        </StyledView>
+      )
+    }
+    return this.props.children as React.ReactElement
+  }
+}
 
 // Basic Native components with NativeWind className support
 const P: React.FC<React.PropsWithChildren<{}>> = ({ children }) => {
@@ -202,33 +242,53 @@ export const MarkdownRenderer: React.FC<Props> = ({ content, onLinkPress }) => {
   void ThemeManager.getTokens();
   return (
     <StyledView className="p-3">
-      <Markdown
-        options={{
-          forceBlock: true,
-          overrides: {
-            p: { component: P },
-            span: { component: Text },
-            strong: { component: Strong },
-            em: { component: Em },
-            code: { component: CodeInline },
-            pre: { component: Pre },
-            h1: { component: H1 },
-            h2: { component: H2 },
-            h3: { component: H3 },
-            hr: { component: HR },
-            blockquote: { component: Blockquote },
-            ul: { component: UL },
-            ol: { component: OL },
-            li: { component: LI },
-            a: { component: (props: any) => <A {...props} onPress={onLinkPress} /> },
-            img: { component: IMG },
-          },
-        }}
-      >
+      <MarkdownErrorBoundary content={content}>
+        <Markdown
+          options={{
+            forceBlock: true,
+            overrides: {
+              p: { component: P },
+              span: { component: Text },
+              strong: { component: Strong },
+              em: { component: Em },
+              code: { component: CodeInline },
+              pre: { component: Pre },
+              h1: { component: H1 },
+              h2: { component: H2 },
+              h3: { component: H3 },
+              hr: { component: HR },
+              blockquote: { component: Blockquote },
+              ul: { component: UL },
+              ol: { component: OL },
+              li: { component: LI },
+              a: { component: (props: any) => <A {...props} onPress={onLinkPress} /> },
+              img: { component: IMG },
+            },
+          }}
+        >
         {content}
       </Markdown>
+      </MarkdownErrorBoundary>
     </StyledView>
   );
 };
+
+const styles = StyleSheet.create({
+  errorContainer: {
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  errorTitle: {
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  errorMessage: {
+    marginTop: 4,
+    fontSize: 13,
+  },
+});
 
 export default MarkdownRenderer;

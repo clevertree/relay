@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use streaming_files::service::StreamingService;
 use streaming_files::rpc::NullClient;
+use streaming_files::service::StreamingService;
 
 #[test]
 fn apply_config_patch_validates_playback_target() {
@@ -11,7 +11,10 @@ fn apply_config_patch_validates_playback_target() {
     // Defaults should be present (after load/migrate)
     let cfg = svc.get_config();
     assert!(!cfg.preferred_backend.is_empty());
-    assert!(matches!(cfg.playback_target.as_str(), "auto" | "tauri" | "system"));
+    assert!(matches!(
+        cfg.playback_target.as_str(),
+        "auto" | "tauri" | "system"
+    ));
 
     // Accept valid value: system
     let patch = serde_json::json!({ "playback_target": "system" });

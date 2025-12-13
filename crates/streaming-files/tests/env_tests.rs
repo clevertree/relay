@@ -19,14 +19,25 @@ fn restore_env(vars: Vec<(String, Option<String>)>) {
 fn env_parsing_defaults_and_overrides() {
     // Run in a single test to avoid parallel env races
     let keys = [
-        "RELAY_QBT_HOST","RELAY_QBT_PORT","RELAY_QBT_BASE","RELAY_QBT_USER","RELAY_QBT_PASS","RELAY_QBT_BYPASS_LOCALHOST",
-        "RELAY_TR_HOST","RELAY_TR_PORT","RELAY_TR_PATH","RELAY_TR_USER","RELAY_TR_PASS",
+        "RELAY_QBT_HOST",
+        "RELAY_QBT_PORT",
+        "RELAY_QBT_BASE",
+        "RELAY_QBT_USER",
+        "RELAY_QBT_PASS",
+        "RELAY_QBT_BYPASS_LOCALHOST",
+        "RELAY_TR_HOST",
+        "RELAY_TR_PORT",
+        "RELAY_TR_PATH",
+        "RELAY_TR_USER",
+        "RELAY_TR_PASS",
         "RELAY_STREAM_DOWNLOAD_DIR",
     ];
     let snap = snapshot_env(&keys);
 
     // Defaults
-    for k in &keys { std::env::remove_var(k); }
+    for k in &keys {
+        std::env::remove_var(k);
+    }
     let e = load_env();
     assert_eq!(e.qbt.host, "127.0.0.1");
     assert_eq!(e.qbt.port, 8080);

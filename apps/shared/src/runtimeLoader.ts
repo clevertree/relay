@@ -494,7 +494,6 @@ export interface HookLoaderOptions {
   moduleLoader: ModuleLoader
   transpiler?: (code: string, filename: string) => Promise<string>
   onDiagnostics?: (diag: LoaderDiagnostics) => void
-  allowServerFallback?: boolean
 }
 
 export class HookLoader {
@@ -504,7 +503,15 @@ export class HookLoader {
   private transpiler?: (code: string, filename: string) => Promise<string>
   private onDiagnostics: (diag: LoaderDiagnostics) => void
   private moduleCache: Map<string, any> = new Map()
-  private allowServerFallback: boolean
+  private logTranspileResult(filename: string, code: string): void {
+    const containsExport = /\bexport\b/.test(code)
+    const sample = code.substring(0, 200).replace(/\n/g, '\\n')
+    const logger = containsExport ? console.warn : console.debug
+    logger(
+      `[HookLoader] Transpiler output for ${filename} (contains export=${containsExport}, len=${code.length})`,
+      sample
+    )
+  }
 
   constructor(options: HookLoaderOptions) {
     this.host = options.host
@@ -512,60 +519,12 @@ export class HookLoader {
     this.moduleLoader = options.moduleLoader
     this.transpiler = options.transpiler
     this.onDiagnostics = options.onDiagnostics || (() => {})
-    this.allowServerFallback = options.allowServerFallback ?? false
   }
 
   private buildRequestHeaders(context: HookContext): Record<string, string> {
     const builder = context?.helpers?.buildRepoHeaders
     if (!builder) return {}
     return { ...builder() }
-  }
-
-  private appendTranspileParam(url: string): string {
-    if (url.includes('?')) {
-      return `${url}&transpile=1`
-    }
-    return `${url}?transpile=1`
-  }
-
-  private hasTranspilerLoadFailure(err?: unknown): boolean {
-    const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : {})
-    if (g.__hook_transpiler_error) {
-      return true
-    }
-    const msg = err instanceof Error ? err.message : String(err || '')
-    return msg.includes('HookTranspiler WASM not loaded') || msg.includes('HookTranspiler returned non-string output')
-  }
-
-  private shouldUseServerFallback(err?: unknown): boolean {
-    if (!this.allowServerFallback) return false
-    return this.hasTranspilerLoadFailure(err)
-  }
-
-  private async requestServerTranspiledCode(
-    url: string,
-    normalizedPath: string,
-    context: HookContext
-  ): Promise<string> {
-    const transpileUrl = this.appendTranspileParam(url)
-    const headers = {
-      ...this.buildRequestHeaders(context),
-      'x-relay-transpile': '1',
-    }
-    const resp = await fetch(transpileUrl, { headers })
-    const body = await resp.text()
-    if (!resp.ok) {
-      throw new Error(
-        `Server transpiler failed for ${normalizedPath}: ${resp.status} ${resp.statusText} — ${body}`
-      )
-    }
-    const ct = (resp.headers.get('content-type') || '').toLowerCase()
-    if (!ct.includes('javascript')) {
-      throw new Error(
-        `Server transpiler returned unexpected content type for ${normalizedPath}: ${ct}`
-      )
-    }
-    return body
   }
 
   /**
@@ -623,15 +582,21 @@ export class HookLoader {
 
       const code = await response.text()
 
-      // Transpile if needed
+      // Transpile if needed (RN always routes through custom transpiler)
       let finalCode = code
-      if (looksLikeTsOrJsx(code, normalizedPath)) {
+      const shouldTranspile = !!this.transpiler || looksLikeTsOrJsx(code, normalizedPath)
+      if (shouldTranspile) {
         try {
-          finalCode = await transpileCode(
-            code,
-            { filename: normalizedPath },
-            false // Web uses import, not CommonJS
-          )
+          if (this.transpiler) {
+            finalCode = await this.transpiler(code, normalizedPath)
+            this.logTranspileResult(normalizedPath, finalCode)
+          } else {
+            finalCode = await transpileCode(
+              code,
+              { filename: normalizedPath },
+              false // Web uses import, not CommonJS
+            )
+          }
         } catch (err) {
           const msg = (err as any)?.message || String(err)
           const diag: LoaderDiagnostics = {
@@ -639,22 +604,8 @@ export class HookLoader {
             error: msg,
             details: { moduleUrl, filename: normalizedPath, ...(err as any) }
           }
-          if (this.shouldUseServerFallback(err)) {
-            diag.details = { ...diag.details, fallback: 'server' }
-            this.onDiagnostics(diag)
-            try {
-              finalCode = await this.requestServerTranspiledCode(moduleUrl, normalizedPath, context)
-            } catch (fallbackErr) {
-              const fallbackMsg = (fallbackErr as any)?.message || String(fallbackErr)
-              diag.error = fallbackMsg
-              this.onDiagnostics(diag)
-              throw fallbackErr
-            }
-          } else {
-            this.onDiagnostics(diag)
-            // Do NOT execute raw JSX; surface a clear error to the caller/UI
-            throw new Error(`TranspileError: ${normalizedPath}: ${msg}`)
-          }
+          this.onDiagnostics(diag)
+          throw new Error(`TranspileError: ${normalizedPath}: ${msg}`)
         }
       }
 
@@ -740,13 +691,15 @@ export class HookLoader {
       // Transpile if needed
       diag.phase = 'transform'
       let finalCode = code
-      if (looksLikeTsOrJsx(code, hookPath)) {
+      const shouldTranspile = !!this.transpiler || looksLikeTsOrJsx(code, hookPath)
+      if (shouldTranspile) {
         try {
           console.debug(`[HookLoader] Transpiling ${hookPath}`)
           
           // Use custom transpiler if provided (e.g., for React Native with CommonJS conversion)
           if (this.transpiler) {
             finalCode = await this.transpiler(code, hookPath)
+            this.logTranspileResult(hookPath, finalCode)
           } else {
             finalCode = await transpileCode(
               code,
@@ -760,22 +713,9 @@ export class HookLoader {
           console.warn('[HookLoader] JSX transpilation failed', { hookPath, error: msg })
           diag.transpileWarn = msg
           diag.details = { ...(diag.details || {}), filename: hookPath }
-          if (this.shouldUseServerFallback(err)) {
-            diag.details.fallback = 'server'
-            this.onDiagnostics(diag)
-            try {
-              finalCode = await this.requestServerTranspiledCode(hookUrl, hookPath, context)
-            } catch (fallbackErr) {
-              const fallbackMsg = (fallbackErr as any)?.message || String(fallbackErr)
-              diag.error = fallbackMsg
-              this.onDiagnostics(diag)
-              throw fallbackErr
-            }
-          } else {
-            diag.error = msg
-            this.onDiagnostics(diag)
-            throw new Error(`TranspileError: ${hookPath}: ${msg}`)
-          }
+          diag.error = msg
+          this.onDiagnostics(diag)
+          throw new Error(`TranspileError: ${hookPath}: ${msg}`)
         }
       }
 

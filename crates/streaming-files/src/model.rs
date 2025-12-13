@@ -17,12 +17,12 @@ pub enum TorrentState {
 pub struct TorrentStatus {
     pub exists: bool,
     pub state: TorrentState,
-    pub progress: f32,        // 0.0..=1.0
-    pub size: u64,            // bytes
-    pub downloaded: u64,      // bytes
-    pub upload: u64,          // bytes
-    pub download_rate: u64,   // bytes/sec
-    pub upload_rate: u64,     // bytes/sec
+    pub progress: f32,      // 0.0..=1.0
+    pub size: u64,          // bytes
+    pub downloaded: u64,    // bytes
+    pub upload: u64,        // bytes
+    pub download_rate: u64, // bytes/sec
+    pub upload_rate: u64,   // bytes/sec
     pub info_hash: String,
     pub name: Option<String>,
     pub save_path: Option<String>,
@@ -60,9 +60,8 @@ pub fn is_media_path(path: &str) -> bool {
     // Expanded set: common video containers + some audio containers (player support may vary)
     let exts = [
         // Video containers
-        ".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".mpg", ".mpeg",
-        ".ts", ".m2ts", ".mts", ".flv", ".wmv",
-        // Audio containers (allow attempting playback)
+        ".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".mpg", ".mpeg", ".ts", ".m2ts", ".mts",
+        ".flv", ".wmv", // Audio containers (allow attempting playback)
         ".mp3", ".aac", ".flac", ".ogg", ".wav",
     ];
     exts.iter().any(|ext| p.ends_with(ext))

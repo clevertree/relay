@@ -1,7 +1,7 @@
 use httpmock::{Method::GET, Method::POST, MockServer};
 use std::sync::Arc;
+use streaming_files::rpc::{NullClient, TorrentClient};
 use streaming_files::service::StreamingService;
-use streaming_files::rpc::{TorrentClient, NullClient};
 
 #[tokio::test]
 async fn refresh_backend_picks_qbt_when_healthy() {
@@ -39,16 +39,17 @@ async fn refresh_backend_falls_back_to_transmission() {
     let tr = MockServer::start();
     // Transmission RPC: first request (without session id) returns 409 + header
     let _m1 = tr.mock(|when, then| {
-        when.method(POST)
-            .path("/transmission/rpc")
-            .matches(|req| {
-                let has = req
-                    .headers
-                    .as_ref()
-                    .map(|h| h.iter().any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id")))
-                    .unwrap_or(false);
-                !has
-            });
+        when.method(POST).path("/transmission/rpc").matches(|req| {
+            let has = req
+                .headers
+                .as_ref()
+                .map(|h| {
+                    h.iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id"))
+                })
+                .unwrap_or(false);
+            !has
+        });
         then.status(409).header("X-Transmission-Session-Id", "tok");
     });
     // Second request with header returns success

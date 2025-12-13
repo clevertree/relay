@@ -14,7 +14,9 @@ pub fn is_playable_by_thresholds(
     min_total_bytes: u64,
     percent_100: u32,
 ) -> bool {
-    if length == 0 { return false; }
+    if length == 0 {
+        return false;
+    }
     let dl = downloaded.min(length);
     let need_first = min_first_bytes.min(length);
     let pct = (percent_100 as f64 / 100.0).clamp(0.0, 1.0);

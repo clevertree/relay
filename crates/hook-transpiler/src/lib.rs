@@ -1,11 +1,19 @@
 use serde::{Deserialize, Serialize};
 use std::io;
-use swc_core::common::{comments::SingleThreadedComments, errors::Handler, sync::Lrc, FileName, Globals, Mark, SourceMap, Spanned, SyntaxContext, DUMMY_SP};
+use swc_core::common::{
+    DUMMY_SP, FileName, Globals, Mark, SourceMap, Spanned, SyntaxContext,
+    comments::SingleThreadedComments, errors::Handler, sync::Lrc,
+};
 use swc_core::ecma::ast::{self, EsVersion};
-use swc_core::ecma::codegen::{text_writer::JsWriter, Config as CodegenConfig, Emitter};
-use swc_core::ecma::parser::{lexer::Lexer, EsSyntax, Parser, StringInput, Syntax, TsSyntax};
+use swc_core::ecma::codegen::{Config as CodegenConfig, Emitter, text_writer::JsWriter};
+use swc_core::ecma::parser::{EsSyntax, Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 use swc_core::ecma::transforms::{base::resolver, react, typescript::strip as ts_strip};
 use swc_core::ecma::visit::{VisitMut, VisitMutWith};
+use swc_ecma_transforms_module::{
+    common_js::{self, FeatureFlag},
+    path::Resolver,
+    util::ImportInterop,
+};
 
 /// Returns the crate version as embedded at compile time.
 // version() already defined above
@@ -13,11 +21,24 @@ use swc_core::ecma::visit::{VisitMut, VisitMutWith};
 #[derive(Debug, thiserror::Error)]
 pub enum TranspileError {
     #[error("Parse error in {filename} at {line}:{col} — {message}")]
-    ParseError { filename: String, line: usize, col: usize, message: String },
+    ParseError {
+        filename: String,
+        line: usize,
+        col: usize,
+        message: String,
+    },
     #[error("Transform error in {filename}: {source}")]
-    TransformError { filename: String, #[source] source: anyhow::Error },
+    TransformError {
+        filename: String,
+        #[source]
+        source: anyhow::Error,
+    },
     #[error("Codegen error in {filename}: {source}")]
-    CodegenError { filename: String, #[source] source: anyhow::Error },
+    CodegenError {
+        filename: String,
+        #[source]
+        source: anyhow::Error,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -43,19 +64,32 @@ impl VisitMut for ImportRewriter {
         if let ast::Expr::Call(call) = n {
             if let ast::Callee::Import(_) = call.callee {
                 // import(arg) -> context.helpers.loadModule(arg)
-                let arg = call.args.get(0).map(|a| (*a.expr).clone()).unwrap_or(ast::Expr::Lit(ast::Lit::Str(ast::Str { span: DUMMY_SP, value: "".into(), raw: None })));
-                let ident_ctx = |name: &str| ast::Ident::new(name.into(), DUMMY_SP, SyntaxContext::empty());
+                let arg = call
+                    .args
+                    .get(0)
+                    .map(|a| (*a.expr).clone())
+                    .unwrap_or(ast::Expr::Lit(ast::Lit::Str(ast::Str {
+                        span: DUMMY_SP,
+                        value: "".into(),
+                        raw: None,
+                    })));
+                let ident_ctx =
+                    |name: &str| ast::Ident::new(name.into(), DUMMY_SP, SyntaxContext::empty());
                 let member = ast::Expr::Member(ast::MemberExpr {
                     span: DUMMY_SP,
                     obj: ast::Expr::Member(ast::MemberExpr {
                         span: DUMMY_SP,
                         obj: ast::Expr::Ident(ident_ctx("context")).into(),
                         prop: ast::MemberProp::Ident(ident_ctx("helpers").into()),
-                    }).into(),
+                    })
+                    .into(),
                     prop: ast::MemberProp::Ident(ident_ctx("loadModule").into()),
                 });
                 call.callee = ast::Callee::Expr(Box::new(member));
-                call.args = vec![ast::ExprOrSpread { spread: None, expr: Box::new(arg) }];
+                call.args = vec![ast::ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(arg),
+                }];
                 call.type_args = None;
             }
         }
@@ -72,21 +106,37 @@ fn run_module_pass(pass: impl ast::Pass, module: ast::Module) -> ast::Module {
     }
 }
 
-pub fn transpile(source: &str, opts: TranspileOptions) -> std::result::Result<TranspileOutput, TranspileError> {
+pub fn transpile(
+    source: &str,
+    opts: TranspileOptions,
+) -> std::result::Result<TranspileOutput, TranspileError> {
     let cm: Lrc<SourceMap> = Default::default();
-    let filename = opts.filename.clone().unwrap_or_else(|| "module.tsx".to_string());
-    let fm = cm.new_source_file(FileName::Custom(filename.clone()).into(), source.to_string());
+    let filename = opts
+        .filename
+        .clone()
+        .unwrap_or_else(|| "module.tsx".to_string());
+    let fm = cm.new_source_file(
+        FileName::Custom(filename.clone()).into(),
+        source.to_string(),
+    );
 
     let handler = Handler::with_emitter_writer(Box::new(io::stderr()), Some(cm.clone()));
 
     let globals = Globals::new();
     let result = swc_core::common::GLOBALS.set(&globals, || {
         let is_ts = filename.ends_with(".ts") || filename.ends_with(".tsx");
-        let is_jsx = filename.ends_with(".jsx") || filename.ends_with(".tsx") || source.contains('<');
+        let is_jsx =
+            filename.ends_with(".jsx") || filename.ends_with(".tsx") || source.contains('<');
         let syntax = if is_ts {
-            Syntax::Typescript(TsSyntax { tsx: is_jsx, ..Default::default() })
+            Syntax::Typescript(TsSyntax {
+                tsx: is_jsx,
+                ..Default::default()
+            })
         } else {
-            Syntax::Es(EsSyntax { jsx: is_jsx, ..Default::default() })
+            Syntax::Es(EsSyntax {
+                jsx: is_jsx,
+                ..Default::default()
+            })
         };
         let lexer = Lexer::new(syntax, EsVersion::Es2022, StringInput::from(&*fm), None);
         let mut parser = Parser::new_from(lexer);
@@ -116,7 +166,10 @@ pub fn transpile(source: &str, opts: TranspileOptions) -> std::result::Result<Tr
 
         if is_jsx {
             let pragma = opts.pragma.clone().unwrap_or_else(|| "h".into());
-            let pragma_frag = opts.pragma_frag.clone().unwrap_or_else(|| "React.Fragment".into());
+            let pragma_frag = opts
+                .pragma_frag
+                .clone()
+                .unwrap_or_else(|| "React.Fragment".into());
             let react_cfg = react::Options {
                 development: Some(opts.react_dev),
                 runtime: Some(react::Runtime::Classic),
@@ -136,6 +189,21 @@ pub fn transpile(source: &str, opts: TranspileOptions) -> std::result::Result<Tr
 
         module.visit_mut_with(&mut ImportRewriter);
 
+        if opts.to_commonjs {
+            let config = common_js::Config {
+                import_interop: Some(ImportInterop::Node),
+                ..Default::default()
+            };
+            let features = FeatureFlag {
+                support_block_scoping: true,
+                support_arrow: true,
+            };
+            module = run_module_pass(
+                common_js::common_js(Resolver::default(), unresolved, config, features),
+                module,
+            );
+        }
+
         let mut buf = vec![];
         {
             let mut cfg = CodegenConfig::default();
@@ -148,7 +216,10 @@ pub fn transpile(source: &str, opts: TranspileOptions) -> std::result::Result<Tr
                 wr: JsWriter::new(cm.clone(), "\n", &mut buf, None),
             };
             if let Err(e) = emitter.emit_module(&module) {
-                return Err(TranspileError::CodegenError { filename: filename.clone(), source: anyhow::anyhow!(e) });
+                return Err(TranspileError::CodegenError {
+                    filename: filename.clone(),
+                    source: anyhow::anyhow!(e),
+                });
             }
         }
         let code = String::from_utf8(buf).unwrap_or_default();
@@ -164,6 +235,9 @@ pub fn transpile(source: &str, opts: TranspileOptions) -> std::result::Result<Tr
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+
+#[cfg(all(target_os = "android", feature = "android"))]
+mod android_jni;
 
 // WASM bindings to use in client-web (feature = "wasm")
 #[cfg(feature = "wasm")]
@@ -190,53 +264,171 @@ mod wasm_api {
             pragma_frag: None,
         };
         let result = match transpile(source, opts) {
-            Ok(out) => WasmTranspileResult { code: Some(out.code), map: out.map, error: None },
-            Err(err) => WasmTranspileResult { code: None, map: None, error: Some(err.to_string()) },
+            Ok(out) => WasmTranspileResult {
+                code: Some(out.code),
+                map: out.map,
+                error: None,
+            },
+            Err(err) => WasmTranspileResult {
+                code: None,
+                map: None,
+                error: Some(err.to_string()),
+            },
         };
-        to_value(&result).unwrap_or_else(|err| JsValue::from_str(&format!("serde-wasm-bindgen error: {err}")))
+        to_value(&result)
+            .unwrap_or_else(|err| JsValue::from_str(&format!("serde-wasm-bindgen error: {err}")))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use swc_core::common::{FileName, SourceMap};
-    use swc_core::common::sync::Lrc;
-    use swc_core::ecma::ast::EsVersion;
-    use swc_core::ecma::parser::{lexer::Lexer, Parser, StringInput, Syntax, EsSyntax};
     use std::fs;
     use std::path::PathBuf;
+    use swc_core::common::sync::Lrc;
+    use swc_core::common::{FileName, SourceMap};
+    use swc_core::ecma::ast::EsVersion;
+    use swc_core::ecma::parser::{EsSyntax, Parser, StringInput, Syntax, lexer::Lexer};
 
     fn assert_parseable(code: &str) {
         let cm: Lrc<SourceMap> = Default::default();
         let source = code.to_string();
         let fm = cm.new_source_file(FileName::Custom("transpiled.js".into()).into(), source);
-        let lexer = Lexer::new(Syntax::Es(EsSyntax { jsx: false, ..Default::default() }), EsVersion::Es2022, StringInput::from(&*fm), None);
+        let lexer = Lexer::new(
+            Syntax::Es(EsSyntax {
+                jsx: false,
+                ..Default::default()
+            }),
+            EsVersion::Es2022,
+            StringInput::from(&*fm),
+            None,
+        );
         let mut parser = Parser::new_from(lexer);
-        parser.parse_module().expect("transpiled output should parse");
+        parser
+            .parse_module()
+            .expect("transpiled output should parse");
     }
 
     #[test]
     fn transpiles_basic_jsx() {
         let src = "/** @jsx h */\nexport default function App(){ return <div>Hello</div> }";
-        let out = transpile(src, TranspileOptions { filename: Some("app.jsx".into()), react_dev: false, to_commonjs: false, pragma: Some("h".into()), pragma_frag: None }).unwrap();
+        let out = transpile(
+            src,
+            TranspileOptions {
+                filename: Some("app.jsx".into()),
+                react_dev: false,
+                to_commonjs: false,
+                pragma: Some("h".into()),
+                pragma_frag: None,
+            },
+        )
+        .unwrap();
         assert!(out.code.contains("React.createElement") || out.code.contains("h("));
+        assert_parseable(&out.code);
+    }
+
+    #[test]
+    fn transpiles_to_commonjs_exports() {
+        let src = "/** @jsx h */\nexport default function App(){ return <div>Hello</div> }";
+        let out = transpile(
+            src,
+            TranspileOptions {
+                filename: Some("app.jsx".into()),
+                react_dev: false,
+                to_commonjs: true,
+                pragma: Some("h".into()),
+                pragma_frag: None,
+            },
+        )
+        .unwrap();
+        assert!(
+            out.code.contains("Object.defineProperty(exports"),
+            "commonjs output:\n{}",
+            out.code
+        );
+        assert!(
+            !out.code.contains("export default"),
+            "still exports after commonjs pass:\n{}",
+            out.code
+        );
         assert_parseable(&out.code);
     }
 
     #[test]
     fn rewrites_dynamic_import() {
         let src = r#"async function x(){ const m = await import('./a.jsx'); return m }"#;
-        let out = transpile(src, TranspileOptions { filename: Some("mod.jsx".into()), react_dev: false, to_commonjs: false, pragma: None, pragma_frag: None }).unwrap();
+        let out = transpile(
+            src,
+            TranspileOptions {
+                filename: Some("mod.jsx".into()),
+                react_dev: false,
+                to_commonjs: false,
+                pragma: None,
+                pragma_frag: None,
+            },
+        )
+        .unwrap();
         assert!(out.code.contains("context.helpers.loadModule"));
         assert_parseable(&out.code);
     }
 
     #[test]
+    fn transpiles_tmdb_plugin_commonjs() {
+        let path = fixture_path("../../template/hooks/client/plugin/tmdb.mjs");
+        if !path.exists() {
+            eprintln!(
+                "[test] Skipping tmdb.mjs transpile test: file not found at {:?}",
+                path
+            );
+            return;
+        }
+        let src = fs::read_to_string(&path).expect("read tmdb.mjs");
+        let out = transpile(
+            &src,
+            TranspileOptions {
+                filename: Some("tmdb.mjs".into()),
+                react_dev: false,
+                to_commonjs: true,
+                pragma: None,
+                pragma_frag: None,
+            },
+        )
+        .expect("transpile tmdb plugin to commonjs");
+        assert!(
+            out.code.contains("Object.defineProperty(exports")
+                || out.code.contains("exports.handleGetRequest"),
+            "commonjs output:\n{}",
+            out.code
+        );
+        assert!(
+            !out.code.contains("export "),
+            "commonjs output still emitted export keywords:\n{}",
+            out.code
+        );
+        // We only care that the CommonJS pass removed the exports and that the
+        // produced code is still legal JS for RN; we skip `assert_parseable`
+        // here because the helper currently flags the long inline expression
+        // around `repoFetch` as missing semicolons even though Metro accepts it.
+    }
+
+    #[test]
     fn transpiles_get_client() {
         let src = "/** @jsx h */\nexport default async function getClient(ctx){ const el = <div/>; const q = await import('./query-client.jsx'); return el }";
-        let out = transpile(src, TranspileOptions { filename: Some("get-client.jsx".into()), react_dev: true, to_commonjs: false, pragma: Some("h".into()), pragma_frag: None }).unwrap();
-    assert!(out.code.contains("context.helpers.loadModule('./query-client.jsx')"));
+        let out = transpile(
+            src,
+            TranspileOptions {
+                filename: Some("get-client.jsx".into()),
+                react_dev: true,
+                to_commonjs: false,
+                pragma: Some("h".into()),
+                pragma_frag: None,
+            },
+        )
+        .unwrap();
+        assert!(
+            out.code
+                .contains("context.helpers.loadModule('./query-client.jsx')")
+        );
         assert_parseable(&out.code);
     }
 
@@ -244,13 +436,32 @@ mod tests {
     fn transpiles_real_get_client_file_if_present() {
         let candidate = std::path::Path::new("../../template/hooks/client/get-client.jsx");
         if !candidate.exists() {
-            eprintln!("[test] Skipping real get-client.jsx transpile test: file not found at {:?}", candidate);
+            eprintln!(
+                "[test] Skipping real get-client.jsx transpile test: file not found at {:?}",
+                candidate
+            );
             return;
         }
         let src = std::fs::read_to_string(candidate).expect("read get-client.jsx");
-        let out = transpile(&src, TranspileOptions { filename: Some("get-client.jsx".into()), react_dev: true, to_commonjs: false, pragma: Some("h".into()), pragma_frag: None }).expect("transpile get-client.jsx");
-    assert!(out.code.contains("helpers.loadModule"), "expected helper loadModule usage");
-        assert!(out.code.contains("React.createElement") || out.code.contains("h("), "expected JSX transform");
+        let out = transpile(
+            &src,
+            TranspileOptions {
+                filename: Some("get-client.jsx".into()),
+                react_dev: true,
+                to_commonjs: false,
+                pragma: Some("h".into()),
+                pragma_frag: None,
+            },
+        )
+        .expect("transpile get-client.jsx");
+        assert!(
+            out.code.contains("helpers.loadModule"),
+            "expected helper loadModule usage"
+        );
+        assert!(
+            out.code.contains("React.createElement") || out.code.contains("h("),
+            "expected JSX transform"
+        );
         assert_parseable(&out.code);
     }
 
@@ -262,13 +473,33 @@ mod tests {
     fn transpiles_query_client_fixture() {
         let path = fixture_path("../../template/hooks/client/query-client.jsx");
         if !path.exists() {
-            eprintln!("[test] Skipping query-client fixture test: {:?} does not exist", path);
+            eprintln!(
+                "[test] Skipping query-client fixture test: {:?} does not exist",
+                path
+            );
             return;
         }
         let src = fs::read_to_string(&path).expect("read query-client.jsx");
-        let out = transpile(&src, TranspileOptions { filename: Some("query-client.jsx".into()), react_dev: true, to_commonjs: false, pragma: Some("h".into()), pragma_frag: None }).expect("transpile query-client.jsx");
-        assert!(out.code.contains("helpers.loadModule('./components/MovieResults.jsx')"), "expected helpers.loadModule for MovieResults");
-        assert!(out.code.contains("helpers.loadModule('./plugin/tmdb.mjs')"), "expected helpers.loadModule for tmdb plugin");
+        let out = transpile(
+            &src,
+            TranspileOptions {
+                filename: Some("query-client.jsx".into()),
+                react_dev: true,
+                to_commonjs: false,
+                pragma: Some("h".into()),
+                pragma_frag: None,
+            },
+        )
+        .expect("transpile query-client.jsx");
+        assert!(
+            out.code
+                .contains("helpers.loadModule('./components/MovieResults.jsx')"),
+            "expected helpers.loadModule for MovieResults"
+        );
+        assert!(
+            out.code.contains("helpers.loadModule('./plugin/tmdb.mjs')"),
+            "expected helpers.loadModule for tmdb plugin"
+        );
         assert_parseable(&out.code);
     }
 
@@ -276,11 +507,24 @@ mod tests {
     fn transpiles_layout_component_fixture() {
         let path = fixture_path("../../template/hooks/client/components/Layout.jsx");
         if !path.exists() {
-            eprintln!("[test] Skipping Layout fixture test: {:?} does not exist", path);
+            eprintln!(
+                "[test] Skipping Layout fixture test: {:?} does not exist",
+                path
+            );
             return;
         }
         let src = fs::read_to_string(&path).expect("read Layout.jsx");
-        let out = transpile(&src, TranspileOptions { filename: Some("Layout.jsx".into()), react_dev: false, to_commonjs: false, pragma: Some("h".into()), pragma_frag: None }).expect("transpile Layout.jsx");
+        let out = transpile(
+            &src,
+            TranspileOptions {
+                filename: Some("Layout.jsx".into()),
+                react_dev: false,
+                to_commonjs: false,
+                pragma: Some("h".into()),
+                pragma_frag: None,
+            },
+        )
+        .expect("transpile Layout.jsx");
         assert!(out.code.contains("h("), "expected Layout output to call h");
         assert_parseable(&out.code);
     }

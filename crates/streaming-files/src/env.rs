@@ -34,7 +34,10 @@ fn env_bool(key: &str, default: bool) -> bool {
 }
 
 fn env_u16(key: &str, default: u16) -> u16 {
-    env::var(key).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
+    env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
 }
 
 pub fn load_env() -> StreamConfigEnv {

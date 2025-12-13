@@ -108,9 +108,8 @@ pub struct ConfigPaths {
 }
 
 pub fn config_paths() -> Result<ConfigPaths> {
-    let proj = ProjectDirs::from("online", "relay", "relay").ok_or_else(|| {
-        StreamingError::Config("unable to resolve config directory".into())
-    })?;
+    let proj = ProjectDirs::from("online", "relay", "relay")
+        .ok_or_else(|| StreamingError::Config("unable to resolve config directory".into()))?;
     let dir = proj.config_dir().to_path_buf();
     let file = dir.join("streaming.json");
     Ok(ConfigPaths { dir, file })
@@ -144,12 +143,24 @@ fn migrate(cfg: &mut StreamingConfig) {
     }
     if cfg.config_version == 1 {
         // add new defaulted fields for v2
-        if cfg.play_min_first_bytes_mb == 0 { cfg.play_min_first_bytes_mb = default_play_min_first_bytes_mb(); }
-        if cfg.play_min_total_mb == 0 { cfg.play_min_total_mb = default_play_min_total_mb(); }
-        if cfg.play_min_total_percent == 0 { cfg.play_min_total_percent = default_play_min_total_percent(); }
-        if cfg.resume_poll_interval_sec == 0 { cfg.resume_poll_interval_sec = default_resume_poll_interval_sec(); }
-        if cfg.resume_timeout_min == 0 { cfg.resume_timeout_min = default_resume_timeout_min(); }
-        if cfg.preferred_backend.is_empty() { cfg.preferred_backend = default_preferred_backend(); }
+        if cfg.play_min_first_bytes_mb == 0 {
+            cfg.play_min_first_bytes_mb = default_play_min_first_bytes_mb();
+        }
+        if cfg.play_min_total_mb == 0 {
+            cfg.play_min_total_mb = default_play_min_total_mb();
+        }
+        if cfg.play_min_total_percent == 0 {
+            cfg.play_min_total_percent = default_play_min_total_percent();
+        }
+        if cfg.resume_poll_interval_sec == 0 {
+            cfg.resume_poll_interval_sec = default_resume_poll_interval_sec();
+        }
+        if cfg.resume_timeout_min == 0 {
+            cfg.resume_timeout_min = default_resume_timeout_min();
+        }
+        if cfg.preferred_backend.is_empty() {
+            cfg.preferred_backend = default_preferred_backend();
+        }
         // endpoint overrides introduced in v2 default to None (use env)
         cfg.config_version = 2;
     }
@@ -229,11 +240,27 @@ pub fn set_download_dir<P: AsRef<Path>>(cfg: &mut StreamingConfig, path: P) {
 }
 
 // Defaults
-fn default_auto_open_player_on_allow() -> bool { true }
-fn default_play_min_first_bytes_mb() -> u32 { 16 }
-fn default_play_min_total_mb() -> u32 { 64 }
-fn default_play_min_total_percent() -> u32 { 1 }
-fn default_resume_poll_interval_sec() -> u32 { 5 }
-fn default_resume_timeout_min() -> u32 { 30 }
-fn default_preferred_backend() -> String { "auto".to_string() }
-fn default_playback_target() -> String { "auto".to_string() }
+fn default_auto_open_player_on_allow() -> bool {
+    true
+}
+fn default_play_min_first_bytes_mb() -> u32 {
+    16
+}
+fn default_play_min_total_mb() -> u32 {
+    64
+}
+fn default_play_min_total_percent() -> u32 {
+    1
+}
+fn default_resume_poll_interval_sec() -> u32 {
+    5
+}
+fn default_resume_timeout_min() -> u32 {
+    30
+}
+fn default_preferred_backend() -> String {
+    "auto".to_string()
+}
+fn default_playback_target() -> String {
+    "auto".to_string()
+}

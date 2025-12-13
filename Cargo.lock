@@ -1572,12 +1572,14 @@ name = "hook-transpiler"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "jni",
  "once_cell",
  "pretty_assertions",
  "reqwest 0.12.25",
  "serde",
  "serde-wasm-bindgen 0.6.5",
  "swc_core",
+ "swc_ecma_transforms_module",
  "thiserror 2.0.17",
  "wasm-bindgen",
 ]

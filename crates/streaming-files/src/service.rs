@@ -2,18 +2,18 @@ use crate::config::{load_or_default, save, StreamingConfig};
 use crate::env::load_env;
 use crate::errors::{Result, StreamingError};
 use crate::model::{AddResult, TorrentFile, TorrentStatus};
-use crate::rpc::{NullClient, TorrentClient};
 use crate::rpc::qbit::QBitClient;
 use crate::rpc::transmission::TransmissionClient;
+use crate::rpc::{NullClient, TorrentClient};
 
-#[cfg(feature = "client")]
-use crate::ui::UiPrompt;
-#[cfg(feature = "client")]
-use crate::playback::is_playable_by_thresholds;
 #[cfg(feature = "client")]
 use crate::config::{default_download_dir, set_download_dir};
 #[cfg(feature = "client")]
 use crate::model::PlayDecision;
+#[cfg(feature = "client")]
+use crate::playback::is_playable_by_thresholds;
+#[cfg(feature = "client")]
+use crate::ui::UiPrompt;
 
 use std::sync::Arc;
 
@@ -33,7 +33,9 @@ impl StreamingService {
         let env = load_env();
         let base = if env.qbt.host.starts_with("http://") || env.qbt.host.starts_with("https://") {
             let mut b = env.qbt.host.clone();
-            if !b.ends_with('/') { b.push('/'); }
+            if !b.ends_with('/') {
+                b.push('/');
+            }
             b
         } else {
             let base = env.qbt.base.trim_start_matches('/');
@@ -55,7 +57,9 @@ impl StreamingService {
         let qbt_base_cfg = cfg.qbt_base.clone().unwrap_or(env.qbt.base);
         let qbt_base = if qbt_host.starts_with("http://") || qbt_host.starts_with("https://") {
             let mut b = qbt_host.clone();
-            if !b.ends_with('/') { b.push('/'); }
+            if !b.ends_with('/') {
+                b.push('/');
+            }
             b
         } else {
             let base = qbt_base_cfg.trim_start_matches('/');
@@ -107,7 +111,9 @@ impl StreamingService {
         let qbt_base_cfg = self.cfg.qbt_base.clone().unwrap_or(env.qbt.base);
         let qbt_base = if qbt_host.starts_with("http://") || qbt_host.starts_with("https://") {
             let mut b = qbt_host.clone();
-            if !b.ends_with('/') { b.push('/'); }
+            if !b.ends_with('/') {
+                b.push('/');
+            }
             b
         } else {
             let base = qbt_base_cfg.trim_start_matches('/');
@@ -127,14 +133,22 @@ impl StreamingService {
             self.client = tr;
             return Ok(());
         }
-        Err(StreamingError::RpcUnavailable("no healthy torrent backend found".into()))
+        Err(StreamingError::RpcUnavailable(
+            "no healthy torrent backend found".into(),
+        ))
     }
 
-    pub fn config(&self) -> &StreamingConfig { &self.cfg }
+    pub fn config(&self) -> &StreamingConfig {
+        &self.cfg
+    }
 
-    pub fn get_config(&self) -> StreamingConfig { self.cfg.clone() }
+    pub fn get_config(&self) -> StreamingConfig {
+        self.cfg.clone()
+    }
 
-    pub fn active_backend_name(&self) -> &'static str { self.client.name() }
+    pub fn active_backend_name(&self) -> &'static str {
+        self.client.name()
+    }
 
     /// Apply a partial config patch from JSON with validation; persist to disk.
     /// Only known, safe keys are applied. Returns reference to updated config.
@@ -142,16 +156,24 @@ impl StreamingService {
         use serde_json::Value as V;
         let obj = match patch {
             V::Object(m) => m,
-            _ => return Err(StreamingError::Invalid("config patch must be an object".into())),
+            _ => {
+                return Err(StreamingError::Invalid(
+                    "config patch must be an object".into(),
+                ))
+            }
         };
 
         // Helper to read u32 with clamping
         let u32_field = |key: &str, min: u32, max: u32, apply: &mut dyn FnMut(u32)| -> Result<()> {
             if let Some(v) = obj.get(key) {
                 let n = match v {
-                    V::Number(n) => n.as_u64().ok_or_else(|| StreamingError::Invalid(format!("{key} must be a non-negative integer")))? as u32,
-                    V::String(s) => s.parse::<u32>().map_err(|_| StreamingError::Invalid(format!("{key} must be an integer")))?,
-                    _ => return Err(StreamingError::Invalid(format!("{key} must be a number")))
+                    V::Number(n) => n.as_u64().ok_or_else(|| {
+                        StreamingError::Invalid(format!("{key} must be a non-negative integer"))
+                    })? as u32,
+                    V::String(s) => s.parse::<u32>().map_err(|_| {
+                        StreamingError::Invalid(format!("{key} must be an integer"))
+                    })?,
+                    _ => return Err(StreamingError::Invalid(format!("{key} must be a number"))),
                 };
                 let clamped = n.clamp(min, max);
                 apply(clamped);
@@ -160,17 +182,40 @@ impl StreamingService {
         };
 
         // Booleans
-        if let Some(v) = obj.get("auto_play_confirmed") { if v.is_boolean() { self.cfg.auto_play_confirmed = v.as_bool().unwrap_or(self.cfg.auto_play_confirmed); } }
-        if let Some(v) = obj.get("seeding_default") { if v.is_boolean() { self.cfg.seeding_default = v.as_bool().unwrap_or(self.cfg.seeding_default); } }
-        if let Some(v) = obj.get("auto_open_player_on_allow") { if v.is_boolean() { self.cfg.auto_open_player_on_allow = v.as_bool().unwrap_or(self.cfg.auto_open_player_on_allow); } }
+        if let Some(v) = obj.get("auto_play_confirmed") {
+            if v.is_boolean() {
+                self.cfg.auto_play_confirmed = v.as_bool().unwrap_or(self.cfg.auto_play_confirmed);
+            }
+        }
+        if let Some(v) = obj.get("seeding_default") {
+            if v.is_boolean() {
+                self.cfg.seeding_default = v.as_bool().unwrap_or(self.cfg.seeding_default);
+            }
+        }
+        if let Some(v) = obj.get("auto_open_player_on_allow") {
+            if v.is_boolean() {
+                self.cfg.auto_open_player_on_allow =
+                    v.as_bool().unwrap_or(self.cfg.auto_open_player_on_allow);
+            }
+        }
 
         // Thresholds
-        u32_field("play_min_first_bytes_mb", 0, 16_384, &mut |n| self.cfg.play_min_first_bytes_mb = n)?;
-        u32_field("play_min_total_mb", 0, 65_536, &mut |n| self.cfg.play_min_total_mb = n)?;
-        u32_field("play_min_total_percent", 0, 100, &mut |n| self.cfg.play_min_total_percent = n)?;
+        u32_field("play_min_first_bytes_mb", 0, 16_384, &mut |n| {
+            self.cfg.play_min_first_bytes_mb = n
+        })?;
+        u32_field("play_min_total_mb", 0, 65_536, &mut |n| {
+            self.cfg.play_min_total_mb = n
+        })?;
+        u32_field("play_min_total_percent", 0, 100, &mut |n| {
+            self.cfg.play_min_total_percent = n
+        })?;
         // Resume controls
-        u32_field("resume_poll_interval_sec", 1, 3_600, &mut |n| self.cfg.resume_poll_interval_sec = n)?;
-        u32_field("resume_timeout_min", 1, 10_080, &mut |n| self.cfg.resume_timeout_min = n)?; // up to 7 days
+        u32_field("resume_poll_interval_sec", 1, 3_600, &mut |n| {
+            self.cfg.resume_poll_interval_sec = n
+        })?;
+        u32_field("resume_timeout_min", 1, 10_080, &mut |n| {
+            self.cfg.resume_timeout_min = n
+        })?; // up to 7 days
 
         // Preferred backend
         if let Some(V::String(s)) = obj.get("preferred_backend") {
@@ -178,7 +223,9 @@ impl StreamingService {
             if matches!(v.as_str(), "auto" | "qbt" | "transmission") {
                 self.cfg.preferred_backend = v;
             } else {
-                return Err(StreamingError::Invalid("preferred_backend must be one of: auto, qbt, transmission".into()));
+                return Err(StreamingError::Invalid(
+                    "preferred_backend must be one of: auto, qbt, transmission".into(),
+                ));
             }
         }
 
@@ -188,35 +235,61 @@ impl StreamingService {
             if matches!(v.as_str(), "auto" | "tauri" | "system") {
                 self.cfg.playback_target = v;
             } else {
-                return Err(StreamingError::Invalid("playback_target must be one of: auto, tauri, system".into()));
+                return Err(StreamingError::Invalid(
+                    "playback_target must be one of: auto, tauri, system".into(),
+                ));
             }
         }
 
         // Endpoint overrides (optional). Sanitize lightly.
         if let Some(V::String(s)) = obj.get("qbt_host") {
             let t = s.trim();
-            self.cfg.qbt_host = if t.is_empty() { None } else { Some(t.to_string()) };
+            self.cfg.qbt_host = if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            };
         }
         if let Some(v) = obj.get("qbt_port") {
-            let n = match v { V::Number(n) => n.as_u64().unwrap_or(0) as u32, V::String(s) => s.parse::<u32>().unwrap_or(0), _ => 0 };
-            if n > 0 && n <= 65535 { self.cfg.qbt_port = Some(n as u16); }
+            let n = match v {
+                V::Number(n) => n.as_u64().unwrap_or(0) as u32,
+                V::String(s) => s.parse::<u32>().unwrap_or(0),
+                _ => 0,
+            };
+            if n > 0 && n <= 65535 {
+                self.cfg.qbt_port = Some(n as u16);
+            }
         }
         if let Some(V::String(s)) = obj.get("qbt_base") {
             let mut t = s.trim().to_string();
-            if !t.starts_with('/') { t = format!("/{}", t); }
+            if !t.starts_with('/') {
+                t = format!("/{}", t);
+            }
             self.cfg.qbt_base = if t == "/" { Some("/".into()) } else { Some(t) };
         }
         if let Some(V::String(s)) = obj.get("tr_host") {
             let t = s.trim();
-            self.cfg.tr_host = if t.is_empty() { None } else { Some(t.to_string()) };
+            self.cfg.tr_host = if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            };
         }
         if let Some(v) = obj.get("tr_port") {
-            let n = match v { V::Number(n) => n.as_u64().unwrap_or(0) as u32, V::String(s) => s.parse::<u32>().unwrap_or(0), _ => 0 };
-            if n > 0 && n <= 65535 { self.cfg.tr_port = Some(n as u16); }
+            let n = match v {
+                V::Number(n) => n.as_u64().unwrap_or(0) as u32,
+                V::String(s) => s.parse::<u32>().unwrap_or(0),
+                _ => 0,
+            };
+            if n > 0 && n <= 65535 {
+                self.cfg.tr_port = Some(n as u16);
+            }
         }
         if let Some(V::String(s)) = obj.get("tr_path") {
             let mut t = s.trim().to_string();
-            if !t.starts_with('/') { t = format!("/{}", t); }
+            if !t.starts_with('/') {
+                t = format!("/{}", t);
+            }
             self.cfg.tr_path = Some(t);
         }
 
@@ -250,7 +323,12 @@ impl StreamingService {
         Ok(final_dir)
     }
 
-    pub async fn add_magnet(&self, magnet: &str, save_path: Option<&str>, seeding: Option<bool>) -> Result<AddResult> {
+    pub async fn add_magnet(
+        &self,
+        magnet: &str,
+        save_path: Option<&str>,
+        seeding: Option<bool>,
+    ) -> Result<AddResult> {
         if !magnet.starts_with("magnet:") {
             return Err(StreamingError::Invalid("expected a magnet URI".into()));
         }
@@ -259,7 +337,11 @@ impl StreamingService {
 
     pub async fn get_status(&self, info_hash_or_magnet: &str) -> Result<TorrentStatus> {
         // If given a magnet, try to extract btih
-        let ih = if let Some(h) = extract_btih(info_hash_or_magnet) { h } else { info_hash_or_magnet };
+        let ih = if let Some(h) = extract_btih(info_hash_or_magnet) {
+            h
+        } else {
+            info_hash_or_magnet
+        };
         self.client.status(ih).await
     }
 
@@ -272,12 +354,22 @@ impl StreamingService {
     }
 
     #[cfg(feature = "client")]
-    pub async fn request_play<P: UiPrompt>(&mut self, info_hash: &str, file_index: Option<usize>, ui: &P) -> Result<PlayDecision> {
+    pub async fn request_play<P: UiPrompt>(
+        &mut self,
+        info_hash: &str,
+        file_index: Option<usize>,
+        ui: &P,
+    ) -> Result<PlayDecision> {
         let files = self.client.list_files(info_hash).await?;
         let (_idx, file) = match pick_file(files, file_index) {
             Some(t) => t,
             None => {
-                return Ok(PlayDecision { allow: false, path: None, reason: Some("No files available".into()), remember: false });
+                return Ok(PlayDecision {
+                    allow: false,
+                    path: None,
+                    reason: Some("No files available".into()),
+                    remember: false,
+                });
             }
         };
 
@@ -298,7 +390,12 @@ impl StreamingService {
             let title = file.path.rsplit('/').next().unwrap_or(&file.path);
             let confirm = ui.confirm_play(title, &file.path, file.length).await?;
             if !confirm.proceed {
-                return Ok(PlayDecision { allow: false, path: None, reason: Some("User canceled".into()), remember: confirm.remember });
+                return Ok(PlayDecision {
+                    allow: false,
+                    path: None,
+                    reason: Some("User canceled".into()),
+                    remember: confirm.remember,
+                });
             }
             if confirm.remember {
                 self.cfg.auto_play_confirmed = true;
@@ -308,9 +405,19 @@ impl StreamingService {
         }
 
         if allow_now {
-            Ok(PlayDecision { allow: true, path: Some(file.path), reason: None, remember })
+            Ok(PlayDecision {
+                allow: true,
+                path: Some(file.path),
+                reason: None,
+                remember,
+            })
         } else {
-            Ok(PlayDecision { allow: false, path: None, reason: Some("Insufficient data yet".into()), remember })
+            Ok(PlayDecision {
+                allow: false,
+                path: None,
+                reason: Some("Insufficient data yet".into()),
+                remember,
+            })
         }
     }
 }

@@ -1,6 +1,6 @@
 use httpmock::{Method::POST, Mock, MockServer};
-use streaming_files::rpc::TorrentClient; // trait methods
 use streaming_files::rpc::transmission::TransmissionClient;
+use streaming_files::rpc::TorrentClient; // trait methods
 
 fn transmission_success_body<T: serde::Serialize>(arguments: T) -> String {
     serde_json::json!({ "result": "success", "arguments": arguments }).to_string()
@@ -12,16 +12,17 @@ async fn transmission_healthy_handles_handshake() {
 
     // First call → 409 with session id header
     let _m1: Mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/transmission/rpc")
-            .matches(|req| {
-                let has = req
-                    .headers
-                    .as_ref()
-                    .map(|h| h.iter().any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id")))
-                    .unwrap_or(false);
-                !has
-            });
+        when.method(POST).path("/transmission/rpc").matches(|req| {
+            let has = req
+                .headers
+                .as_ref()
+                .map(|h| {
+                    h.iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id"))
+                })
+                .unwrap_or(false);
+            !has
+        });
         then.status(409)
             .header("X-Transmission-Session-Id", "abc123")
             .body("");
@@ -48,16 +49,17 @@ async fn transmission_add_magnet_success_and_duplicate() {
 
     // Handshake first
     let _m1 = server.mock(|when, then| {
-        when.method(POST)
-            .path("/transmission/rpc")
-            .matches(|req| {
-                let has = req
-                    .headers
-                    .as_ref()
-                    .map(|h| h.iter().any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id")))
-                    .unwrap_or(false);
-                !has
-            });
+        when.method(POST).path("/transmission/rpc").matches(|req| {
+            let has = req
+                .headers
+                .as_ref()
+                .map(|h| {
+                    h.iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id"))
+                })
+                .unwrap_or(false);
+            !has
+        });
         then.status(409).header("X-Transmission-Session-Id", "sess");
     });
     // Real add → success
@@ -74,23 +76,27 @@ async fn transmission_add_magnet_success_and_duplicate() {
     });
 
     let client = TransmissionClient::new(format!("{}/transmission/rpc", server.base_url()));
-    let add = client.add_magnet("magnet:?xt=urn:btih:aa11", None, None).await.unwrap();
+    let add = client
+        .add_magnet("magnet:?xt=urn:btih:aa11", None, None)
+        .await
+        .unwrap();
     assert_eq!(add.info_hash, "aa11");
     assert_eq!(add.name.as_deref(), Some("Movie"));
 
     // Duplicate path
     let server2 = MockServer::start();
     let _d1 = server2.mock(|when, then| {
-        when.method(POST)
-            .path("/transmission/rpc")
-            .matches(|req| {
-                let has = req
-                    .headers
-                    .as_ref()
-                    .map(|h| h.iter().any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id")))
-                    .unwrap_or(false);
-                !has
-            });
+        when.method(POST).path("/transmission/rpc").matches(|req| {
+            let has = req
+                .headers
+                .as_ref()
+                .map(|h| {
+                    h.iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id"))
+                })
+                .unwrap_or(false);
+            !has
+        });
         then.status(409).header("X-Transmission-Session-Id", "ddup");
     });
     let _d2 = server2.mock(|when, then| {
@@ -105,7 +111,10 @@ async fn transmission_add_magnet_success_and_duplicate() {
             })));
     });
     let client2 = TransmissionClient::new(format!("{}/transmission/rpc", server2.base_url()));
-    let add2 = client2.add_magnet("magnet:?xt=urn:btih:bb22", None, None).await.unwrap();
+    let add2 = client2
+        .add_magnet("magnet:?xt=urn:btih:bb22", None, None)
+        .await
+        .unwrap();
     assert_eq!(add2.info_hash, "bb22");
     assert_eq!(add2.name.as_deref(), Some("Dup"));
 }
@@ -116,16 +125,17 @@ async fn transmission_status_and_files_mapping() {
 
     // Handshake
     let _h1 = server.mock(|when, then| {
-        when.method(POST)
-            .path("/transmission/rpc")
-            .matches(|req| {
-                let has = req
-                    .headers
-                    .as_ref()
-                    .map(|h| h.iter().any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id")))
-                    .unwrap_or(false);
-                !has
-            });
+        when.method(POST).path("/transmission/rpc").matches(|req| {
+            let has = req
+                .headers
+                .as_ref()
+                .map(|h| {
+                    h.iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id"))
+                })
+                .unwrap_or(false);
+            !has
+        });
         then.status(409).header("X-Transmission-Session-Id", "tok");
     });
 
@@ -198,16 +208,17 @@ async fn transmission_start_and_stop() {
     let server = MockServer::start();
     // Handshake
     let _h1 = server.mock(|when, then| {
-        when.method(POST)
-            .path("/transmission/rpc")
-            .matches(|req| {
-                let has = req
-                    .headers
-                    .as_ref()
-                    .map(|h| h.iter().any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id")))
-                    .unwrap_or(false);
-                !has
-            });
+        when.method(POST).path("/transmission/rpc").matches(|req| {
+            let has = req
+                .headers
+                .as_ref()
+                .map(|h| {
+                    h.iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("X-Transmission-Session-Id"))
+                })
+                .unwrap_or(false);
+            !has
+        });
         then.status(409).header("X-Transmission-Session-Id", "tok2");
     });
     // Start

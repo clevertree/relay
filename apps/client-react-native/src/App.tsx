@@ -18,6 +18,7 @@ import DebugTab from './components/DebugTab';
 import {useAppState} from './state/store';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { UpdateModal } from './components/UpdateModal';
+import { initNativeRustTranspiler } from './nativeRustTranspiler';
 
 type RootStackParamList = {
   Main: undefined;
@@ -188,23 +189,44 @@ const DebugScreen: React.FC<{navigation: any}> = ({navigation}) => {
   );
 };
 
-class ErrorBoundary extends React.Component<{}, {error: Error | null}> {
+class ErrorBoundary extends React.Component<{}, {error: Error | null; info?: React.ErrorInfo | null}> {
   constructor(props: {}) {
     super(props);
-    this.state = {error: null};
+    this.state = {error: null, info: null};
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     // eslint-disable-next-line no-console
     console.error('ErrorBoundary caught:', error, info.componentStack);
-    this.setState({error});
+    this.setState({error, info});
   }
 
   render() {
     if (this.state.error) {
+      const stack = this.state.info?.componentStack || this.state.error.stack || 'stack trace unavailable';
       return (
-        <SafeAreaView style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
-          <Text style={{color: '#dc3545'}}>A rendering error occurred. Check logs.</Text>
+        <SafeAreaView style={{flex: 1, padding: 16, backgroundColor: '#111'}}>
+          <View style={{flex: 1, justifyContent: 'center'}}>
+            <Text style={{color: '#f5f5f5', fontSize: 20, fontWeight: '700', marginBottom: 10}}>
+              Rendering failure
+            </Text>
+            <Text style={{color: '#dedede', fontSize: 16, marginBottom: 12}}>
+              We couldn’t render some UI. The log below shows what went wrong.
+            </Text>
+            <Text style={{color: '#ff8c00', fontWeight: '600'}}>Error message</Text>
+            <Text style={{color: '#fff', marginBottom: 12}} selectable>
+              {this.state.error.message}
+            </Text>
+            <Text style={{color: '#ff8c00', fontWeight: '600'}}>Component stack</Text>
+            <ScrollView style={{flex: 1, marginTop: 6, backgroundColor: '#222', borderRadius: 8, padding: 10}} contentContainerStyle={{flexGrow: 1}}>
+              <Text style={{color: '#d4d4d4', fontSize: 12, lineHeight: 20}} selectable>
+                {stack}
+              </Text>
+            </ScrollView>
+            <Text style={{color: '#9f9', fontSize: 13, marginTop: 10}}>
+              Please capture your device logs and share them with the engineering team along with the actions you took before this screen appeared.
+            </Text>
+          </View>
         </SafeAreaView>
       );
     }
@@ -214,6 +236,19 @@ class ErrorBoundary extends React.Component<{}, {error: Error | null}> {
 }
 
 const App: React.FC = () => {
+  // Initialize native Rust hook transpiler bridge on app startup
+  useEffect(() => {
+    ;(async () => {
+      try {
+        console.log('[App] Initializing native hook-transpiler bridge...')
+        await initNativeRustTranspiler()
+        console.log('[App] Native hook-transpiler bridge initialized')
+      } catch (e) {
+        console.error('[App] Failed to initialize native hook-transpiler bridge:', e)
+      }
+    })()
+  }, [])
+
   // Debug: log component availability to help diagnose undefined SceneView errors
   // (SceneView will throw if a screen's component is undefined)
   // eslint-disable-next-line no-console

@@ -1,6 +1,6 @@
-use hook_transpiler::{transpile, TranspileError, TranspileOptions, version as transpiler_version};
-use serde::{Serialize, Deserialize};
+use hook_transpiler::{transpile, version as transpiler_version, TranspileError, TranspileOptions};
 use percent_encoding::percent_decode_str;
+use serde::{Deserialize, Serialize};
 
 // IPFS CLI commands removed; IPFS logic is delegated to repo scripts
 
@@ -1102,13 +1102,7 @@ mod tests {
         headers.insert(HEADER_BRANCH, "main".parse().unwrap());
         headers.insert(HEADER_REPO, "repo".parse().unwrap());
 
-        let response = get_file(
-            State(state),
-            headers,
-            AxPath("hello.txt".to_string()),
-            None,
-        )
-        .await;
+        let response = get_file(State(state), headers, AxPath("hello.txt".to_string()), None).await;
         let (parts, body) = response.into_response().into_parts();
 
         assert_eq!(parts.status, StatusCode::OK);
@@ -1174,13 +1168,7 @@ mod tests {
         headers.insert(HEADER_BRANCH, "main".parse().unwrap());
         headers.insert(HEADER_REPO, "nonexistent".parse().unwrap());
 
-        let response = get_file(
-            State(state),
-            headers,
-            AxPath("file.txt".to_string()),
-            None,
-        )
-        .await;
+        let response = get_file(State(state), headers, AxPath("file.txt".to_string()), None).await;
         let (parts, _body) = response.into_response().into_parts();
 
         assert_eq!(parts.status, StatusCode::NOT_FOUND);
@@ -1220,11 +1208,7 @@ mod tests {
         // Verify Allow header contains expected methods
         let allow_header = parts.headers.get("Allow");
         assert!(allow_header.is_some());
-        let allow_str = allow_header
-            .unwrap()
-            .to_str()
-            .unwrap_or("")
-            .to_uppercase();
+        let allow_str = allow_header.unwrap().to_str().unwrap_or("").to_uppercase();
         assert!(allow_str.contains("GET"));
         assert!(allow_str.contains("OPTIONS"));
 
@@ -1349,13 +1333,8 @@ mod tests {
         headers.insert(HEADER_BRANCH, "main".parse().unwrap());
         headers.insert(HEADER_REPO, "repo".parse().unwrap());
 
-        let response = head_file(
-            State(state),
-            headers,
-            AxPath("hello.txt".to_string()),
-            None,
-        )
-        .await;
+        let response =
+            head_file(State(state), headers, AxPath("hello.txt".to_string()), None).await;
         let (parts, body) = response.into_response().into_parts();
 
         assert_eq!(parts.status, StatusCode::OK);
@@ -1421,13 +1400,7 @@ mod tests {
         headers.insert(HEADER_BRANCH, "main".parse().unwrap());
         headers.insert(HEADER_REPO, "nonexistent".parse().unwrap());
 
-        let response = head_file(
-            State(state),
-            headers,
-            AxPath("file.txt".to_string()),
-            None,
-        )
-        .await;
+        let response = head_file(State(state), headers, AxPath("file.txt".to_string()), None).await;
         let (parts, _body) = response.into_response().into_parts();
 
         assert_eq!(parts.status, StatusCode::NOT_FOUND);
@@ -1494,9 +1467,7 @@ async fn get_file(
     }
     let normalized_path = decoded.trim_start_matches('/').to_string();
 
-    if should_transpile_request(&headers, &query)
-        && is_transpilable_hook_path(&normalized_path)
-    {
+    if should_transpile_request(&headers, &query) && is_transpilable_hook_path(&normalized_path) {
         if let Some(transpiled) =
             transpile_hook_file(&state.repo_path, &branch, &repo_name, &normalized_path)
         {
@@ -1507,13 +1478,8 @@ async fn get_file(
     info!(%branch, "resolved branch");
 
     // Resolve via Git first for all file types
-    let git_result = git_resolve_and_respond(
-        &state.repo_path,
-        &headers,
-        &branch,
-        &repo_name,
-        &decoded,
-    );
+    let git_result =
+        git_resolve_and_respond(&state.repo_path, &headers, &branch, &repo_name, &decoded);
     match git_result {
         GitResolveResult::Respond(resp) => return resp,
         GitResolveResult::NotFound(rel_missing) => {
@@ -1675,10 +1641,17 @@ async fn try_static(state: &AppState, decoded: &str) -> Option<Response> {
                         .essence_str()
                         .to_string();
                     // Add basic cache headers for static assets
-                    let mut resp = (StatusCode::OK, [("Content-Type", ct.clone())], bytes).into_response();
+                    let mut resp =
+                        (StatusCode::OK, [("Content-Type", ct.clone())], bytes).into_response();
                     let headers = resp.headers_mut();
-                    headers.insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=3600"));
-                    headers.insert(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, axum::http::HeaderValue::from_static("*"));
+                    headers.insert(
+                        axum::http::header::CACHE_CONTROL,
+                        axum::http::HeaderValue::from_static("public, max-age=3600"),
+                    );
+                    headers.insert(
+                        axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                        axum::http::HeaderValue::from_static("*"),
+                    );
                     return Some(resp);
                 }
                 Err(e) => {
@@ -1919,13 +1892,7 @@ async fn head_file(
     }
 
     // Resolve via Git - if found, return headers without body
-    match git_resolve_and_respond(
-        &state.repo_path,
-        &headers,
-        &branch,
-        &repo_name,
-        &decoded,
-    ) {
+    match git_resolve_and_respond(&state.repo_path, &headers, &branch, &repo_name, &decoded) {
         GitResolveResult::Respond(resp) => {
             // If GET would have succeeded, return 200 with same headers but no body
             let (parts, _body) = resp.into_parts();
@@ -1933,11 +1900,15 @@ async fn head_file(
                 (
                     StatusCode::OK,
                     [
-                        ("Content-Type",
-                            parts.headers.get("Content-Type")
+                        (
+                            "Content-Type",
+                            parts
+                                .headers
+                                .get("Content-Type")
                                 .and_then(|h| h.to_str().ok())
                                 .unwrap_or("application/octet-stream")
-                                .to_string()),
+                                .to_string(),
+                        ),
                         (HEADER_BRANCH, branch),
                         (HEADER_REPO, repo_name),
                     ],
@@ -1964,10 +1935,7 @@ async fn head_file(
 }
 
 /// Append permissive CORS headers to all responses without short-circuiting OPTIONS.
-async fn cors_headers(
-    req: Request<Body>,
-    next: Next,
-) -> Response {
+async fn cors_headers(req: Request<Body>, next: Next) -> Response {
     let mut res = next.run(req).await;
     let headers = res.headers_mut();
     headers.insert(
@@ -2104,7 +2072,10 @@ fn read_file_from_repo(
 }
 
 fn parse_bool_like(value: &str) -> bool {
-    matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 fn should_transpile_request(
@@ -2118,7 +2089,10 @@ fn should_transpile_request(
             }
         }
     }
-    if let Some(header) = headers.get("x-relay-transpile").and_then(|v| v.to_str().ok()) {
+    if let Some(header) = headers
+        .get("x-relay-transpile")
+        .and_then(|v| v.to_str().ok())
+    {
         if parse_bool_like(header) {
             return true;
         }
@@ -2156,7 +2130,10 @@ fn map_transpile_error(err: TranspileError) -> (StatusCode, String) {
             message,
         } => (
             StatusCode::BAD_REQUEST,
-            format!("Parse error in {} at {}:{} — {}", filename, line, col, message),
+            format!(
+                "Parse error in {} at {}:{} — {}",
+                filename, line, col, message
+            ),
         ),
         TranspileError::TransformError(filename, source) => (
             StatusCode::BAD_REQUEST,
@@ -2234,7 +2211,11 @@ fn transpile_hook_file(
             add_transpiler_version_header(&mut resp);
             Some(resp)
         }
-        Err(err) => Some(build_transpile_error_response(err, Some(branch), Some(repo_name))),
+        Err(err) => Some(build_transpile_error_response(
+            err,
+            Some(branch),
+            Some(repo_name),
+        )),
     }
 }
 

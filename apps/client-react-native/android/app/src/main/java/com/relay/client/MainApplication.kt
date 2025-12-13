@@ -10,6 +10,9 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.soloader.SoLoader
+import com.relay.client.RelayCorePackage
+import com.relay.client.APKInstallerPackage
+import com.relay.client.RustTranspilerPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -19,6 +22,8 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               // Add our custom RelayCorePackage
               add(RelayCorePackage())
+              // Add native Rust transpiler bridge
+              add(RustTranspilerPackage())
               // Add APKInstallerPackage for OTA updates
               add(APKInstallerPackage())
             }
