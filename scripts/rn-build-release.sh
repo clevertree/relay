@@ -5,9 +5,12 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 APP_DIR="$ROOT_DIR/apps/client-react-native"
 GRADLEW="$APP_DIR/android/gradlew"
 GRADLEW_UNIX="$APP_DIR/android/gradlew"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
 
 echo "[rn-build-release] Root: $ROOT_DIR"
 echo "[rn-build-release] App:  $APP_DIR"
+echo "[rn-build-release] Rebuilding hook-transpiler native libs"
+bash "$SCRIPTS_DIR/rn-prepare-hook-transpiler.sh"
 
 if [[ ! -x "$GRADLEW_UNIX" ]]; then
   echo "[rn-build-release] Gradle wrapper not executable, fixing perms"

@@ -5,8 +5,6 @@
     "version": "0.1.0",
     "scripts": {
         "dev": "npm --prefix apps/client-web run dev",
-        "dev:client": "cargo run --manifest-path apps/client/Cargo.toml",
-        "build:client": "cargo build --manifest-path apps/client/Cargo.toml",
         "dev:server": "cargo run --manifest-path apps/server/Cargo.toml -- serve",
         "dev:server:dist": "RELAY_REPO_PATH=./data RELAY_STATIC_DIR=/Users/ari.asulin/p/relay/apps/client-web/dist RELAY_HTTP_PORT=8080 RELAY_HTTPS_PORT=8443 cargo run --manifest-path apps/server/Cargo.toml -- serve",
         "dev:server:dist:debug": "RELAY_REPO_PATH=./data RELAY_STATIC_DIR=apps/client-web/dist RELAY_HTTP_PORT=8080 RELAY_HTTPS_PORT=8443 cargo run --manifest-path apps/server/Cargo.toml -- serve",
@@ -40,6 +38,7 @@
         "rn:build:release": "bash ./scripts/rn-build-release.sh",
         "rn:ios": "npm --prefix apps/client-react-native run ios",
         "rn:typecheck": "npm --prefix apps/client-react-native run typecheck",
+        "rn:prep-hook-transpiler": "bash ./scripts/rn-prepare-hook-transpiler.sh",
         "docker:build:local": "docker build -t relay-all-in-one:local .",
         "docker:run:local:data": "bash ./scripts/run-relay-local-with-data.sh"
     },

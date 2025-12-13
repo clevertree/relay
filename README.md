@@ -345,6 +345,7 @@ npm run rn:android:installRelease
 Notes:
 - If installation fails with an unsigned APK error, configure signing in `apps/client-react-native/android/app/build.gradle`.
 - The RN client includes a Settings toggle (in Debug tab) to choose Client or Server transpiler mode. Default is Client. Server mode posts to `/api/transpile` and executes returned CommonJS.
+- The release script rebuilds [scripts/rn-prepare-hook-transpiler.sh](scripts/rn-prepare-hook-transpiler.sh) before packaging so the Android app always ships the newest native hook-transpiler bridge.
 
 ## Release Validation
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-CRATE_DIR="$ROOT_DIR/apps/client-web/wasm-transpiler"
+CRATE_DIR="$ROOT_DIR/crates/hook-transpiler"
 OUT_DIR="$ROOT_DIR/apps/client-web/public/wasm"
 TARGET_DIR="$CRATE_DIR/target/wasm32-unknown-unknown/release"
 
@@ -23,10 +23,11 @@ echo "[build-hook-wasm] Building crate with cargo (release, target wasm32-unknow
 pushd "$CRATE_DIR" >/dev/null
 cargo build \
   --target wasm32-unknown-unknown \
-  --release
+  --release \
+  --features wasm
 popd >/dev/null
 
-WASM_BIN="$TARGET_DIR/wasm_hook_transpiler.wasm"
+WASM_BIN="$TARGET_DIR/relay_hook_transpiler.wasm"
 if [ ! -f "$WASM_BIN" ]; then
   echo "[build-hook-wasm] ERROR: Built wasm not found at $WASM_BIN" >&2
   exit 1

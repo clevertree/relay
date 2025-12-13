@@ -92,6 +92,8 @@ npm run rn:start
 npm run rn:build:release
 ```
 
+Note: `npm run rn:build:release` now rebuilds [scripts/rn-prepare-hook-transpiler.sh](scripts/rn-prepare-hook-transpiler.sh) before packaging so the native bridge always matches the latest hook-transpiler build.
+
 In the RN app Debug tab:
 - Use the Transpiler Settings toggle (Client or Server). Default is Client. Server mode posts to `/api/transpile` with `to_common_js=true`.
 - Run the single "Client Transpiler Test" to verify in‑app JSX transpilation.

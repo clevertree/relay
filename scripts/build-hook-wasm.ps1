@@ -6,7 +6,7 @@ $WarningPreference = "SilentlyContinue"
 
 # Get root directory
 $RootDir = (Get-Item (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))).FullName
-$CrateDir = Join-Path $RootDir "apps/client-web/wasm-transpiler"
+$CrateDir = Join-Path $RootDir "crates/hook-transpiler"
 $OutDir = Join-Path $RootDir "apps/client-web/src/wasm"
 $PublicDir = Join-Path $RootDir "apps/client-web/public/wasm"
 $TargetDir = Join-Path $CrateDir "target/wasm32-unknown-unknown/release"
@@ -32,9 +32,10 @@ $env:RUSTFLAGS = "--cfg getrandom_backend=`"wasm_js`""
 Write-Host "[build-hook-wasm] Building crate with cargo (release, target wasm32-unknown-unknown) in crate dir"
 Push-Location $CrateDir
 try {
-    cargo build `
-      --target wasm32-unknown-unknown `
-      --release
+        cargo build `
+            --target wasm32-unknown-unknown `
+            --release `
+            --features wasm
     if ($LASTEXITCODE -ne 0) {
         throw "cargo build failed with exit code $LASTEXITCODE"
     }
@@ -43,7 +44,7 @@ try {
 }
 
 # Check that WASM binary exists
-$WasmBin = Join-Path $TargetDir "wasm_hook_transpiler.wasm"
+$WasmBin = Join-Path $TargetDir "relay_hook_transpiler.wasm"
 if (-not (Test-Path $WasmBin)) {
     Write-Host "[build-hook-wasm] ERROR: Built wasm not found at $WasmBin" -ForegroundColor Red
     exit 1
