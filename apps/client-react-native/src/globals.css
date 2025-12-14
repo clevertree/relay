@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Minimal globals for NativeWind debug generation */
+
+/* Add any safelisted classes used by app for quick testing */
+.text-base {}
+
+.bg-bgPrimary {}
+
+.bg-bgSecondary {}
+
+.font-bold {}
+
+.p-3 {}
+
+.flex {}
+
+.flex-1 {}
+
+.flex-row {}
+
+.flex-col {}
+
+.w-full {}
+
+.h-full {}

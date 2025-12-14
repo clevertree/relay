@@ -63,7 +63,15 @@ module.exports = {
       },
     },
   },
-  safelist: [],
+  safelist: [
+    // Classes extracted from template/hooks/client/components/Layout.jsx
+    'flex', 'flex-col', 'h-full', 'gap-3', 'p-0', 'border-b', 'border-gray-300', 'dark:border-gray-700', 'flex-shrink-0',
+    'gap-2', 'p-2', 'flex-1', 'px-2', 'py-2', 'border', 'rounded', 'font-mono', 'text-sm',
+    'px-4', 'py-2', 'bg-blue-500', 'hover:bg-blue-600', 'text-white', 'border-none', 'cursor-pointer', 'font-medium',
+    'gap-4', 'items-center', 'text-sm', 'dark:border-gray-600', 'bg-white', 'dark:bg-gray-800', 'dark:text-white',
+    'ml-auto', 'px-2', 'py-1', 'px-3', 'py-1', 'bg-gray-700', 'hover:bg-gray-800', 'bg-gray-600', 'hover:bg-gray-700',
+    'overflow-y-auto'
+  ],
   plugins: [],
 };
 

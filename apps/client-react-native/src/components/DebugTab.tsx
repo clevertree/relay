@@ -111,6 +111,76 @@ export default function DebugTab() {
     console.log('[DebugTab] Rendered')
   }, [])
 
+  // Quick runtime test for nativewind `className` / `styled` support
+  const NativeWindRuntimeTest: React.FC = () => {
+    let Styled: any = null
+    let diag: { present: boolean; keys?: string[]; styledType?: string; NativeWindStyleSheetType?: string } = { present: false }
+    try {
+      // eslint-disable-next-line global-require
+      const nw = require('nativewind')
+      diag.present = !!nw
+      try { diag.keys = Object.keys(nw || {}) } catch (e) { diag.keys = undefined }
+      try { diag.styledType = typeof nw?.styled } catch (e) { diag.styledType = 'error' }
+      try { diag.NativeWindStyleSheetType = typeof nw?.NativeWindStyleSheet } catch (e) { diag.NativeWindStyleSheetType = 'error' }
+      if (nw && typeof nw.styled === 'function') Styled = nw.styled
+      else if (nw && nw.default && typeof nw.default.styled === 'function') Styled = nw.default.styled
+    } catch (e) {
+      // Attempt to use shim's helper
+      try {
+        const shim = require('../nativewind-shim')
+        if (shim && typeof shim.createStyledWrapper === 'function') {
+          Styled = shim.createStyledWrapper
+          diag.present = true
+          diag.keys = ['(app-local shim)']
+          diag.styledType = 'function (shim)'
+        }
+      } catch (err) {
+        Styled = null
+      }
+    }
+
+    const TestBox = Styled ? Styled((props: any) => (
+      <View style={{ padding: 8, borderRadius: 6 }} {...props}>{props.children}</View>
+    )) : (props: any) => <View style={[{ padding: 8, borderRadius: 6 }, props.style]}>{props.children}</View>
+
+    const TestText = Styled ? Styled((props: any) => <Text {...props}>{props.children}</Text>) : (props: any) => <Text style={props.style}>{props.children}</Text>
+
+    return (
+      <View style={{ marginBottom: 12 }}>
+        <View style={{ marginBottom: 8 }}>
+          <Text style={{ fontWeight: '700', marginBottom: 6 }}>NativeWind runtime diagnostics</Text>
+          <Text style={{ fontSize: 12, color: '#444' }}>present: {String(diag.present)}</Text>
+          <Text style={{ fontSize: 12, color: '#444' }}>styled type: {String(diag.styledType)}</Text>
+          <Text style={{ fontSize: 12, color: '#444' }}>NativeWindStyleSheet type: {String(diag.NativeWindStyleSheetType)}</Text>
+          <Text style={{ fontSize: 12, color: '#444' }}>keys: {Array.isArray(diag.keys) ? diag.keys.join(', ') : String(diag.keys)}</Text>
+        </View>
+        <Text style={{ fontWeight: '700', marginBottom: 6 }}>NativeWind runtime className test</Text>
+        <TestBox className="p-2 rounded bg-bgTertiary" style={{ borderWidth: 1, borderColor: '#ddd' }}>
+          <TestText className="text-base font-bold">This should be styled via className</TestText>
+        </TestBox>
+        <View style={{ height: 8 }} />
+        <View style={{ padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
+          <Text style={{ fontSize: 14, fontWeight: '700' }}>Inline style counterpart</Text>
+        </View>
+        <View style={{ height: 12 }} />
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Flex row test</Text>
+        <View style={{ borderWidth: 1, borderColor: '#eee', borderRadius: 6, overflow: 'hidden' }}>
+          <View style={{ flexDirection: 'row', height: 48 }}>
+            <TestBox className="flex-1 p-2" style={{ backgroundColor: '#fde68a', borderRightWidth: 1, borderRightColor: '#fbbf24' }}>
+              <TestText className="text-base">Left</TestText>
+            </TestBox>
+            <TestBox className="flex-1 p-2" style={{ backgroundColor: '#d1fae5', borderRightWidth: 1, borderRightColor: '#34d399' }}>
+              <TestText className="text-base">Center</TestText>
+            </TestBox>
+            <TestBox className="flex-1 p-2" style={{ backgroundColor: '#bfdbfe' }}>
+              <TestText className="text-base">Right</TestText>
+            </TestBox>
+          </View>
+        </View>
+      </View>
+    )
+  }
+
   const updateResult = (testName: string, result: TestResult) => {
     setResults(prev => ({ ...prev, [testName]: result }))
   }
@@ -135,7 +205,7 @@ export default function DebugTab() {
       updateResult(testName, {
         status: 'success',
         message: 'Client-side transpiler produced CommonJS output',
-        details: out.substring(0, 300) + (out.length > 300 ? '...':'')
+        details: out.substring(0, 300) + (out.length > 300 ? '...' : '')
       })
     } catch (e: any) {
       updateResult(testName, {
@@ -368,14 +438,14 @@ export default function DebugTab() {
         requireShim,
         host: 'localhost',
         transpiler: transpileWrapper,
-        onDiagnostics: () => {},
+        onDiagnostics: () => { },
       })
 
       const importHandler = new ES6ImportHandler({
         host: 'localhost',
         baseUrl: '/hooks',
         transpiler: transpileWrapper,
-        onDiagnostics: () => {},
+        onDiagnostics: () => { },
       })
       moduleLoader.setImportHandler(importHandler)
 
@@ -386,10 +456,10 @@ export default function DebugTab() {
         FileRenderer: () => null as any,
         params: {},
         helpers: {
-          navigate: () => {},
+          navigate: () => { },
           buildPeerUrl: (path: string) => `https://localhost${path}`,
           loadModule: async () => ({}),
-          setBranch: () => {},
+          setBranch: () => { },
           buildRepoHeaders: () => ({}),
         },
       }
@@ -516,6 +586,11 @@ export default function DebugTab() {
           <View style={[styles.resultBox, styles.resultBoxSuccess]}>
             <Text style={styles.resultText}>Current mode: {mode}</Text>
           </View>
+        </View>
+
+        {/* NativeWind runtime test (quick visual compare) */}
+        <View style={styles.section}>
+          <NativeWindRuntimeTest />
         </View>
 
         {/* Single client-side transpiler test */}
@@ -735,10 +810,10 @@ export default function DebugTab() {
                 FileRenderer: () => null as any,
                 params: {},
                 helpers: {
-                  navigate: () => {},
+                  navigate: () => { },
                   buildPeerUrl: (p: string) => p,
                   loadModule: async () => ({}),
-                  setBranch: () => {},
+                  setBranch: () => { },
                   buildRepoHeaders: () => ({}),
                 },
               }
@@ -754,7 +829,7 @@ export default function DebugTab() {
               console.log('[DebugTab][Import] module.exports:', (mod as any).exports)
               console.log('[DebugTab][Import] Object.getOwnPropertyNames(mod):', Object.getOwnPropertyNames(mod || {}))
               console.log('[DebugTab][Import] module.exports.default:', (mod as any).exports?.default)
-              
+
               if (typeof def !== 'function') {
                 const detailedErr = `Default export is not a function (got ${typeof def}). 
 Exports keys: ${Object.keys(mod || {}).join(',')}
@@ -764,10 +839,10 @@ Transpiled snippet: ${transpiled.substring(0, 300)}`
               }
               const res = await def(ctx)
               console.log('[DebugTab][Import] Dynamic import delegation success', { result: res })
-              updateResult(testName, { 
-                status: 'success', 
-                message: 'Dynamic import delegated successfully', 
-                details: `Result: ${String(res)}\nTranspiled length: ${transpiled.length}` 
+              updateResult(testName, {
+                status: 'success',
+                message: 'Dynamic import delegated successfully',
+                details: `Result: ${String(res)}\nTranspiled length: ${transpiled.length}`
               })
             } catch (e: any) {
               console.log('[DebugTab][Import] Dynamic import delegation failed', {
@@ -780,10 +855,10 @@ Stack: ${e?.stack?.split('\n').slice(0, 5).join('\n') || 'N/A'}
 
 Transpiled Code (first 1000 chars):
 ${transpiled?.substring(0, 1000) || 'N/A'}`
-              updateResult('dynamicImport', { 
-                status: 'error', 
-                message: 'Dynamic import delegation failed', 
-                details: detailedMsg 
+              updateResult('dynamicImport', {
+                status: 'error',
+                message: 'Dynamic import delegation failed',
+                details: detailedMsg
               })
             } finally {
               setLoading(null)

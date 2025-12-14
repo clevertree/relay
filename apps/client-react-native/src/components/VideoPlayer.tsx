@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Dimensions,
+  Platform,
 } from 'react-native'
 import { DistributedFileLoader, type LoadingStatus, type FileLoadResult } from './DistributedFileLoader'
 
@@ -280,6 +281,16 @@ export function VideoPlayer({
   style,
   onStatusChange,
 }: VideoPlayerProps) {
+  // Temporarily disable native video playback on Android to avoid crashes
+  if (Platform.OS === 'android') {
+    return (
+      <View style={[styles.container, style]}>
+        <View style={styles.videoContainer}>
+          <Text style={styles.placeholderText}>Video playback disabled on Android</Text>
+        </View>
+      </View>
+    )
+  }
   const [loadingStatus, setLoadingStatus] = useState<LoadingStatus>('idle')
   const [statusMessage, setStatusMessage] = useState<string>('')
   const [progress, setProgress] = useState<number>(0)

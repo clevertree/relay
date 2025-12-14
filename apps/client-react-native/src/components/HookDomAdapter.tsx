@@ -35,9 +35,11 @@ const ButtonWrapper = React.forwardRef<View, WithClassName<TouchableOpacityProps
   )
 })
 
-const InputWrapper = React.forwardRef<TextInput, WithClassName<TextInputProps>>(function InputWrapper({ className, style, type, ...rest }, ref) {
+const InputWrapper = React.forwardRef<TextInput, WithClassName<TextInputProps>>(function InputWrapper({ className, style, ...rest }, ref) {
   const extraProps: Partial<TextInputProps> = {}
-  if (type === 'number' || type === 'tel') {
+  // Support common input type hints via rest.type if present at runtime
+  const runtimeType = (rest as any).type
+  if (runtimeType === 'number' || runtimeType === 'tel') {
     extraProps.keyboardType = 'numeric'
   }
   return <TextInput ref={ref} style={style} {...rest} {...extraProps} />

@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -6,8 +6,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {useAppState} from '../state/store';
-import {fetchPeerOptions} from '../services/probing';
+import { useAppState } from '../state/store';
+import { fetchPeerOptions } from '../services/probing';
 import RepoBrowser from './RepoBrowser';
 
 interface RepoTabProps {
@@ -22,7 +22,7 @@ interface OptionsInfo {
   lastUpdateTs?: number;
 }
 
-const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
+const RepoTabComponent: React.FC<RepoTabProps> = ({ tabId }) => {
   const tab = useAppState((s) => s.tabs.find((t) => t.id === tabId));
   const updateTab = useAppState((s) => s.updateTab);
   const [loading, setLoading] = useState(true);
@@ -50,7 +50,7 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
       setOptionsInfo({
         branches: ['main'],
       });
-      
+
       if (!tab.currentBranch) {
         updateTab(tabId, (t) => ({
           ...t,
@@ -72,7 +72,7 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
       <View style={styles.container}>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Tab not found (ID: {tabId})</Text>
-          <Text style={{color: '#666', marginTop: 8, fontSize: 12}}>
+          <Text style={{ color: '#666', marginTop: 8, fontSize: 12 }}>
             The tab may have been closed or is still loading.
           </Text>
         </View>
@@ -82,7 +82,6 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
 
   return (
     <View style={styles.container}>
-      {console.log('[RepoTab] rendering, loading:', loading, 'error:', error)}
       {/* Header with host info */}
       <View style={styles.header}>
         <Text style={styles.hostText}>{tab.host}</Text>
@@ -109,12 +108,6 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({tabId}) => {
       ) : (
         <RepoBrowser
           host={tab.host}
-          branch={tab.currentBranch}
-          initialPath={pathInput}
-          onNavigate={(path: string) => {
-            setPathInput(path);
-            updateTab(tabId, (t) => ({...t, path}));
-          }}
         />
       )}
     </View>

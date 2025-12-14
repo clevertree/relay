@@ -1,6 +1,25 @@
 import React from 'react';
 import { Text, View, Image, TouchableOpacity, ViewProps, TextProps, StyleSheet, TextInput } from 'react-native';
-import { styled } from 'nativewind';
+let styled: any = null;
+try {
+  // eslint-disable-next-line global-require
+  const nw = require('nativewind');
+  if (nw && typeof nw.styled === 'function') {
+    styled = nw.styled;
+  } else if (nw && typeof nw.default?.styled === 'function') {
+    styled = nw.default.styled;
+  } else {
+    // Provide a no-op fallback factory: returns a wrapper that forwards children
+    styled = (Comp: any) => (props: any) => {
+      const { children, style } = props || {}
+      return React.createElement(Comp, { ...props, style }, children)
+    }
+    console.warn('[MarkdownRenderer] nativewind.styled unavailable; using fallback wrappers');
+  }
+} catch (e) {
+  console.warn('[MarkdownRenderer] failed to require nativewind, using fallback styled', e);
+  styled = (Comp: any) => (props: any) => React.createElement(Comp, props, props?.children)
+}
 // @ts-ignore - markdown-to-jsx types not available
 import Markdown from 'markdown-to-jsx';
 import { ThemeManager } from '../utils/themeManager';
@@ -115,12 +134,12 @@ interface StyledImageProps {
 }
 
 // Wrapper components registered with NativeWind so className works
-const StyledView = styled<ViewProps>(View as any);
-const StyledText = styled<TextProps>(Text as any);
-const StyledTouchable = styled<StyledTouchableProps>(TouchableOpacity as any);
-const StyledImage = styled<StyledImageProps>(Image as any);
-const StyledTextInput = styled<any>(TextInput as any);
-const StyledPicker = styled<any>(Picker as any);
+const StyledView = (styled as any)(View as any);
+const StyledText = (styled as any)(Text as any);
+const StyledTouchable = (styled as any)(TouchableOpacity as any);
+const StyledImage = (styled as any)(Image as any);
+const StyledTextInput = (styled as any)(TextInput as any);
+const StyledPicker = (styled as any)(Picker as any);
 
 type MarkdownErrorBoundaryProps = {
   children: React.ReactNode
@@ -136,7 +155,7 @@ class MarkdownErrorBoundary extends React.Component<MarkdownErrorBoundaryProps, 
   state: MarkdownErrorBoundaryState = { error: null, showDetails: false }
 
   static getDerivedStateFromError(error: Error): MarkdownErrorBoundaryState {
-    return { error }
+    return { error, showDetails: false }
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
@@ -153,7 +172,7 @@ class MarkdownErrorBoundary extends React.Component<MarkdownErrorBoundaryProps, 
     if (this.state.error) {
       const colors = ThemeManager.getColors()
       return (
-        <StyledView style={[styles.errorContainer, { borderColor: colors.error ?? '#ef4444' }] }>
+        <StyledView style={[styles.errorContainer, { borderColor: colors.error ?? '#ef4444' }]}>
           <Text style={[styles.errorTitle, { color: colors.error ?? '#ef4444' }]}>Failed to render markdown</Text>
           <Text style={[styles.errorMessage, { color: colors.textPrimary }]}>{this.state.error.message}</Text>
           {this.state.error.stack ? (
@@ -486,46 +505,50 @@ export const MarkdownRenderer: React.FC<Props> = ({ content, onLinkPress }) => {
               source: { component: () => null },
               track: { component: () => null },
               // Form controls → native
-              input: { component: (p: any) => {
-                const { value, defaultValue, onChange, onChangeText, children, ...rest } = p || {}
-                const handleChangeText = (text: string) => {
-                  if (typeof onChangeText === 'function') onChangeText(text)
-                  if (typeof onChange === 'function') onChange({ target: { value: text } })
+              input: {
+                component: (p: any) => {
+                  const { value, defaultValue, onChange, onChangeText, children, ...rest } = p || {}
+                  const handleChangeText = (text: string) => {
+                    if (typeof onChangeText === 'function') onChangeText(text)
+                    if (typeof onChange === 'function') onChange({ target: { value: text } })
+                  }
+                  const v = (p?.value ?? p?.defaultValue) as any
+                  return (
+                    <StyledTextInput
+                      value={typeof v === 'string' ? v : undefined}
+                      defaultValue={typeof v === 'string' ? v : undefined}
+                      onChangeText={handleChangeText}
+                      className="px-2 py-1 border rounded text-sm"
+                      {...rest}
+                    />
+                  )
                 }
-                const v = (p?.value ?? p?.defaultValue) as any
-                return (
-                  <StyledTextInput
-                    value={typeof v === 'string' ? v : undefined}
-                    defaultValue={typeof v === 'string' ? v : undefined}
-                    onChangeText={handleChangeText}
-                    className="px-2 py-1 border rounded text-sm"
-                    {...rest}
-                  />
-                )
-              } },
-              select: { component: ({ children, value, defaultValue, onChange, ...rest }: any) => {
-                const items = React.Children.toArray(children) as any[]
-                const selectedValue = value ?? defaultValue
-                const handleChange = (val: any) => {
-                  if (typeof onChange === 'function') onChange({ target: { value: val } })
+              },
+              select: {
+                component: ({ children, value, defaultValue, onChange, ...rest }: any) => {
+                  const items = React.Children.toArray(children) as any[]
+                  const selectedValue = value ?? defaultValue
+                  const handleChange = (val: any) => {
+                    if (typeof onChange === 'function') onChange({ target: { value: val } })
+                  }
+                  return (
+                    <StyledPicker
+                      selectedValue={selectedValue}
+                      onValueChange={handleChange}
+                      className="border rounded text-sm"
+                      {...rest}
+                    >
+                      {items.map((c: any, i: number) => (
+                        <Picker.Item
+                          key={i}
+                          label={String(c?.props?.children ?? c?.props?.label ?? c?.props?.value ?? '')}
+                          value={c?.props?.value ?? c?.props?.children}
+                        />)
+                      )}
+                    </StyledPicker>
+                  )
                 }
-                return (
-                  <StyledPicker
-                    selectedValue={selectedValue}
-                    onValueChange={handleChange}
-                    className="border rounded text-sm"
-                    {...rest}
-                  >
-                    {items.map((c: any, i: number) => (
-                      <Picker.Item
-                        key={i}
-                        label={String(c?.props?.children ?? c?.props?.label ?? c?.props?.value ?? '')}
-                        value={c?.props?.value ?? c?.props?.children}
-                      />)
-                    )}
-                  </StyledPicker>
-                )
-              } },
+              },
               option: { component: () => null },
               // Generic block containers
               div: { component: StyledView },
@@ -543,21 +566,27 @@ export const MarkdownRenderer: React.FC<Props> = ({ content, onLinkPress }) => {
               h1: { component: H1 },
               h2: { component: H2 },
               h3: { component: H3 },
-              h4: { component: ({ children }: any) => (
-                <StyledText className="text-base font-semibold mt-3 mb-2" style={{ color: ThemeManager.getColors().textPrimary }}>
-                  {children}
-                </StyledText>
-              ) },
-              h5: { component: ({ children }: any) => (
-                <StyledText className="text-base font-semibold mt-2 mb-1" style={{ color: ThemeManager.getColors().textPrimary }}>
-                  {children}
-                </StyledText>
-              ) },
-              h6: { component: ({ children }: any) => (
-                <StyledText className="text-sm font-semibold mt-2 mb-1" style={{ color: ThemeManager.getColors().textPrimary }}>
-                  {children}
-                </StyledText>
-              ) },
+              h4: {
+                component: ({ children }: any) => (
+                  <StyledText className="text-base font-semibold mt-3 mb-2" style={{ color: ThemeManager.getColors().textPrimary }}>
+                    {children}
+                  </StyledText>
+                )
+              },
+              h5: {
+                component: ({ children }: any) => (
+                  <StyledText className="text-base font-semibold mt-2 mb-1" style={{ color: ThemeManager.getColors().textPrimary }}>
+                    {children}
+                  </StyledText>
+                )
+              },
+              h6: {
+                component: ({ children }: any) => (
+                  <StyledText className="text-sm font-semibold mt-2 mb-1" style={{ color: ThemeManager.getColors().textPrimary }}>
+                    {children}
+                  </StyledText>
+                )
+              },
               hr: { component: HR },
               blockquote: { component: Blockquote },
               ul: { component: UL },
@@ -567,27 +596,37 @@ export const MarkdownRenderer: React.FC<Props> = ({ content, onLinkPress }) => {
               img: { component: IMG },
               br: { component: () => <StyledText>{"\n"}</StyledText> },
               // Table support / temporary disable on RN
-              table: { component: DISABLE_TABLES_RN ? TableDisabledNotice : (({ children }: any) => (
-                <StyledView className="w-full my-2">{children}</StyledView>
-              )) },
-              thead: { component: ({ children }: any) => (
-                <StyledView className="mb-1">{children}</StyledView>
-              ) },
+              table: {
+                component: DISABLE_TABLES_RN ? TableDisabledNotice : (({ children }: any) => (
+                  <StyledView className="w-full my-2">{children}</StyledView>
+                ))
+              },
+              thead: {
+                component: ({ children }: any) => (
+                  <StyledView className="mb-1">{children}</StyledView>
+                )
+              },
               tbody: { component: ({ children }: any) => <StyledView>{children}</StyledView> },
-              tr: { component: ({ children }: any) => (
-                <StyledView className="flex-row items-center py-1">{children}</StyledView>
-              ) },
-              th: { component: ({ children }: any) => (
-                <StyledText className="font-semibold mr-3">{children}</StyledText>
-              ) },
-              td: { component: ({ children }: any) => (
-                <StyledText className="mr-3">{children}</StyledText>
-              ) },
+              tr: {
+                component: ({ children }: any) => (
+                  <StyledView className="flex-row items-center py-1">{children}</StyledView>
+                )
+              },
+              th: {
+                component: ({ children }: any) => (
+                  <StyledText className="font-semibold mr-3">{children}</StyledText>
+                )
+              },
+              td: {
+                component: ({ children }: any) => (
+                  <StyledText className="mr-3">{children}</StyledText>
+                )
+              },
             },
           }}
         >
-        {processedContent}
-      </Markdown>
+          {processedContent}
+        </Markdown>
       </MarkdownErrorBoundary>
     </StyledView>
   );

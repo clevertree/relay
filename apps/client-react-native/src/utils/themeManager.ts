@@ -192,6 +192,9 @@ export class ThemeManager {
       textSecondary: isDark ? '#d1d5db' : '#4b5563',
       border: isDark ? '#374151' : '#e5e7eb',
       bgTertiary: isDark ? '#111827' : '#f3f4f6',
+      bgPrimary: isDark ? '#0b1220' : '#ffffff',
+      bgSecondary: isDark ? '#0f1724' : '#f9fafb',
+      error: isDark ? '#ef4444' : '#ef4444',
     };
   }
 

@@ -1,4 +1,4 @@
-import {create} from 'zustand';
+import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type PeerProtocol = 'https' | 'git' | 'ssh' | 'ipfs-api' | 'ipfs-gateway' | 'ipfs-swarm';
@@ -122,7 +122,7 @@ export const useAppState = create<AppState>((set, get) => ({
     // Peers state
     peers: [],
     setPeers: async (hosts) => {
-        const newPeers = hosts.map((h) => ({host: h, probes: []}));
+        const newPeers = hosts.map((h) => ({ host: h, probes: [] }));
         await persistPeers(newPeers);
         set({
             peers: newPeers,
@@ -134,7 +134,7 @@ export const useAppState = create<AppState>((set, get) => ({
         })),
     setPeerProbing: (host, isProbing) =>
         set((s) => ({
-            peers: s.peers.map((p) => (p.host === host ? {...p, isProbing} : p)),
+            peers: s.peers.map((p) => (p.host === host ? { ...p, isProbing } : p)),
         })),
     addPeer: async (host) => {
         // Sanitize the host input - remove protocol prefixes
@@ -145,7 +145,7 @@ export const useAppState = create<AppState>((set, get) => ({
         if (currentPeers.some((p) => p.host === cleanHost)) {
             return;
         }
-        const newPeers = [...currentPeers, {host: cleanHost, probes: []}];
+        const newPeers = [...currentPeers, { host: cleanHost, probes: [] }];
         await persistPeers(newPeers);
         set({
             peers: newPeers,
@@ -166,7 +166,7 @@ export const useAppState = create<AppState>((set, get) => ({
     openTab: async (host, path = '/') => {
         const existingTab = get().tabs.find((t) => t.host === host && t.path === path);
         if (existingTab) {
-            set({activeTabId: existingTab.id});
+            set({ activeTabId: existingTab.id });
             await persistTabs(get().tabs, existingTab.id);
             return existingTab.id;
         }
@@ -192,10 +192,10 @@ export const useAppState = create<AppState>((set, get) => ({
         const tabs = get().tabs.filter((t) => t.id !== tabId);
         const activeTabId = get().activeTabId === tabId ? (tabs.find((t) => t.id === 'home') ?? tabs[0])?.id || 'home' : get().activeTabId;
         await persistTabs(tabs, activeTabId || 'home');
-        set({tabs, activeTabId});
+        set({ tabs, activeTabId });
     },
     setActiveTab: async (tabId) => {
-        set({activeTabId: tabId});
+        set({ activeTabId: tabId });
         await persistTabs(get().tabs, tabId);
     },
     updateTab: (tabId, updater) =>
@@ -210,41 +210,57 @@ export const useAppState = create<AppState>((set, get) => ({
     // Auto-refresh state
     autoRefreshEnabled: false,
     setAutoRefresh: (enabled) =>
-        set({autoRefreshEnabled: enabled}),
+        set({ autoRefreshEnabled: enabled }),
     lastRefreshTs: 0,
     setLastRefreshTs: (ts) =>
-        set({lastRefreshTs: ts}),
+        set({ lastRefreshTs: ts }),
 }));
 
 // Initialize persisted state
-(async () => {
-    let tabs = await loadPersistedTabs();
-    let activeTabId = await loadPersistedActiveTab();
-    
-    console.log('[Store] Loaded tabs:', tabs.length, 'activeTabId:', activeTabId);
-    
-    // Ensure at least a home tab exists if tabs is empty
-    if (tabs.length === 0) {
-        // Create home tab and auto-open the default relay server
-        tabs = [
-            {
-                id: 'home',
-                title: 'Home',
-                isHome: true,
-            },
-            {
-                id: generateTabId(),
-                host: 'node-dfw1.relaynet.online',
-                path: '/',
-                title: 'node-dfw1.relaynet.online',
-                currentBranch: 'main',
+// Initialize persisted state but protect module import from any async errors
+; (async () => {
+    try {
+        let tabs = await loadPersistedTabs();
+        let activeTabId = await loadPersistedActiveTab();
+
+        console.log('[Store] Loaded tabs:', tabs.length, 'activeTabId:', activeTabId);
+
+        // Ensure at least a home tab exists if tabs is empty
+        if (tabs.length === 0) {
+            // Create home tab and auto-open the default relay server
+            tabs = [
+                {
+                    id: 'home',
+                    title: 'Home',
+                    isHome: true,
+                },
+                {
+                    id: generateTabId(),
+                    host: 'node-dfw1.relaynet.online',
+                    path: '/',
+                    title: 'node-dfw1.relaynet.online',
+                    currentBranch: 'main',
+                }
+            ];
+            activeTabId = tabs[1].id; // Set active to the relay server tab
+            try {
+                await persistTabs(tabs, activeTabId);
+            } catch (e) {
+                console.warn('[Store] Failed to persist default tabs:', e);
             }
-        ];
-        activeTabId = tabs[1].id; // Set active to the relay server tab
-        await persistTabs(tabs, activeTabId);
-        console.log('[Store] Created default tabs, activeTabId:', activeTabId);
+            console.log('[Store] Created default tabs, activeTabId:', activeTabId);
+        }
+
+        console.log('[Store] Setting state with tabs:', tabs.map(t => t.id));
+        useAppState.setState({ tabs, activeTabId });
+    } catch (e) {
+        console.error('[Store] Failed to initialize persisted state:', e);
+        // Ensure at least a basic home tab is present so the UI can render
+        useAppState.setState({
+            tabs: [
+                { id: 'home', title: 'Home', isHome: true }
+            ],
+            activeTabId: 'home'
+        });
     }
-    
-    console.log('[Store] Setting state with tabs:', tabs.map(t => t.id));
-    useAppState.setState({tabs, activeTabId});
 })();

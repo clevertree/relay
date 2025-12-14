@@ -10,42 +10,63 @@ import {
   useWindowDimensions,
   AppRegistry,
 } from 'react-native';
-import {NavigationContainer} from '@react-navigation/native';
-import {createNativeStackNavigator} from '@react-navigation/native-stack';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import PeersView from './components/PeersView';
 import RepoTab from './components/RepoTab';
 import DebugTab from './components/DebugTab';
-import {useAppState} from './state/store';
+import { useAppState } from './state/store';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { UpdateModal } from './components/UpdateModal';
 import { initNativeRustTranspiler } from './nativeRustTranspiler';
-import { NativeWindStyleSheet } from 'nativewind';
+// Import nativewind at runtime via require to avoid TS type errors when runtime
+// exports vary between package versions.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const NativeWind = require('nativewind') as any;
 
-// Ensure NativeWind outputs React Native StyleSheet objects at runtime
-NativeWindStyleSheet.setOutput({
-  default: 'native',
-});
+// Ensure NativeWind outputs React Native StyleSheet objects at runtime.
+// Guard this call so a missing/changed nativewind API doesn't crash module initialization
+try {
+  if (NativeWind && NativeWind.NativeWindStyleSheet && typeof NativeWind.NativeWindStyleSheet.setOutput === 'function') {
+    NativeWind.NativeWindStyleSheet.setOutput({ default: 'native' });
+  } else {
+    console.warn('[App] NativeWindStyleSheet.setOutput unavailable');
+  }
+} catch (err) {
+  // Protect app startup from unexpected runtime errors in nativewind
+  // eslint-disable-next-line no-console
+  console.warn('[App] NativeWindStyleSheet.setOutput failed', err);
+}
 
 type RootStackParamList = {
   Main: undefined;
-  RepoTab: {tabId: string};
+  RepoTab: { tabId: string };
+  Debug: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
+const TabBar: React.FC<{ navigation: any }> = ({ navigation }) => {
   const tabs = useAppState((s) => s.tabs);
   const activeTabId = useAppState((s) => s.activeTabId);
   const setActiveTab = useAppState((s) => s.setActiveTab);
   const closeTab = useAppState((s) => s.closeTab);
   const homeTabId = useAppState((s) => s.homeTabId);
 
-  // Include home tab and debug tab
-  const allTabs = [
-    {id: homeTabId, title: 'Home', isHome: true},
+  // Include home tab and debug tab, ensure unique tab ids (home shouldn't appear twice)
+  const initialTabs = [
+    { id: homeTabId, title: 'Home', isHome: true },
     ...tabs,
-    {id: 'debug', title: 'Debug', isDebug: true}
+    { id: 'debug', title: 'Debug', isDebug: true },
   ];
+  const seen = new Set<string>();
+  const allTabs = [] as Array<{ id: string; title: string; isHome?: boolean; isDebug?: boolean }>;
+  for (const t of initialTabs) {
+    if (!t || !t.id) continue;
+    if (seen.has(String(t.id))) continue;
+    seen.add(String(t.id));
+    allTabs.push(t);
+  }
 
   return (
     <View style={styles.tabBar}>
@@ -61,7 +82,7 @@ const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
                 } else if (tab.id === 'debug') {
                   navigation.navigate('Debug');
                 } else {
-                  navigation.navigate('RepoTab', {tabId: tab.id});
+                  navigation.navigate('RepoTab', { tabId: tab.id });
                 }
               }}>
               <Text
@@ -92,11 +113,11 @@ const TabBar: React.FC<{navigation: any}> = ({navigation}) => {
   );
 };
 
-const MainScreen: React.FC<{navigation: any}> = ({navigation}) => {
+const MainScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const openTab = useAppState((s) => s.openTab);
   const activeTabId = useAppState((s) => s.activeTabId);
   const homeTabId = useAppState((s) => s.homeTabId);
-  const {width} = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const { showUpdateModal, setShowUpdateModal, checkForUpdate } = useAppUpdate();
 
@@ -108,7 +129,7 @@ const MainScreen: React.FC<{navigation: any}> = ({navigation}) => {
 
   const handlePeerPress = (host: string) => {
     openTab(host).then((tabId) => {
-      navigation.navigate('RepoTab', {tabId});
+      navigation.navigate('RepoTab', { tabId });
     }).catch((err) => {
       console.error('Failed to open tab:', err);
     });
@@ -119,7 +140,7 @@ const MainScreen: React.FC<{navigation: any}> = ({navigation}) => {
       <StatusBar barStyle="dark-content" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Relay Client</Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.updateButton}
           onPress={checkForUpdate}
         >
@@ -155,8 +176,8 @@ const MainScreen: React.FC<{navigation: any}> = ({navigation}) => {
   );
 };
 
-const RepoTabScreen: React.FC<{route: any; navigation: any}> = ({route, navigation}) => {
-  const {tabId} = route.params;
+const RepoTabScreen: React.FC<{ route: any; navigation: any }> = ({ route, navigation }) => {
+  const { tabId } = route.params;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -176,7 +197,7 @@ const RepoTabScreen: React.FC<{route: any; navigation: any}> = ({route, navigati
   );
 };
 
-const DebugScreen: React.FC<{navigation: any}> = ({navigation}) => {
+const DebugScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
@@ -195,41 +216,41 @@ const DebugScreen: React.FC<{navigation: any}> = ({navigation}) => {
   );
 };
 
-class ErrorBoundary extends React.Component<{}, {error: Error | null; info?: React.ErrorInfo | null}> {
+class ErrorBoundary extends React.Component<{}, { error: Error | null; info?: React.ErrorInfo | null }> {
   constructor(props: {}) {
     super(props);
-    this.state = {error: null, info: null};
+    this.state = { error: null, info: null };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     // eslint-disable-next-line no-console
     console.error('ErrorBoundary caught:', error, info.componentStack);
-    this.setState({error, info});
+    this.setState({ error, info });
   }
 
   render() {
     if (this.state.error) {
       const stack = this.state.info?.componentStack || this.state.error.stack || 'stack trace unavailable';
       return (
-        <SafeAreaView style={{flex: 1, padding: 16, backgroundColor: '#111'}}>
-          <View style={{flex: 1, justifyContent: 'center'}}>
-            <Text style={{color: '#f5f5f5', fontSize: 20, fontWeight: '700', marginBottom: 10}}>
+        <SafeAreaView style={{ flex: 1, padding: 16, backgroundColor: '#111' }}>
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <Text style={{ color: '#f5f5f5', fontSize: 20, fontWeight: '700', marginBottom: 10 }}>
               Rendering failure
             </Text>
-            <Text style={{color: '#dedede', fontSize: 16, marginBottom: 12}}>
+            <Text style={{ color: '#dedede', fontSize: 16, marginBottom: 12 }}>
               We couldn’t render some UI. The log below shows what went wrong.
             </Text>
-            <Text style={{color: '#ff8c00', fontWeight: '600'}}>Error message</Text>
-            <Text style={{color: '#fff', marginBottom: 12}} selectable>
+            <Text style={{ color: '#ff8c00', fontWeight: '600' }}>Error message</Text>
+            <Text style={{ color: '#fff', marginBottom: 12 }} selectable>
               {this.state.error.message}
             </Text>
-            <Text style={{color: '#ff8c00', fontWeight: '600'}}>Component stack</Text>
-            <ScrollView style={{flex: 1, marginTop: 6, backgroundColor: '#222', borderRadius: 8, padding: 10}} contentContainerStyle={{flexGrow: 1}}>
-              <Text style={{color: '#d4d4d4', fontSize: 12, lineHeight: 20}} selectable>
+            <Text style={{ color: '#ff8c00', fontWeight: '600' }}>Component stack</Text>
+            <ScrollView style={{ flex: 1, marginTop: 6, backgroundColor: '#222', borderRadius: 8, padding: 10 }} contentContainerStyle={{ flexGrow: 1 }}>
+              <Text style={{ color: '#d4d4d4', fontSize: 12, lineHeight: 20 }} selectable>
                 {stack}
               </Text>
             </ScrollView>
-            <Text style={{color: '#9f9', fontSize: 13, marginTop: 10}}>
+            <Text style={{ color: '#9f9', fontSize: 13, marginTop: 10 }}>
               Please capture your device logs and share them with the engineering team along with the actions you took before this screen appeared.
             </Text>
           </View>
@@ -244,7 +265,7 @@ class ErrorBoundary extends React.Component<{}, {error: Error | null; info?: Rea
 const App: React.FC = () => {
   // Initialize native Rust hook transpiler bridge on app startup
   useEffect(() => {
-    ;(async () => {
+    ; (async () => {
       try {
         console.log('[App] Initializing native hook-transpiler bridge...')
         await initNativeRustTranspiler()
@@ -267,7 +288,7 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <NavigationContainer>
-        <Stack.Navigator id="RootNavigator" screenOptions={{headerShown: false}}>
+        <Stack.Navigator id="RootNavigator" screenOptions={{ headerShown: false }}>
           <Stack.Screen
             name="Main">
             {(props) => {
@@ -279,7 +300,7 @@ const App: React.FC = () => {
                 // eslint-disable-next-line no-console
                 console.error('MainScreen render failed', err);
                 return (
-                  <SafeAreaView style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+                  <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                     <Text>Main render error</Text>
                   </SafeAreaView>
                 );
@@ -295,7 +316,7 @@ const App: React.FC = () => {
                 // eslint-disable-next-line no-console
                 console.error('DebugScreen render failed', err);
                 return (
-                  <SafeAreaView style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+                  <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                     <Text>Debug render error</Text>
                   </SafeAreaView>
                 );
@@ -313,7 +334,7 @@ const App: React.FC = () => {
                 // eslint-disable-next-line no-console
                 console.error('RepoTabScreen render failed', err);
                 return (
-                  <SafeAreaView style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+                  <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                     <Text>RepoTab render error</Text>
                   </SafeAreaView>
                 );
@@ -419,8 +440,5 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
-
-// Register the app component as required by React Native
-AppRegistry.registerComponent('RelayClient', () => App);
 
 export default App;

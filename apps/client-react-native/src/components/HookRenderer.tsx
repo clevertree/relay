@@ -48,6 +48,21 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
     const requireShim = (spec: string) => {
       if (spec === 'react') return HookReact
       if (spec === 'react/jsx-runtime' || spec === 'react/jsx-dev-runtime') return jsxRuntimeShim
+      // Ensure nativewind is available to transpiled hooks at runtime. Prefer real package,
+      // fall back to our local shim if nativewind isn't present as a runtime export.
+      if (spec === 'nativewind' || spec.startsWith('nativewind/')) {
+        try {
+          // eslint-disable-next-line global-require
+          return require('nativewind')
+        } catch (e) {
+          try {
+            // eslint-disable-next-line global-require
+            return require('../nativewind-shim')
+          } catch (err) {
+            return {}
+          }
+        }
+      }
       return {}
     }
 
@@ -131,7 +146,7 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
             setLoading(false)
             return
           }
-          ;(async () => {
+          ; (async () => {
             try {
               const url = buildUrl(filePath)
               const resp = await fetch(url)
@@ -164,8 +179,8 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
         Layout: undefined,
         params: {},
         helpers: {
-          navigate: () => {},
-          setBranch: () => {},
+          navigate: () => { },
+          setBranch: () => { },
           buildPeerUrl: buildUrl,
           loadModule,
           buildRepoHeaders: () => ({}),
