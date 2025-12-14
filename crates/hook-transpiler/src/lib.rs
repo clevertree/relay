@@ -222,7 +222,29 @@ pub fn transpile(
                 });
             }
         }
-        let code = String::from_utf8(buf).unwrap_or_default();
+        let mut code = String::from_utf8(buf).unwrap_or_default();
+        // Post-process fix for SWC CJS edge-case that generates invalid LHS:
+        // `0 && module.exports = {...};` → `0 && (module.exports = {...});`
+        if opts.to_commonjs {
+            use regex::Regex;
+            // Enable dot to match newlines for RHS capture
+            if let Ok(re_mod) = Regex::new(r"(?s)0\s*&&\s*module\.exports\s*=\s*(.*?);") {
+                code = re_mod
+                    .replace_all(&code, |caps: &regex::Captures| {
+                        format!("0 && (module.exports = {});", &caps[1])
+                    })
+                    .into_owned();
+            }
+            if let Ok(re_exp) = Regex::new(r"(?s)0\s*&&\s*exports\.([A-Za-z_\$][A-Za-z0-9_\$]*)\s*=\s*(.*?);") {
+                code = re_exp
+                    .replace_all(&code, |caps: &regex::Captures| {
+                        let name = &caps[1];
+                        let rhs = &caps[2];
+                        format!("0 && (exports.{} = {});", name, rhs)
+                    })
+                    .into_owned();
+            }
+        }
         Ok(TranspileOutput { code, map: None })
     });
 

@@ -1,0 +1,19 @@
+[package]
+name = "hook-transpiler-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "CLI for the hook-transpiler crate to transpile JSX/TSX/JS/MJS to JS/CommonJS"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+walkdir = "2"
+pathdiff = "0.2"
+hook-transpiler = { path = "../hook-transpiler" }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+which = "6"

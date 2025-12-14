@@ -11,8 +11,10 @@ import {
   View,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
 } from 'react-native'
 import * as Babel from '@babel/standalone'
+import HookRenderer from './HookRenderer'
 import { useRNTranspilerSetting } from '../state/transpilerSettings'
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl } from '../../../shared/src'
 
@@ -102,6 +104,7 @@ export default function DebugTab() {
   const [loading, setLoading] = useState<string | null>(null)
   const mode = useRNTranspilerSetting((s) => s.mode)
   const setMode = useRNTranspilerSetting((s) => s.setMode)
+  const [host, setHost] = useState<string>('https://node-dfw1.relaynet.online')
 
   // Log when DebugTab renders
   React.useEffect(() => {
@@ -533,6 +536,28 @@ export default function DebugTab() {
           {results.clientTranspiler && (
             <TestResult testName="clientTranspiler" result={results.clientTranspiler} />
           )}
+        </View>
+
+        {/* Shared HookRenderer preview (identical wiring to RepoBrowser) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🔍 Transpiler Preview (Shared HookRenderer)</Text>
+          <Text style={styles.resultText}>
+            This uses the same HookRenderer as RepoBrowser, so whatever works here works there.
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <Text style={{ fontSize: 12, color: '#333', marginRight: 8 }}>Host:</Text>
+            <TextInput
+              value={host}
+              onChangeText={setHost}
+              placeholder="https://your-host"
+              style={{ flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 }}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={{ height: 400, marginTop: 12 }}>
+            <HookRenderer host={host} />
+          </View>
         </View>
       </ScrollView>
     )

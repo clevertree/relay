@@ -18,10 +18,10 @@ ABI_DIRS=(
   x86_64
 )
 
-if ! command -v cargo-ndk >/dev/null 2>&1; then
-  echo "[rn-prepare-hook-transpiler] cargo-ndk is not installed. Install it via 'cargo install cargo-ndk' and ensure Android targets are configured." >&2
-  exit
-fi
+#if ! command -v cargo-ndk >/dev/null 2>&1; then
+#  echo "[rn-prepare-hook-transpiler] cargo-ndk is not installed. Install it via 'cargo install cargo-ndk' and ensure Android targets are configured." >&2
+#  exit
+#fi
 
 pushd "$HOOK_CRATE_DIR" >/dev/null
 NDK_ARGS=()

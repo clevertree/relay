@@ -6,5 +6,6 @@ members = [
     "crates/streaming-files",
     "apps/client-react-native/rust",
     "crates/hook-transpiler",
+    "crates/hook-transpiler-cli",
 ]
 resolver = "2"
