@@ -50,6 +50,7 @@ export interface HookHelpers {
   loadModule: (modulePath: string) => Promise<any>
   setBranch?: (branch: string) => void
   buildRepoHeaders?: (branch?: string, repo?: string) => Record<string, string>
+  registerThemeStyles?: (themeName: string, definitions?: Record<string, unknown>) => void
 }
 
 /**
@@ -90,7 +91,7 @@ export class WebModuleLoader implements ModuleLoader {
 
     try {
       // Set global context for JSX transpiled code
-      ;(window as any).__ctx__ = context
+      ; (window as any).__ctx__ = context
 
       // Use Function constructor instead of dynamic import for Metro compatibility
       // eslint-disable-next-line no-new-func
@@ -240,7 +241,7 @@ try {
       }
 
       await fn(importFn, this.requireShim, module, exports, context)
-      
+
       // Ensure module.exports and exports are in sync
       // If code modified exports, make sure it's reflected in module.exports
       // If code modified module.exports, make sure it overwrites exports
@@ -257,7 +258,7 @@ try {
     }
 
     const mod = (module as any).exports || exports
-    
+
     // Debug logging
     console.log('[RNModuleLoader] After execution - mod object:', JSON.stringify(mod, null, 2))
     console.log('[RNModuleLoader] mod.default type:', typeof (mod?.default))
@@ -288,9 +289,9 @@ export async function transpileCode(
   // STRICT MODE: Disable SWC/Babel/server fallbacks.
   // Only use the new Rust crate WASM binding if available on the page.
   // The web app must load the crate and expose globalThis.__hook_transpile_jsx(source, filename) => string
-  
-  console.log('[transpileCode] *** TRANSPILE CODE CALLED ***', {filename: options.filename || 'module.tsx', codeLength: code.length})
-  
+
+  console.log('[transpileCode] *** TRANSPILE CODE CALLED ***', { filename: options.filename || 'module.tsx', codeLength: code.length })
+
   const filename = options.filename || 'module.tsx'
   const g: any = (typeof globalThis !== 'undefined' ? (globalThis as any) : {})
   const wasmTranspile: any = g.__hook_transpile_jsx
@@ -320,7 +321,7 @@ export async function transpileCode(
       throw e
     }
   }
-  
+
   if (typeof wasmTranspile !== 'function') {
     const availableKeys = Object.keys(g).filter(k => k.startsWith('__')).join(', ')
     console.error('[transpileCode] WASM not ready:', {
@@ -367,7 +368,7 @@ export async function transpileCode(
   const codeWithPreamble = preamble + code
 
   console.log('[transpileCode] Calling WASM transpiler for', filename, '(' + codeWithPreamble.length + ' bytes)')
-  
+
   // DEBUG: Check if function is actually callable
   let out: any;
   try {
@@ -400,13 +401,13 @@ export async function transpileCode(
     }
     throw callError
   }
-  
+
   console.log('[transpileCode] WASM transpilation returned', out.length, 'bytes')
-  
+
   // Log first 200 chars to see if transpilation happened
   const sample = out.substring(0, 200);
   console.log('[transpileCode] Output sample:', sample)
-  
+
   // IMPORTANT: Log larger sample for debugging
   const largeSample = out.substring(0, 1500);
   if (!largeSample.includes('TranspileError') && !largeSample.includes('<')) {
@@ -414,11 +415,11 @@ export async function transpileCode(
   } else if (largeSample.includes('<')) {
     console.warn('[transpileCode] WARNING: First 1500 chars STILL CONTAINS JSX:', largeSample.substring(0, 800));
   }
-  
+
   if (typeof out !== 'string') {
     throw new Error('HookTranspiler returned non-string output')
   }
-  
+
   // Check if WASM returned a transpilation error
   if (out.startsWith('TranspileError:')) {
     const errorMsg = `${out} (v${version})`
@@ -428,9 +429,9 @@ export async function transpileCode(
       errorMessage: errorMsg,
       codePreview: code.substring(0, 200)
     })
-    // Make transpiled code available for debugging
-    ;(globalThis as any).__lastTranspiledCode = out
-    ;(globalThis as any).__lastTranspileError = errorMsg
+      // Make transpiled code available for debugging
+      ; (globalThis as any).__lastTranspiledCode = out
+      ; (globalThis as any).__lastTranspileError = errorMsg
     // Optional server fallback for user-enabled path
     if ((g as any).__allowServerTranspile) {
       console.warn('[transpileCode] WASM returned TranspileError; attempting server fallback')
@@ -457,10 +458,10 @@ export async function transpileCode(
     }
     throw new Error(errorMsg)
   }
-  
+
   // Store transpiled code for debugging
-  ;(globalThis as any).__lastTranspiledCode = out
-  
+  ; (globalThis as any).__lastTranspiledCode = out
+
   // Check if output still has JSX syntax (< followed by uppercase letter)
   const stillHasJsx = /<[A-Z]/.test(out);
   if (stillHasJsx) {
@@ -469,7 +470,7 @@ export async function transpileCode(
   } else if (out.includes('h(')) {
     console.log('[transpileCode] ✓ Output contains h() calls - transpilation successful')
   }
-  
+
   // Rewrite dynamic import() to helpers.loadModule()
   const rewritten = out.replace(/\bimport\s*\(/g, 'context.helpers.loadModule(')
   return rewritten + `\n//# sourceURL=${filename}`
@@ -518,7 +519,7 @@ export class HookLoader {
     this.protocol = options.protocol
     this.moduleLoader = options.moduleLoader
     this.transpiler = options.transpiler
-    this.onDiagnostics = options.onDiagnostics || (() => {})
+    this.onDiagnostics = options.onDiagnostics || (() => { })
   }
 
   private buildRequestHeaders(context: HookContext): Record<string, string> {
@@ -660,7 +661,7 @@ export class HookLoader {
 
       let response: Response
       let code: string
-      
+
       try {
         // Try fetch with a timeout using XMLHttpRequest as fallback
         response = await fetch(hookUrl, fetchOptions)
@@ -695,7 +696,7 @@ export class HookLoader {
       if (shouldTranspile) {
         try {
           console.debug(`[HookLoader] Transpiling ${hookPath}`)
-          
+
           // Use custom transpiler if provided (e.g., for React Native with CommonJS conversion)
           if (this.transpiler) {
             finalCode = await this.transpiler(code, hookPath)

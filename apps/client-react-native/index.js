@@ -2,15 +2,6 @@ import { AppRegistry } from 'react-native';
 // Inject repo .env values into the JS runtime for development builds
 import './native/env-inject';
 
-// Load runtime shim to provide a `styled` fallback for nativewind when
-// the package does not expose it at runtime (helps debug/dev builds).
-try {
-    // eslint-disable-next-line import/no-unresolved, global-require
-    require('./src/nativewind-shim');
-} catch (err) {
-    // ignore if shim cannot be loaded
-}
-
 // Simple shared error container to capture the latest startup error
 let startupError = null;
 
@@ -76,38 +67,6 @@ AppRegistry.registerComponent('RelayClient', () => AppComponent);
 // and then try to load the real App asynchronously so we can observe errors
 // without preventing AppRegistry from being registered.
 try {
-    // Normalize nativewind require shape so modules can call require('nativewind').styled
-    try {
-        // eslint-disable-next-line global-require
-        const nw = require('nativewind');
-        try {
-            // eslint-disable-next-line global-require
-            const shim = require('./src/nativewind-shim');
-            if (shim && typeof shim.installInto === 'function') {
-                shim.installInto(nw);
-                try { console.log('[index] Installed local nativewind shim into nativewind'); } catch (e) { }
-                try { console.warn('[index] Installed local nativewind shim into nativewind'); } catch (e) { }
-            }
-        } catch (shimErr) {
-            // If shim cannot be loaded, fall back to copying from nw.default if present
-            if (nw) {
-                if (typeof nw.styled !== 'function' && nw.default && typeof nw.default.styled === 'function') {
-                    nw.styled = nw.default.styled;
-                    console.log('[index] Normalized nativewind.default.styled -> nativewind.styled');
-                }
-            }
-        }
-        try {
-            // Emit explicit runtime info about nativewind module shape to help debugging
-            try { console.warn('[index] nativewind keys:', Object.keys(nw)); } catch (e) { }
-            try { console.warn('[index] nativewind.styled type:', typeof nw.styled); } catch (e) { }
-            try { console.warn('[index] nativewind.NativeWindStyleSheet type:', typeof nw.NativeWindStyleSheet); } catch (e) { }
-        } catch (e) {
-            // ignore
-        }
-    } catch (e) {
-        // ignore - nativewind may not be installed or available in bridgeless runtime
-    }
     const React = require('react');
     const { View, Text, ActivityIndicator } = require('react-native');
     let RealApp = null;

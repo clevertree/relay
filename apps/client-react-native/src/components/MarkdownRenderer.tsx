@@ -1,25 +1,6 @@
 import React from 'react';
 import { Text, View, Image, TouchableOpacity, ViewProps, TextProps, StyleSheet, TextInput } from 'react-native';
-let styled: any = null;
-try {
-  // eslint-disable-next-line global-require
-  const nw = require('nativewind');
-  if (nw && typeof nw.styled === 'function') {
-    styled = nw.styled;
-  } else if (nw && typeof nw.default?.styled === 'function') {
-    styled = nw.default.styled;
-  } else {
-    // Provide a no-op fallback factory: returns a wrapper that forwards children
-    styled = (Comp: any) => (props: any) => {
-      const { children, style } = props || {}
-      return React.createElement(Comp, { ...props, style }, children)
-    }
-    console.warn('[MarkdownRenderer] nativewind.styled unavailable; using fallback wrappers');
-  }
-} catch (e) {
-  console.warn('[MarkdownRenderer] failed to require nativewind, using fallback styled', e);
-  styled = (Comp: any) => (props: any) => React.createElement(Comp, props, props?.children)
-}
+import { styled, tailwindToStyle } from '../tailwindRuntime';
 // @ts-ignore - markdown-to-jsx types not available
 import Markdown from 'markdown-to-jsx';
 import { ThemeManager } from '../utils/themeManager';
@@ -42,77 +23,14 @@ function preprocessHtmlForMarkdown(content: string): string {
   return processed
 }
 
-// Minimal runtime Tailwind parser for RN to support dynamic className coming from markdown.
-// We only cover a safe subset needed for docs: layout, spacing, borders, radius, typography sizes.
-const TW_SPACE: Record<string, number> = { '0': 0, '0.5': 2, '1': 4, '1.5': 6, '2': 8, '2.5': 10, '3': 12, '3.5': 14, '4': 16, '5': 20, '6': 24, '8': 32, '12': 48 };
-const TW_TEXT_SIZES: Record<string, number> = { xs: 11, sm: 12, base: 14, lg: 16, xl: 18, '2xl': 20 };
-
 function mergeStyle(a?: any, b?: any) {
-  if (!a) return b;
-  if (!b) return a;
-  if (Array.isArray(a)) return [...a, b];
-  return [a, b];
+  if (!a) return b
+  if (!b) return a
+  if (Array.isArray(a)) return [...a, b]
+  return [a, b]
 }
 
-function tailwindToStyle(className?: string): any | undefined {
-  if (!className || typeof className !== 'string') return undefined;
-  const colors = ThemeManager.getColors();
-  const style: any = {};
-  const classes = className.trim().split(/\s+/);
-  for (const c of classes) {
-    if (c === 'flex') style.display = 'flex';
-    else if (c === 'flex-1') style.flex = 1;
-    else if (c === 'flex-row') style.flexDirection = 'row';
-    else if (c === 'flex-col') style.flexDirection = 'column';
-    else if (c.startsWith('items-')) {
-      const v = c.split('-')[1];
-      style.alignItems = v === 'center' ? 'center' : v === 'end' ? 'flex-end' : 'flex-start';
-    } else if (c.startsWith('justify-')) {
-      const v = c.split('-')[1];
-      style.justifyContent = v === 'center' ? 'center' : v === 'between' ? 'space-between' : v === 'end' ? 'flex-end' : 'flex-start';
-    } else if (c.startsWith('gap-')) {
-      const v = c.slice(4);
-      const px = TW_SPACE[v];
-      if (px !== undefined) style.gap = px;
-    } else if (c === 'border') {
-      style.borderWidth = 1; style.borderColor = colors.border;
-    } else if (c === 'rounded') {
-      style.borderRadius = 6;
-    } else if (c.startsWith('p-')) {
-      const v = c.slice(2); const px = TW_SPACE[v]; if (px !== undefined) { style.padding = px; }
-    } else if (c.startsWith('px-')) {
-      const v = c.slice(3); const px = TW_SPACE[v]; if (px !== undefined) { style.paddingHorizontal = px; }
-    } else if (c.startsWith('py-')) {
-      const v = c.slice(3); const px = TW_SPACE[v]; if (px !== undefined) { style.paddingVertical = px; }
-    } else if (c.startsWith('m-')) {
-      const v = c.slice(2); const px = TW_SPACE[v]; if (px !== undefined) { style.margin = px; }
-    } else if (c.startsWith('mr-')) {
-      const v = c.slice(3); const px = TW_SPACE[v]; if (px !== undefined) { style.marginRight = px; }
-    } else if (c.startsWith('mb-')) {
-      const v = c.slice(3); const px = TW_SPACE[v]; if (px !== undefined) { style.marginBottom = px; }
-    } else if (c.startsWith('mt-')) {
-      const v = c.slice(3); const px = TW_SPACE[v]; if (px !== undefined) { style.marginTop = px; }
-    } else if (c === 'w-full') {
-      style.width = '100%';
-    } else if (c === 'h-px') {
-      style.height = 1;
-    } else if (c.startsWith('text-')) {
-      const v = c.slice(5);
-      if (TW_TEXT_SIZES[v] !== undefined) style.fontSize = TW_TEXT_SIZES[v];
-    } else if (c === 'font-bold') {
-      style.fontWeight = '700';
-    } else if (c === 'italic') {
-      style.fontStyle = 'italic';
-    }
-    // Colors: map semantic tokens if present
-    else if (c === 'bg-bgSecondary') style.backgroundColor = ThemeManager.getTokens().colors.bgSecondary;
-    else if (c === 'bg-bgTertiary') style.backgroundColor = ThemeManager.getTokens().colors.bgTertiary;
-    else if (c === 'bg-bgPrimary') style.backgroundColor = ThemeManager.getTokens().colors.bgPrimary;
-  }
-  return style;
-}
-
-// Extend component props to allow className (NativeWind will handle at build time via Babel plugin)
+// Extend component props to allow className (our mapper applies tailwind via `styled`)
 interface StyledViewProps extends ViewProps {
   className?: string;
 }
@@ -133,13 +51,13 @@ interface StyledImageProps {
   style?: any;
 }
 
-// Wrapper components registered with NativeWind so className works
-const StyledView = (styled as any)(View as any);
-const StyledText = (styled as any)(Text as any);
-const StyledTouchable = (styled as any)(TouchableOpacity as any);
-const StyledImage = (styled as any)(Image as any);
-const StyledTextInput = (styled as any)(TextInput as any);
-const StyledPicker = (styled as any)(Picker as any);
+// Wrapper components that apply tailwind classes via the mapper
+const StyledView = styled(View);
+const StyledText = styled(Text);
+const StyledTouchable = styled(TouchableOpacity);
+const StyledImage = styled(Image);
+const StyledTextInput = styled(TextInput);
+const StyledPicker = styled(Picker);
 
 type MarkdownErrorBoundaryProps = {
   children: React.ReactNode

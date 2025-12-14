@@ -5,17 +5,25 @@
 
 import React, { useState, useRef, useCallback } from 'react'
 import {
-  ScrollView,
+  ScrollView as RNScrollView,
   StyleSheet,
-  Text,
-  View,
-  TouchableOpacity,
+  Text as RNText,
+  View as RNView,
+  TouchableOpacity as RNTouchableOpacity,
   ActivityIndicator,
-  TextInput,
+  TextInput as RNTextInput,
 } from 'react-native'
+import {
+  ScrollView as TailwindScrollView,
+  Text as TailwindText,
+  TouchableOpacity as TailwindTouchableOpacity,
+  View as TailwindView,
+  TextInput as TailwindTextInput,
+} from '../tailwindPrimitives'
 import * as Babel from '@babel/standalone'
 import HookRenderer from './HookRenderer'
 import { useRNTranspilerSetting } from '../state/transpilerSettings'
+import { styled } from '../tailwindRuntime'
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl } from '../../../shared/src'
 
 const styles = StyleSheet.create({
@@ -93,6 +101,11 @@ const styles = StyleSheet.create({
   },
 })
 
+const ScrollView = RNScrollView
+const View = RNView
+const Text = RNText
+const TouchableOpacity = RNTouchableOpacity
+
 interface TestResult {
   status: 'pending' | 'success' | 'error'
   message: string
@@ -111,75 +124,40 @@ export default function DebugTab() {
     console.log('[DebugTab] Rendered')
   }, [])
 
-  // Quick runtime test for nativewind `className` / `styled` support
-  const NativeWindRuntimeTest: React.FC = () => {
-    let Styled: any = null
-    let diag: { present: boolean; keys?: string[]; styledType?: string; NativeWindStyleSheetType?: string } = { present: false }
-    try {
-      // eslint-disable-next-line global-require
-      const nw = require('nativewind')
-      diag.present = !!nw
-      try { diag.keys = Object.keys(nw || {}) } catch (e) { diag.keys = undefined }
-      try { diag.styledType = typeof nw?.styled } catch (e) { diag.styledType = 'error' }
-      try { diag.NativeWindStyleSheetType = typeof nw?.NativeWindStyleSheet } catch (e) { diag.NativeWindStyleSheetType = 'error' }
-      if (nw && typeof nw.styled === 'function') Styled = nw.styled
-      else if (nw && nw.default && typeof nw.default.styled === 'function') Styled = nw.default.styled
-    } catch (e) {
-      // Attempt to use shim's helper
-      try {
-        const shim = require('../nativewind-shim')
-        if (shim && typeof shim.createStyledWrapper === 'function') {
-          Styled = shim.createStyledWrapper
-          diag.present = true
-          diag.keys = ['(app-local shim)']
-          diag.styledType = 'function (shim)'
-        }
-      } catch (err) {
-        Styled = null
-      }
-    }
+  const TailwindStyledView = styled(RNView)
+  const TailwindStyledText = styled(RNText)
 
-    const TestBox = Styled ? Styled((props: any) => (
-      <View style={{ padding: 8, borderRadius: 6 }} {...props}>{props.children}</View>
-    )) : (props: any) => <View style={[{ padding: 8, borderRadius: 6 }, props.style]}>{props.children}</View>
-
-    const TestText = Styled ? Styled((props: any) => <Text {...props}>{props.children}</Text>) : (props: any) => <Text style={props.style}>{props.children}</Text>
-
-    return (
-      <View style={{ marginBottom: 12 }}>
-        <View style={{ marginBottom: 8 }}>
-          <Text style={{ fontWeight: '700', marginBottom: 6 }}>NativeWind runtime diagnostics</Text>
-          <Text style={{ fontSize: 12, color: '#444' }}>present: {String(diag.present)}</Text>
-          <Text style={{ fontSize: 12, color: '#444' }}>styled type: {String(diag.styledType)}</Text>
-          <Text style={{ fontSize: 12, color: '#444' }}>NativeWindStyleSheet type: {String(diag.NativeWindStyleSheetType)}</Text>
-          <Text style={{ fontSize: 12, color: '#444' }}>keys: {Array.isArray(diag.keys) ? diag.keys.join(', ') : String(diag.keys)}</Text>
-        </View>
-        <Text style={{ fontWeight: '700', marginBottom: 6 }}>NativeWind runtime className test</Text>
-        <TestBox className="p-2 rounded bg-bgTertiary" style={{ borderWidth: 1, borderColor: '#ddd' }}>
-          <TestText className="text-base font-bold">This should be styled via className</TestText>
-        </TestBox>
-        <View style={{ height: 8 }} />
-        <View style={{ padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
-          <Text style={{ fontSize: 14, fontWeight: '700' }}>Inline style counterpart</Text>
-        </View>
-        <View style={{ height: 12 }} />
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Flex row test</Text>
-        <View style={{ borderWidth: 1, borderColor: '#eee', borderRadius: 6, overflow: 'hidden' }}>
-          <View style={{ flexDirection: 'row', height: 48 }}>
-            <TestBox className="flex-1 p-2" style={{ backgroundColor: '#fde68a', borderRightWidth: 1, borderRightColor: '#fbbf24' }}>
-              <TestText className="text-base">Left</TestText>
-            </TestBox>
-            <TestBox className="flex-1 p-2" style={{ backgroundColor: '#d1fae5', borderRightWidth: 1, borderRightColor: '#34d399' }}>
-              <TestText className="text-base">Center</TestText>
-            </TestBox>
-            <TestBox className="flex-1 p-2" style={{ backgroundColor: '#bfdbfe' }}>
-              <TestText className="text-base">Right</TestText>
-            </TestBox>
-          </View>
-        </View>
-      </View>
-    )
-  }
+  const TailwindRuntimeTest: React.FC = () => (
+    <RNView style={{ marginBottom: 12 }}>
+      <RNView style={{ marginBottom: 8 }}>
+        <RNText style={{ fontWeight: '700', marginBottom: 6 }}>Tailwind runtime diagnostics</RNText>
+        <RNText style={{ fontSize: 12, color: '#444' }}>Styled helper present: {String(typeof styled === 'function')}</RNText>
+      </RNView>
+      <RNText style={{ fontWeight: '700', marginBottom: 6 }}>Tailwind runtime className test</RNText>
+      <TailwindStyledView className="p-2 rounded bg-bgTertiary" style={{ borderWidth: 1, borderColor: '#ddd' }}>
+        <TailwindStyledText className="text-base font-bold">This should be styled via className</TailwindStyledText>
+      </TailwindStyledView>
+      <RNView style={{ height: 8 }} />
+      <RNView style={{ padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
+        <RNText style={{ fontSize: 14, fontWeight: '700' }}>Inline style counterpart</RNText>
+      </RNView>
+      <RNView style={{ height: 12 }} />
+      <RNText style={{ fontWeight: '600', marginBottom: 6 }}>Flex row test</RNText>
+      <RNView style={{ borderWidth: 1, borderColor: '#eee', borderRadius: 6, overflow: 'hidden' }}>
+        <RNView style={{ flexDirection: 'row', height: 48 }}>
+          <TailwindStyledView className="flex-1 p-2" style={{ backgroundColor: '#fde68a', borderRightWidth: 1, borderRightColor: '#fbbf24' }}>
+            <TailwindStyledText className="text-base">Left</TailwindStyledText>
+          </TailwindStyledView>
+          <TailwindStyledView className="flex-1 p-2" style={{ backgroundColor: '#d1fae5', borderRightWidth: 1, borderRightColor: '#34d399' }}>
+            <TailwindStyledText className="text-base">Center</TailwindStyledText>
+          </TailwindStyledView>
+          <TailwindStyledView className="flex-1 p-2" style={{ backgroundColor: '#bfdbfe' }}>
+            <TailwindStyledText className="text-base">Right</TailwindStyledText>
+          </TailwindStyledView>
+        </RNView>
+      </RNView>
+    </RNView>
+  )
 
   const updateResult = (testName: string, result: TestResult) => {
     setResults(prev => ({ ...prev, [testName]: result }))
@@ -544,97 +522,99 @@ export default function DebugTab() {
     const isError = result.status === 'error'
 
     return (
-      <View
-        style={[
-          styles.resultBox,
-          isSuccess && styles.resultBoxSuccess,
-          isError && styles.resultBoxError,
-        ]}
+      <TailwindView
+        className="rounded p-3 mt-3"
+        style={{
+          backgroundColor: isError ? '#fff5f5' : isSuccess ? '#f5fff5' : '#f9f9f9',
+          borderLeftWidth: 4,
+          borderLeftColor: isError ? '#ff3b30' : isSuccess ? '#34c759' : '#007AFF',
+        }}
       >
-        <Text style={[styles.resultText, { fontWeight: 'bold', marginBottom: 4 }]}>
+        <TailwindText className="text-sm font-semibold mb-1" style={{ color: '#333', lineHeight: 18 }}>
           {result.message}
-        </Text>
+        </TailwindText>
         {result.details && (
-          <Text style={styles.resultText}>{result.details}</Text>
+          <TailwindText className="text-sm font-mono" style={{ color: '#333', lineHeight: 18 }}>{result.details}</TailwindText>
         )}
-      </View>
+      </TailwindView>
     )
   }
 
   // Simplified Debug tab per requirements: only settings and a single client transpiler test
   if (true) {
     return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <TailwindScrollView className="flex-1" style={{ backgroundColor: '#f5f5f5' }} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
         {/* Settings: switch transpiler mode (client/server) */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚙️ Transpiler Settings</Text>
-          <Text style={styles.resultText}>Choose which transpiler path to use in React Native.</Text>
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
-            <TouchableOpacity
-              style={[styles.testButton, mode === 'client' ? {} : styles.testButtonDisabled]}
+        <TailwindView className="mb-6 bg-white rounded p-4" style={{ shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 }}>
+          <TailwindText className="text-base font-bold mb-3" style={{ color: '#333' }}>⚙️ Transpiler Settings</TailwindText>
+          <TailwindText className="text-sm" style={{ color: '#333', lineHeight: 18 }}>Choose which transpiler path to use in React Native.</TailwindText>
+          <TailwindView className="flex-row mt-3" style={{ columnGap: 12 }}>
+            <TailwindTouchableOpacity
+              className={`px-4 py-2 rounded my-2 ${mode === 'client' ? 'bg-primary' : 'bg-gray-300'}`}
               onPress={() => setMode('client')}
             >
-              <Text style={styles.testButtonText}>Client (default)</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.testButton, mode === 'server' ? {} : styles.testButtonDisabled]}
+              <TailwindText className="text-white text-sm font-semibold">Client (default)</TailwindText>
+            </TailwindTouchableOpacity>
+            <TailwindTouchableOpacity
+              className={`px-4 py-2 rounded my-2 ${mode === 'server' ? 'bg-primary' : 'bg-gray-300'}`}
               onPress={() => setMode('server')}
             >
-              <Text style={styles.testButtonText}>Server</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={[styles.resultBox, styles.resultBoxSuccess]}>
-            <Text style={styles.resultText}>Current mode: {mode}</Text>
-          </View>
-        </View>
+              <TailwindText className="text-white text-sm font-semibold">Server</TailwindText>
+            </TailwindTouchableOpacity>
+          </TailwindView>
+          <TailwindView className="rounded p-3 mt-3" style={{ backgroundColor: '#f5fff5', borderLeftWidth: 4, borderLeftColor: '#34c759' }}>
+            <TailwindText className="text-sm font-mono" style={{ color: '#333' }}>Current mode: {mode}</TailwindText>
+          </TailwindView>
+        </TailwindView>
 
         {/* NativeWind runtime test (quick visual compare) */}
-        <View style={styles.section}>
-          <NativeWindRuntimeTest />
-        </View>
+        <TailwindView className="mb-6 bg-white rounded p-4" style={{ shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 }}>
+          <TailwindRuntimeTest />
+        </TailwindView>
 
         {/* Single client-side transpiler test */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🧪 Client Transpiler Test</Text>
-          <Text style={styles.resultText}>
+        <TailwindView className="mb-6 bg-white rounded p-4" style={{ shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 }}>
+          <TailwindText className="text-base font-bold mb-3" style={{ color: '#333' }}>🧪 Client Transpiler Test</TailwindText>
+          <TailwindText className="text-sm" style={{ color: '#333', lineHeight: 18 }}>
             Runs a small JSX snippet through the client-side transpiler (Babel in RN for now).
-          </Text>
-          <TouchableOpacity
-            style={[styles.testButton, loading === 'clientTranspiler' && styles.testButtonDisabled]}
+          </TailwindText>
+          <TailwindTouchableOpacity
+            className={`px-4 py-2 rounded my-2 ${loading === 'clientTranspiler' ? 'bg-gray-300' : 'bg-primary'}`}
             onPress={runClientTranspilerTest}
             disabled={loading === 'clientTranspiler'}
           >
-            <Text style={styles.testButtonText}>
+            <TailwindText className="text-white text-sm font-semibold">
               {loading === 'clientTranspiler' ? 'Transpiling...' : 'Run Client Transpiler Test'}
-            </Text>
-          </TouchableOpacity>
+            </TailwindText>
+          </TailwindTouchableOpacity>
           {results.clientTranspiler && (
             <TestResult testName="clientTranspiler" result={results.clientTranspiler} />
           )}
-        </View>
+        </TailwindView>
 
         {/* Shared HookRenderer preview (identical wiring to RepoBrowser) */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🔍 Transpiler Preview (Shared HookRenderer)</Text>
-          <Text style={styles.resultText}>
+        <TailwindView className="mb-6 bg-white rounded p-4" style={{ shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 }}>
+          <TailwindText className="text-base font-bold mb-3" style={{ color: '#333' }}>🔍 Transpiler Preview (Shared HookRenderer)</TailwindText>
+          <TailwindText className="text-sm" style={{ color: '#333', lineHeight: 18 }}>
             This uses the same HookRenderer as RepoBrowser, so whatever works here works there.
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <Text style={{ fontSize: 12, color: '#333', marginRight: 8 }}>Host:</Text>
-            <TextInput
+          </TailwindText>
+          <TailwindView className="flex-row items-center mt-2" style={{ columnGap: 8 }}>
+            <TailwindText className="text-sm" style={{ color: '#333', marginRight: 8 }}>Host:</TailwindText>
+            <TailwindTextInput
               value={host}
               onChangeText={setHost}
               placeholder="https://your-host"
-              style={{ flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 }}
+              className="flex-1 px-2 py-1 rounded"
+              style={{ borderWidth: 1, borderColor: '#ccc' }}
               autoCapitalize="none"
               autoCorrect={false}
             />
-          </View>
-          <View style={{ height: 400, marginTop: 12 }}>
+          </TailwindView>
+          <TailwindView style={{ height: 400, marginTop: 12 }}>
             <HookRenderer host={host} />
-          </View>
-        </View>
-      </ScrollView>
+          </TailwindView>
+        </TailwindView>
+      </TailwindScrollView>
     )
   }
 

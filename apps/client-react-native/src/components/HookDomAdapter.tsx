@@ -13,6 +13,7 @@ import {
   ViewProps,
 } from 'react-native'
 import VideoPlayer from './VideoPlayer'
+import { tailwindToStyle } from '../tailwindRuntime'
 
 type WithClassName<P> = P & { className?: string }
 
@@ -179,6 +180,24 @@ export function createHookReact(reactModule: typeof React) {
   function hookCreateElement(type: any, props: any, ...children: any[]) {
     if (typeof type === 'string') {
       const resolved = resolveComponent(type)
+      // Convert any incoming `className` into RN `style` at runtime so
+      // hook-rendered elements receive styles from our tailwind runtime.
+      if (props && props.className) {
+        try {
+          try { console.debug('[HookDomAdapter] className ->', props.className) } catch (e) { }
+          const tw = tailwindToStyle(props.className)
+          try { console.debug('[HookDomAdapter] tailwindToStyle ->', tw) } catch (e) { }
+          if (tw) {
+            const mergedStyle = [tw, props.style]
+            const nextProps = { ...props, style: mergedStyle }
+            // remove className to avoid cluttering downstream components
+            delete nextProps.className
+            return baseCreateElement(resolved, nextProps, ...children)
+          }
+        } catch (e) {
+          // ignore conversion errors and fall back to original props
+        }
+      }
       return baseCreateElement(resolved, props, ...children)
     }
     return baseCreateElement(type, props, ...children)

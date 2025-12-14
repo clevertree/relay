@@ -4,11 +4,8 @@ import {
   FlatList,
   RefreshControl,
   StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
 } from 'react-native';
+import { Text, TextInput, TouchableOpacity, View } from '../tailwindPrimitives';
 import {useAppState, type PeerInfo, type PeerProbe} from '../state/store';
 import {RelayCore} from '../../native/RelayCoreModule';
 import {fullProbePeer} from '../services/probing';
@@ -166,70 +163,74 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
 
   const renderItem = ({item}: {item: PeerInfo}) => (
     <TouchableOpacity
-      style={styles.peerItem}
+      className="bg-white rounded p-4"
+      style={{ borderWidth: 1, borderColor: '#e9ecef', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 }}
       onPress={() => handlePeerPress(item.host)}
       disabled={!onPeerPress}>
-      <View style={styles.peerHeader}>
-        <View style={styles.peerInfo}>
-          <Text style={styles.hostText}>{item.host}</Text>
+      <View className="flex-row items-center justify-between mb-3">
+        <View className="flex-row items-center flex-1">
+          <Text className="text-base font-semibold flex-1" style={{ color: '#333' }}>{item.host}</Text>
           {item.isProbing && (
-            <ActivityIndicator size="small" color="#007AFF" style={styles.probingIndicator} />
+            <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 8 }} />
           )}
         </View>
-        <View style={styles.peerActions}>
+        <View className="flex-row items-center" style={{ columnGap: 8 }}>
           {renderProbeStatus(item)}
           <TouchableOpacity
-            style={styles.removeButton}
+            className="w-8 h-8 rounded-full items-center justify-center"
+            style={{ backgroundColor: '#f8d7da' }}
             onPress={(e) => handleRemovePeer(e, item.host)}>
-            <Text style={styles.removeButtonText}>✕</Text>
+            <Text className="text-white font-semibold">✕</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {item.branches && item.branches.length > 0 && (
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Branches:</Text>
-          <Text style={styles.infoText}>{renderArrayField(item.branches)}</Text>
+        <View className="flex-row items-start mb-2">
+          <Text className="text-xs font-semibold mr-2" style={{ color: '#555' }}>Branches:</Text>
+          <Text className="text-xs" style={{ color: '#333' }}>{renderArrayField(item.branches)}</Text>
         </View>
       )}
 
       {item.repos && item.repos.length > 0 && (
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Repos:</Text>
-          <Text style={styles.infoText}>{renderArrayField(item.repos)}</Text>
+        <View className="flex-row items-start mb-2">
+          <Text className="text-xs font-semibold mr-2" style={{ color: '#555' }}>Repos:</Text>
+          <Text className="text-xs" style={{ color: '#333' }}>{renderArrayField(item.repos)}</Text>
         </View>
       )}
 
       <TouchableOpacity
-        style={styles.openButton}
+        className="mt-2 self-start px-3 py-2 rounded"
+        style={{ backgroundColor: '#007AFF' }}
         onPress={(e) => {
           e.stopPropagation();
           handlePeerPress(item.host);
         }}>
-        <Text style={styles.openButtonText}>Open →</Text>
+        <Text className="text-white text-sm font-semibold">Open →</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.logo}>⚡</Text>
-          <Text style={styles.title}>Relay</Text>
+    <View className="flex-1" style={{ backgroundColor: '#f8f9fa' }}>
+      <View className="p-4 border-b bg-white" style={{ borderBottomColor: '#e9ecef', borderBottomWidth: 1 }}>
+        <View className="flex-row items-center mb-4">
+          <Text className="text-2xl mr-2">⚡</Text>
+          <Text className="text-xl font-bold" style={{ color: '#333' }}>Relay</Text>
         </View>
 
         {/* Add peer input form */}
-        <View style={styles.addPeerForm}>
+        <View className="flex-row" style={{ columnGap: 8 }}>
           <TextInput
-            style={styles.peerInput}
+            className="flex-1 px-3 py-2 rounded"
+            style={{ borderWidth: 1, borderColor: '#ddd' }}
             placeholder="host:port"
             value={newPeerInput}
             onChangeText={setNewPeerInput}
             onSubmitEditing={handleAddPeer}
           />
-          <TouchableOpacity style={styles.addButton} onPress={handleAddPeer}>
-            <Text style={styles.addButtonText}>Add</Text>
+          <TouchableOpacity className="px-4 py-2 rounded justify-center" style={{ backgroundColor: '#28a745' }} onPress={handleAddPeer}>
+            <Text className="text-white text-sm font-semibold">Add</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -238,13 +239,13 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
         data={peers}
         keyExtractor={(item) => item.host}
         renderItem={renderItem}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={{ padding: 16, rowGap: 12 }}
         refreshControl={
           <RefreshControl refreshing={false} onRefresh={loadAndProbePeers} />
         }
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
+          <View className="items-center justify-center p-8">
+            <Text className="text-sm text-center" style={{ color: '#666' }}>
               No peers configured. Add one using the form above or set RELAY_PEERS environment variable.
             </Text>
           </View>

@@ -1,15 +1,6 @@
 import React, { useEffect } from 'react';
-import {
-  SafeAreaView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  ScrollView,
-  useWindowDimensions,
-  AppRegistry,
-} from 'react-native';
+import { StatusBar, useWindowDimensions } from 'react-native';
+import { SafeAreaView, ScrollView, Text, TouchableOpacity, View } from './tailwindPrimitives';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import PeersView from './components/PeersView';
@@ -19,25 +10,6 @@ import { useAppState } from './state/store';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { UpdateModal } from './components/UpdateModal';
 import { initNativeRustTranspiler } from './nativeRustTranspiler';
-// Import nativewind at runtime via require to avoid TS type errors when runtime
-// exports vary between package versions.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const NativeWind = require('nativewind') as any;
-
-// Ensure NativeWind outputs React Native StyleSheet objects at runtime.
-// Guard this call so a missing/changed nativewind API doesn't crash module initialization
-try {
-  if (NativeWind && NativeWind.NativeWindStyleSheet && typeof NativeWind.NativeWindStyleSheet.setOutput === 'function') {
-    NativeWind.NativeWindStyleSheet.setOutput({ default: 'native' });
-  } else {
-    console.warn('[App] NativeWindStyleSheet.setOutput unavailable');
-  }
-} catch (err) {
-  // Protect app startup from unexpected runtime errors in nativewind
-  // eslint-disable-next-line no-console
-  console.warn('[App] NativeWindStyleSheet.setOutput failed', err);
-}
-
 type RootStackParamList = {
   Main: undefined;
   RepoTab: { tabId: string };
@@ -69,12 +41,13 @@ const TabBar: React.FC<{ navigation: any }> = ({ navigation }) => {
   }
 
   return (
-    <View style={styles.tabBar}>
+    <View className="bg-surface-secondary border-b" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         {allTabs.map((tab) => (
-          <View key={tab.id} style={styles.tabContainer}>
+          <View key={tab.id} className="flex-row items-center">
             <TouchableOpacity
-              style={[styles.tab, activeTabId === tab.id && styles.tabActive]}
+              className={`px-4 py-2 border-b-2 ${activeTabId === tab.id ? 'border-primary bg-surface' : 'border-transparent'}`}
+              style={{ maxWidth: 150 }}
               onPress={() => {
                 setActiveTab(tab.id);
                 if (tab.id === homeTabId) {
@@ -86,24 +59,22 @@ const TabBar: React.FC<{ navigation: any }> = ({ navigation }) => {
                 }
               }}>
               <Text
-                style={[
-                  styles.tabText,
-                  activeTabId === tab.id && styles.tabTextActive,
-                ]}
-                numberOfLines={1}>
+                className={`text-sm ${activeTabId === tab.id ? 'text-primary font-semibold' : 'text-text-secondary'}`}
+                numberOfLines={1}
+              >
                 {tab.title}
               </Text>
             </TouchableOpacity>
             {!tab.isHome && !tab.isDebug && (
               <TouchableOpacity
-                style={styles.closeButton}
+                className="p-2 mr-1"
                 onPress={() => {
                   closeTab(tab.id);
                   if (activeTabId === tab.id) {
                     navigation.navigate('Main');
                   }
                 }}>
-                <Text style={styles.closeButtonText}>×</Text>
+                <Text className="text-lg text-text-muted font-semibold">×</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -136,20 +107,17 @@ const MainScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView className="flex-1 bg-surface">
       <StatusBar barStyle="dark-content" />
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Relay Client</Text>
-        <TouchableOpacity
-          style={styles.updateButton}
-          onPress={checkForUpdate}
-        >
-          <Text style={styles.updateButtonText}>🔄</Text>
+      <View className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
+        <Text className="text-lg font-bold flex-1 text-center">Relay Client</Text>
+        <TouchableOpacity className="p-2 ml-3" onPress={checkForUpdate}>
+          <Text className="text-lg">🔄</Text>
         </TouchableOpacity>
       </View>
       <TabBar navigation={navigation} />
-      <View style={isTablet ? styles.splitContainer : styles.fullContainer}>
-        <View style={isTablet ? styles.sidePanel : styles.fullPanel}>
+      <View className={isTablet ? 'flex-1 flex-row' : 'flex-1'}>
+        <View className={isTablet ? 'flex-1' : 'flex-1'} style={isTablet ? { borderRightWidth: 1, borderRightColor: '#eee' } : undefined}>
           {!activeTabId || activeTabId === homeTabId ? (
             <>
               {console.log('[MainScreen] Rendering PeersView, activeTabId:', activeTabId, 'homeTabId:', homeTabId)}
@@ -180,17 +148,17 @@ const RepoTabScreen: React.FC<{ route: any; navigation: any }> = ({ route, navig
   const { tabId } = route.params;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView className="flex-1 bg-surface">
       <StatusBar barStyle="dark-content" />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Peers</Text>
+      <View className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
+        <TouchableOpacity onPress={() => navigation.goBack()} className="p-1">
+          <Text className="text-primary text-base">← Peers</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Relay Client</Text>
-        <View style={styles.headerSpacer} />
+        <Text className="text-lg font-bold flex-1 text-center">Relay Client</Text>
+        <View style={{ width: 60 }} />
       </View>
       <TabBar navigation={navigation} />
-      <View style={styles.contentWrapper}>
+      <View className="flex-1">
         <RepoTab tabId={tabId} />
       </View>
     </SafeAreaView>
@@ -199,17 +167,17 @@ const RepoTabScreen: React.FC<{ route: any; navigation: any }> = ({ route, navig
 
 const DebugScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView className="flex-1 bg-surface">
       <StatusBar barStyle="dark-content" />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Home</Text>
+      <View className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
+        <TouchableOpacity onPress={() => navigation.goBack()} className="p-1">
+          <Text className="text-primary text-base">← Home</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Debug Tools</Text>
-        <View style={styles.headerSpacer} />
+        <Text className="text-lg font-bold flex-1 text-center">Debug Tools</Text>
+        <View style={{ width: 60 }} />
       </View>
       <TabBar navigation={navigation} />
-      <View style={styles.contentWrapper}>
+      <View className="flex-1">
         <DebugTab />
       </View>
     </SafeAreaView>
@@ -347,98 +315,7 @@ const App: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    backgroundColor: '#fff',
-    justifyContent: 'space-between',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    flex: 1,
-    textAlign: 'center',
-  },
-  updateButton: {
-    padding: 8,
-    marginLeft: 12,
-  },
-  updateButtonText: {
-    fontSize: 18,
-  },
-  backButton: {
-    padding: 4,
-  },
-  backButtonText: {
-    color: '#007AFF',
-    fontSize: 16,
-  },
-  headerSpacer: {
-    width: 60,
-  },
-  tabBar: {
-    backgroundColor: '#f8f9fa',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-    maxWidth: 150,
-  },
-  tabActive: {
-    borderBottomColor: '#007AFF',
-    backgroundColor: '#fff',
-  },
-  tabText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  tabTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  closeButton: {
-    padding: 8,
-    marginRight: 4,
-  },
-  closeButtonText: {
-    fontSize: 18,
-    color: '#999',
-    fontWeight: '600',
-  },
-  splitContainer: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  fullContainer: {
-    flex: 1,
-  },
-  sidePanel: {
-    flex: 1,
-    borderRightWidth: 1,
-    borderRightColor: '#eee',
-  },
-  fullPanel: {
-    flex: 1,
-  },
-  contentWrapper: {
-    flex: 1,
-  },
-});
+// Styles converted to NativeWind classes where possible. Inline styles remain
+// for precise values not covered by the Tailwind scale (e.g., exact border colors, widths).
 
 export default App;

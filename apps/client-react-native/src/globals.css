@@ -26,3 +26,31 @@
 .w-full {}
 
 .h-full {}
+
+/* Explicit spacing placeholders to ensure Tailwind generates spacing utilities */
+.p-0 {}
+.p-1 {}
+.p-2 {}
+.p-3 {}
+.p-4 {}
+.p-5 {}
+.p-6 {}
+.p-8 {}
+.p-12 {}
+.px-1 {}
+.px-2 {}
+.px-3 {}
+.px-4 {}
+.py-1 {}
+.py-2 {}
+.py-3 {}
+.py-4 {}
+.pt-1 {}
+.pt-2 {}
+.pt-3 {}
+.pr-1 {}
+.pr-2 {}
+.pb-1 {}
+.pb-2 {}
+.pl-1 {}
+.pl-2 {}

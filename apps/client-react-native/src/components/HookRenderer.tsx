@@ -8,6 +8,7 @@ import { createHookReact } from './HookDomAdapter'
 import { HookErrorBoundary } from './HookErrorBoundary'
 import MarkdownRenderer from './MarkdownRenderer'
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl } from '../../../shared/src'
+import { registerThemeStyles } from '../tailwindRuntime'
 
 type OptionsInfo = {
   client?: { hooks?: { get?: { path: string }; query?: { path: string } } }
@@ -48,20 +49,11 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
     const requireShim = (spec: string) => {
       if (spec === 'react') return HookReact
       if (spec === 'react/jsx-runtime' || spec === 'react/jsx-dev-runtime') return jsxRuntimeShim
-      // Ensure nativewind is available to transpiled hooks at runtime. Prefer real package,
-      // fall back to our local shim if nativewind isn't present as a runtime export.
-      if (spec === 'nativewind' || spec.startsWith('nativewind/')) {
-        try {
-          // eslint-disable-next-line global-require
-          return require('nativewind')
-        } catch (e) {
-          try {
-            // eslint-disable-next-line global-require
-            return require('../nativewind-shim')
-          } catch (err) {
-            return {}
-          }
-        }
+      // Map any styling runtime imports to our internal tailwind runtime.
+      // We intentionally removed the nativewind shim and rely on our own implementation.
+      if (spec === 'nativewind' || spec.startsWith('nativewind/') || spec === 'tailwindRuntime') {
+        // eslint-disable-next-line global-require
+        return require('../tailwindRuntime')
       }
       return {}
     }
@@ -184,6 +176,7 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
           buildPeerUrl: buildUrl,
           loadModule,
           buildRepoHeaders: () => ({}),
+          registerThemeStyles,
         },
       }
     },
