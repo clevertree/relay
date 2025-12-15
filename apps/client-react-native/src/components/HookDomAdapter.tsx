@@ -18,19 +18,22 @@ import { tailwindToStyle } from '../tailwindRuntime'
 type WithClassName<P> = P & { className?: string }
 
 const TextWrapper = React.forwardRef<Text, WithClassName<TextProps>>(function TextWrapper({ className, style, ...rest }, ref) {
-  return <Text ref={ref} style={style} {...rest} />
+  const tw = className ? tailwindToStyle(className) : undefined
+  return <Text ref={ref} style={[tw, style]} {...rest} />
 })
 
 const ViewWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function ViewWrapper({ className, style, ...rest }, ref) {
-  return <View ref={ref} style={style} {...rest} />
+  const tw = className ? tailwindToStyle(className) : undefined
+  return <View ref={ref} style={[tw, style]} {...rest} />
 })
 
 const ButtonWrapper = React.forwardRef<View, WithClassName<TouchableOpacityProps>>(function ButtonWrapper(
   { className, style, children, ...rest },
   ref,
 ) {
+  const tw = className ? tailwindToStyle(className) : undefined
   return (
-    <TouchableOpacity ref={ref} style={style} {...rest}>
+    <TouchableOpacity ref={ref} style={[tw, style]} {...rest}>
       {typeof children === 'string' ? <Text>{children}</Text> : children}
     </TouchableOpacity>
   )
@@ -43,36 +46,40 @@ const InputWrapper = React.forwardRef<TextInput, WithClassName<TextInputProps>>(
   if (runtimeType === 'number' || runtimeType === 'tel') {
     extraProps.keyboardType = 'numeric'
   }
-  return <TextInput ref={ref} style={style} {...rest} {...extraProps} />
+  const tw = className ? tailwindToStyle(className) : undefined
+  return <TextInput ref={ref} style={[tw, style]} {...rest} {...extraProps} />
 })
 
 const TextAreaWrapper = React.forwardRef<TextInput, WithClassName<TextInputProps>>(function TextAreaWrapper({ className, style, ...rest }, ref) {
-  return <TextInput ref={ref} multiline style={style} {...rest} />
+  const tw = className ? tailwindToStyle(className) : undefined
+  return <TextInput ref={ref} multiline style={[tw, style]} {...rest} />
 })
 
-const ImgWrapper: FC<WithClassName<ImageProps & { src?: string; alt?: string }>> = ({ src, alt, style, ...rest }) => {
+const ImgWrapper: FC<WithClassName<ImageProps & { src?: string; alt?: string }>> = ({ src, alt, style, className, ...rest }) => {
   const imageProps: ComponentPropsWithoutRef<typeof Image> = {
     source: src ? { uri: src } : undefined,
     accessibilityLabel: alt,
-    style,
+    style: [className ? tailwindToStyle(className) : undefined, style],
     resizeMode: 'contain',
     ...rest,
   }
   return <Image {...imageProps} />
 }
 
-const AnchorWrapper: FC<WithClassName<TextProps & { href?: string }>> = ({ style, children, ...rest }) => (
-  <TouchableOpacity {...rest} style={style} activeOpacity={0.7}>
+const AnchorWrapper: FC<WithClassName<TextProps & { href?: string }>> = ({ className, style, children, ...rest }) => (
+  <TouchableOpacity {...rest} style={[className ? tailwindToStyle(className) : undefined, style]} activeOpacity={0.7}>
     <Text>{children}</Text>
   </TouchableOpacity>
 )
 
-const UnknownElement: FC<WithClassName<ViewProps> & { tagName: string }> = ({ tagName, style, children, ...rest }) => (
+const UnknownElement: FC<WithClassName<ViewProps> & { tagName: string }> = ({ tagName, className, style, children, ...rest }) => (
   <View
     {...rest}
-    style={
-      ([{ borderWidth: 1, borderStyle: 'dashed', borderColor: '#d97706', padding: 6, borderRadius: 6 }, style] as StyleProp<ViewProps>)
-    }
+    style={([
+      { borderWidth: 1, borderStyle: 'dashed', borderColor: '#d97706', padding: 6, borderRadius: 6 },
+      className ? (tailwindToStyle(className) as any) : undefined,
+      style,
+    ] as StyleProp<ViewProps>)}
   >
     <Text style={{ fontSize: 11, textTransform: 'uppercase', color: '#d97706', fontWeight: '600' }}>
       Placeholder for &lt;{tagName}&gt;
@@ -81,32 +88,32 @@ const UnknownElement: FC<WithClassName<ViewProps> & { tagName: string }> = ({ ta
   </View>
 )
 
-const ListItemWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function ListItemWrapper({ style, children, ...rest }, ref) {
+const ListItemWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function ListItemWrapper({ className, style, children, ...rest }, ref) {
   return (
-    <View ref={ref} style={[{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }, style]} {...rest}>
+    <View ref={ref} style={[{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }, className ? (tailwindToStyle(className) as any) : undefined, style]} {...rest}>
       <Text style={{ marginRight: 6 }}>•</Text>
       <View style={{ flex: 1 }}>{children}</View>
     </View>
   )
 })
 
-const TableWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function TableWrapper({ style, ...rest }, ref) {
-  return <View ref={ref} style={[{ flexDirection: 'column', borderWidth: 1, borderColor: '#d1d5db' }, style]} {...rest} />
+const TableWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function TableWrapper({ className, style, ...rest }, ref) {
+  return <View ref={ref} style={[{ flexDirection: 'column', borderWidth: 1, borderColor: '#d1d5db' }, className ? (tailwindToStyle(className) as any) : undefined, style]} {...rest} />
 })
 
-const TableRowWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function TableRowWrapper({ style, children, ...rest }, ref) {
+const TableRowWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function TableRowWrapper({ className, style, children, ...rest }, ref) {
   return (
-    <View ref={ref} style={[{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#e5e7eb' }, style]} {...rest}>
+    <View ref={ref} style={[{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#e5e7eb' }, className ? (tailwindToStyle(className) as any) : undefined, style]} {...rest}>
       {children}
     </View>
   )
 })
 
-const TableCellWrapper = React.forwardRef<Text, WithClassName<TextProps>>(function TableCellWrapper({ style, children, ...rest }, ref) {
+const TableCellWrapper = React.forwardRef<Text, WithClassName<TextProps>>(function TableCellWrapper({ className, style, children, ...rest }, ref) {
   return (
     <Text
       ref={ref}
-      style={[{ flex: 1, padding: 8, borderRightWidth: 1, borderColor: '#e5e7eb' }, style]}
+      style={[{ flex: 1, padding: 8, borderRightWidth: 1, borderColor: '#e5e7eb' }, className ? (tailwindToStyle(className) as any) : undefined, style]}
       {...rest}
     >
       {children}

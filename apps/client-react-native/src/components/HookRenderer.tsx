@@ -3,12 +3,12 @@
  * Ensures identical wiring across RepoBrowser and DebugTab preview.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Text, View, ScrollView } from 'react-native'
 import { createHookReact } from './HookDomAdapter'
 import { HookErrorBoundary } from './HookErrorBoundary'
 import MarkdownRenderer from './MarkdownRenderer'
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl } from '../../../shared/src'
-import { registerThemeStyles } from '../tailwindRuntime'
+import { registerThemeStyles, styled, tailwindToStyle } from '../tailwindRuntime'
 
 type OptionsInfo = {
   client?: { hooks?: { get?: { path: string }; query?: { path: string } } }
@@ -29,11 +29,22 @@ export interface HookRendererProps {
   hookPath?: string // defaults to /hooks/client/get-client.jsx
 }
 
+type ErrorDetails = {
+  phase?: string
+  message?: string
+  hookPath?: string
+  host?: string
+} | null
+
+const TWView = styled(View)
+const TWScroll = styled(ScrollView)
+const TWText = styled(Text)
+
 export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hookPathProp }) => {
   const [element, setElement] = useState<React.ReactNode | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [details, setDetails] = useState<any>(null)
+  const [details, setDetails] = useState<ErrorDetails>(null)
   const [activeHookPath, setActiveHookPath] = useState<string | null>(null)
   const optionsRef = useRef<OptionsInfo | null>(null)
   const hookLoaderRef = useRef<HookLoader | null>(null)
@@ -118,9 +129,10 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
       const json = (await resp.json()) as OptionsInfo
       optionsRef.current = json
       return json
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
       setError('Failed to load repository OPTIONS')
-      setDetails({ phase: 'options', message: e?.message || String(e) })
+      setDetails({ phase: 'options', message: msg })
       return null
     }
   }, [normalizedHost])
@@ -146,20 +158,21 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
               const text = await resp.text()
               setContent(text)
               setError(null)
-            } catch (err) {
-              setError(`Failed to load ${filePath}: ${(err as any)?.message || err}`)
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err)
+              setError(`Failed to load ${filePath}: ${msg}`)
               setContent('')
             } finally {
               setLoading(false)
             }
           })()
         }, [filePath])
-        if (loading) return <Text>Loading...</Text>
-        if (error) return <Text style={{ color: 'red' }}>{error}</Text>
+        if (loading) return <TWText>Loading...</TWText>
+        if (error) return <TWText className="text-red-600">{error}</TWText>
         return <MarkdownRenderer content={content} />
       }
 
-      const loadModule = async (modulePath: string): Promise<any> => {
+      const loadModule = async (modulePath: string): Promise<unknown> => {
         if (!hookLoaderRef.current) throw new Error('[HookRenderer] Hook loader not initialized')
         return hookLoaderRef.current.loadModule(modulePath, baseHookPath, createHookContext(baseHookPath))
       }
@@ -207,8 +220,8 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
       const ctx = createHookContext(path)
       const el = await hookLoaderRef.current.loadAndExecuteHook(path, ctx)
       setElement(el)
-    } catch (e: any) {
-      const message = e?.message || String(e)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e)
       setError(message)
       setElement(null)
       setDetails({
@@ -226,82 +239,43 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
   }, [tryRender])
 
   return (
-    <View style={styles.container}>
+    <TWView className="flex-1 min-h-0 bg-white">
       {loading && (
-        <View style={styles.loadingContainer}>
+        <TWView className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Loading...</Text>
-        </View>
+          <TWText className="mt-3 text-gray-600">Loading...</TWText>
+        </TWView>
       )}
 
       {error && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorTitle}>Error</Text>
-          <Text style={styles.errorText}>{error}</Text>
+        <TWView className="flex-1 justify-center p-5">
+          <TWText className="text-lg font-bold text-red-600 mb-3">Error</TWText>
+          <TWText className="text-gray-800">{error}</TWText>
           {details && (
-            <View style={styles.errorDetails}>
-              <Text style={styles.errorDetailText}>{JSON.stringify(details, null, 2)}</Text>
-            </View>
+            <TWView className="mt-2 rounded-md bg-gray-100 p-2">
+              <TWText className="font-mono text-xs text-gray-600">{JSON.stringify(details, null, 2)}</TWText>
+            </TWView>
           )}
-        </View>
+        </TWView>
       )}
 
       {!loading && !error && element && (
-        <View style={styles.hookContainer}>
+        <TWScroll
+          className="flex-1 min-h-0 w-full"
+          contentContainerStyle={tailwindToStyle('flex-grow min-h-0 pb-8')}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+        >
           <HookErrorBoundary
             scriptPath={activeHookPath || ''}
             onError={(err) => console.error('[HookRenderer] Child render error', err)}
           >
             {element}
           </HookErrorBoundary>
-        </View>
+        </TWScroll>
       )}
-    </View>
+    </TWView>
   )
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    color: '#666',
-  },
-  errorContainer: {
-    flex: 1,
-    padding: 20,
-    justifyContent: 'center',
-  },
-  errorTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#dc3545',
-    marginBottom: 12,
-  },
-  errorText: {
-    color: '#333',
-  },
-  errorDetails: {
-    marginTop: 10,
-    backgroundColor: '#f8f9fa',
-    padding: 10,
-    borderRadius: 6,
-  },
-  errorDetailText: {
-    fontFamily: 'monospace',
-    fontSize: 12,
-    color: '#555',
-  },
-  hookContainer: {
-    flex: 1,
-  },
-})
 
 export default HookRenderer

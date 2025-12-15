@@ -15,8 +15,31 @@ const tailwindConfig = requireFromCwd(path.join(appRoot, 'tailwind.config.js'))
 const cssSourcePath = path.join(appRoot, 'src', 'globals.css')
 const generatedDir = path.join(appRoot, 'src', 'generated')
 const outputPath = path.join(generatedDir, 'tailwindClassMap.generated.js')
+const tsOutputPath = path.join(generatedDir, 'tailwindClassMap.generated.ts')
 
 const cssToReactNative = requireFromCwd('css-to-react-native')?.default || requireFromCwd('css-to-react-native')
+const SUPPORTED_BORDER_STYLES = new Set(['solid', 'dashed', 'dotted'])
+const BORDER_STYLE_HIDE_VALUES = new Set(['none', 'hidden'])
+
+function sanitizeNativeStyle(className, style) {
+    if (!style || typeof style !== 'object') return style
+    const value = style.borderStyle
+    if (typeof value !== 'string') return style
+    const normalized = value.trim().toLowerCase()
+    if (SUPPORTED_BORDER_STYLES.has(normalized)) {
+        style.borderStyle = normalized
+        return style
+    }
+    delete style.borderStyle
+    if (BORDER_STYLE_HIDE_VALUES.has(normalized)) {
+        if (!('borderWidth' in style)) {
+            style.borderWidth = 0
+        }
+    } else {
+        console.warn(`[tailwind-map] dropping unsupported borderStyle "${value}" for ${className}`)
+    }
+    return style
+}
 
 function normalizeClassSelector(selector) {
     if (!selector || !selector.startsWith('.')) return null
@@ -54,6 +77,7 @@ async function buildBaseClassMap(css) {
                 console.warn('[tailwind-map] Failed to convert declarations for', className, err.message || err)
                 continue
             }
+            nativeStyle = sanitizeNativeStyle(className, nativeStyle)
             if (!nativeStyle || Object.keys(nativeStyle).length === 0) continue
             map[className] = { native: nativeStyle }
         }
@@ -131,6 +155,9 @@ async function run() {
     const contents = `const tailwindClassMap = ${serialized}\n\nmodule.exports = { tailwindClassMap }\n`
     await fs.writeFile(outputPath, contents, 'utf8')
     console.log('[tailwind-map] Written', outputPath)
+    const tsContents = `export const tailwindClassMap = ${serialized} as const\n`
+    await fs.writeFile(tsOutputPath, tsContents, 'utf8')
+    console.log('[tailwind-map] Written', tsOutputPath)
 }
 
 await run()

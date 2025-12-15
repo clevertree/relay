@@ -3,26 +3,22 @@
  * Reuses the shared HookRenderer so wiring matches DebugTab preview.
  */
 import React from 'react'
-import { StyleSheet, View } from 'react-native'
+import { View } from 'react-native'
 import HookRenderer from './HookRenderer'
+import { styled } from '../tailwindRuntime'
 
 interface RepoBrowserProps {
   host: string
 }
 
+const TWView = styled(View)
+
 const RepoBrowser: React.FC<RepoBrowserProps> = ({ host }) => {
   return (
-    <View style={styles.container}>
+    <TWView className="flex-1 bg-white min-h-0">
       <HookRenderer host={host} />
-    </View>
+    </TWView>
   )
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-})
 
 export default RepoBrowser

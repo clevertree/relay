@@ -1,5 +1,6 @@
 import React from 'react'
-import { StyleSheet, Text, View } from 'react-native'
+import { Text, View } from 'react-native'
+import { styled } from '../tailwindRuntime'
 
 type Props = {
   children: React.ReactNode
@@ -30,40 +31,17 @@ export class HookErrorBoundary extends React.Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      const TWView = styled(View)
+      const TWText = styled(Text)
       return (
-        <View style={styles.container}>
-          <Text style={styles.title}>Hook rendering failed</Text>
-          <Text style={styles.scriptLabel}>Script: {this.props.scriptPath ?? 'unknown'}</Text>
-          <Text style={styles.message}>{this.state.error.message}</Text>
-        </View>
+        <TWView className="mx-3 my-2 rounded-lg bg-red-50 border border-red-200 p-4">
+          <TWText className="font-bold text-red-700 mb-1">Hook rendering failed</TWText>
+          <TWText className="text-xs text-gray-500 mb-1">Script: {this.props.scriptPath ?? 'unknown'}</TWText>
+          <TWText className="text-red-700">{this.state.error.message}</TWText>
+        </TWView>
       )
     }
 
     return this.props.children as React.ReactElement
   }
 }
-
-const styles = StyleSheet.create({
-  container: {
-    padding: 16,
-    borderRadius: 8,
-    marginHorizontal: 12,
-    marginVertical: 8,
-    backgroundColor: '#fef2f2',
-    borderWidth: 1,
-    borderColor: '#fecaca',
-  },
-  title: {
-    fontWeight: '700',
-    color: '#b91c1c',
-    marginBottom: 4,
-  },
-  scriptLabel: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 6,
-  },
-  message: {
-    color: '#991b1b',
-  },
-})

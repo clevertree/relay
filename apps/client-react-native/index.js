@@ -72,14 +72,71 @@ try {
     let RealApp = null;
 
     const Shell = () => {
-        if (RealApp) {
+        const [realAppReady, setRealAppReady] = React.useState(!!RealApp);
+        const [elapsed, setElapsed] = React.useState(0);
+        const [timedOut, setTimedOut] = React.useState(false);
+        const [attempt, setAttempt] = React.useState(0);
+
+        React.useEffect(() => {
+            let mounted = true;
+            if (RealApp) setRealAppReady(true);
+            // elapsed timer
+            const t = setInterval(() => {
+                if (!mounted) return;
+                setElapsed((s) => s + 1);
+            }, 1000);
+
+            // timeout after 10s
+            const to = setTimeout(() => {
+                if (!mounted) return;
+                setTimedOut(true);
+            }, 10000);
+
+            return () => {
+                mounted = false;
+                clearInterval(t);
+                clearTimeout(to);
+            };
+        }, [attempt]);
+
+        React.useEffect(() => {
+            if (RealApp) setRealAppReady(true);
+        }, [RealApp]);
+
+        const retry = () => {
+            setTimedOut(false);
+            setElapsed(0);
+            setAttempt((a) => a + 1);
+            // try to require the real app again
+            try {
+                // eslint-disable-next-line global-require
+                const Loaded = require('./src/App').default;
+                RealApp = Loaded;
+                AppRegistry.registerComponent('RelayClient', () => RealApp);
+                console.log('[index] Real App module loaded on retry');
+                setRealAppReady(true);
+            } catch (e) {
+                console.error('[index] Retry load failed:', e);
+            }
+        };
+
+        if (realAppReady && RealApp) {
             return React.createElement(RealApp, null);
         }
+
         return React.createElement(
             View,
-            { style: { flex: 1, justifyContent: 'center', alignItems: 'center' } },
-            React.createElement(ActivityIndicator, null),
-            React.createElement(Text, { style: { marginTop: 12 } }, 'Loading app...')
+            { style: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#fff' } },
+            React.createElement(ActivityIndicator, { size: 'large' }),
+            React.createElement(Text, { style: { marginTop: 12, fontSize: 16, fontWeight: '600' } }, 'Loading app...'),
+            React.createElement(Text, { style: { marginTop: 6, color: '#666' } }, `Elapsed: ${elapsed}s`),
+            timedOut && React.createElement(Text, { style: { marginTop: 8, color: '#b00', textAlign: 'center' } }, 'App did not finish loading within 10s.'),
+            timedOut && React.createElement(Text, { style: { marginTop: 6, color: '#666', textAlign: 'center' } }, 'This usually means network probes or dynamic modules are taking too long.'),
+            timedOut && React.createElement(
+                TouchableOpacity,
+                { onPress: retry, style: { marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#007aff', borderRadius: 6 } },
+                React.createElement(Text, { style: { color: '#fff', fontWeight: '600' } }, 'Retry')
+            )
         );
     };
 

@@ -16,8 +16,9 @@ ipfs/
 *.core
 *.txt
 **/*screen*.png
+**/screenshots/
 **/*log*.txt
-
+**/apps/client-react-native/*.out
 # Storybook static output
 storybook-static/
 

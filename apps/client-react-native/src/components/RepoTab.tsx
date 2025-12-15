@@ -1,14 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { useAppState } from '../state/store';
 import { fetchPeerOptions } from '../services/probing';
-import RepoBrowser from './RepoBrowser';
+import HookRenderer from './HookRenderer';
+import { styled } from '../tailwindRuntime';
 
 interface RepoTabProps {
   tabId: string;
@@ -45,7 +40,7 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({ tabId }) => {
     setError(null);
 
     try {
-      // Skip actual fetch for now - use defaults and let RepoBrowser load
+      // Skip actual fetch for now - use defaults and let HookRenderer handle loading
       console.log('[RepoTab] Using default options (skipping fetch)');
       setOptionsInfo({
         branches: ['main'],
@@ -67,114 +62,56 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({ tabId }) => {
     }
   };
 
+  const TWView = styled(View);
+  const TWText = styled(Text);
+  const TWButton = styled(TouchableOpacity);
+
   if (!tab) {
     return (
-      <View style={styles.container}>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Tab not found (ID: {tabId})</Text>
-          <Text style={{ color: '#666', marginTop: 8, fontSize: 12 }}>
+      <TWView className="flex-1 min-h-0 bg-white">
+        <TWView className="flex-1 items-center justify-center p-5">
+          <TWText className="text-red-600 text-center mb-3">Tab not found (ID: {tabId})</TWText>
+          <TWText className="text-gray-600 mt-2 text-xs">
             The tab may have been closed or is still loading.
-          </Text>
-        </View>
-      </View>
+          </TWText>
+        </TWView>
+      </TWView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <TWView className="flex-1 min-h-0 bg-white">
       {/* Header with host info */}
-      <View style={styles.header}>
-        <Text style={styles.hostText}>{tab.host}</Text>
+      <TWView className="flex-row items-center px-3 py-3 border-b border-gray-200 bg-gray-50">
+        <TWText className="text-base font-semibold flex-1">{tab.host}</TWText>
         {tab.currentBranch && (
-          <View style={styles.branchBadge}>
-            <Text style={styles.branchText}>{tab.currentBranch}</Text>
-          </View>
+          <TWView className="bg-blue-500 px-2 py-1 rounded mr-2">
+            <TWText className="text-white text-xs font-medium">{tab.currentBranch}</TWText>
+          </TWView>
         )}
-      </View>
+      </TWView>
 
       {/* Content area */}
       {loading ? (
-        <View style={styles.loadingContainer}>
+        <TWView className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Loading peer info...</Text>
-        </View>
+          <TWText className="mt-3 text-gray-600">Loading peer info...</TWText>
+        </TWView>
       ) : error ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadOptions}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
+        <TWView className="flex-1 items-center justify-center p-5">
+          <TWText className="text-red-600 text-center mb-3">{error}</TWText>
+          <TWButton className="bg-blue-500 px-5 py-2 rounded-md" onPress={loadOptions}>
+            <TWText className="text-white font-semibold">Retry</TWText>
+          </TWButton>
+        </TWView>
       ) : (
-        <RepoBrowser
-          host={tab.host}
-        />
+        <TWView className="flex-1 min-h-0">
+          <HookRenderer host={tab.host} />
+        </TWView>
       )}
-    </View>
+    </TWView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    backgroundColor: '#f8f9fa',
-  },
-  hostText: {
-    fontSize: 16,
-    fontWeight: '600',
-    flex: 1,
-  },
-  branchBadge: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  branchText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    color: '#666',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    color: '#dc3545',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  retryButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 6,
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-});
 
 export const RepoTab = RepoTabComponent;
 export default RepoTabComponent;

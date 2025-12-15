@@ -192,19 +192,14 @@ export const tailwindClassMap = {
         "borderStyle": "dotted"
       }
     },
-    "border-double": {
-      "native": {
-        "borderStyle": "double"
-      }
-    },
     "border-hidden": {
       "native": {
-        "borderStyle": "hidden"
+        "borderWidth": 0
       }
     },
     "border-none": {
       "native": {
-        "borderStyle": "none"
+        "borderWidth": 0
       }
     },
     "border-separate": {
