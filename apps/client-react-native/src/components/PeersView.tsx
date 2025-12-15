@@ -1,14 +1,9 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-} from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, RefreshControl } from 'react-native';
 import { Text, TextInput, TouchableOpacity, View } from '../tailwindPrimitives';
-import {useAppState, type PeerInfo, type PeerProbe} from '../state/store';
-import {RelayCore} from '../../native/RelayCoreModule';
-import {fullProbePeer} from '../services/probing';
+import { useAppState, type PeerInfo, type PeerProbe } from '../state/store';
+import { RelayCore } from '../../native/RelayCoreModule';
+import { fullProbePeer } from '../services/probing';
 
 const AUTO_REFRESH_INTERVAL_MS = 10000; // 10 seconds
 
@@ -42,7 +37,7 @@ function renderArrayField(items: any[]): string {
     .join(', ');
 }
 
-const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress, isActive = true}) => {
+const PeersViewComponent: React.FC<PeersViewProps> = ({ onPeerPress, isActive = true }) => {
   const peers = useAppState((s) => s.peers);
   const setPeers = useAppState((s) => s.setPeers);
   const updatePeer = useAppState((s) => s.updatePeer);
@@ -79,8 +74,8 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress, isActive = t
         }));
       }
     },
-      [setPeerProbing, updatePeer],
-    );
+    [setPeerProbing, updatePeer],
+  );
 
   // Probe all peers
   const probeAllPeers = useCallback(async () => {
@@ -154,17 +149,34 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress, isActive = t
   // Get status and probe info
   const renderProbeStatus = (peer: PeerInfo) => {
     if (!peer.probes || peer.probes.length === 0) {
-      return <Text style={styles.statusText}>Not probed</Text>;
+      return (
+        <Text
+          className="text-xs px-2 py-1 rounded-2xl font-medium text-center"
+          style={{ minWidth: 60, backgroundColor: '#e5e7eb', color: '#374151' }}
+        >
+          Not probed
+        </Text>
+      );
     }
 
     const okProbes = peer.probes.filter((p) => p.ok);
     if (okProbes.length === 0) {
-      return <Text style={[styles.statusText, styles.statusOffline]}>Offline</Text>;
+      return (
+        <Text
+          className="text-xs px-2 py-1 rounded-2xl font-medium text-center"
+          style={{ minWidth: 60, backgroundColor: '#f8d7da', color: '#721c24' }}
+        >
+          Offline
+        </Text>
+      );
     }
 
     const latency = okProbes[0].latencyMs;
     return (
-      <Text style={[styles.statusText, styles.statusOnline]}>
+      <Text
+        className="text-xs px-2 py-1 rounded-2xl font-medium text-center"
+        style={{ minWidth: 60, backgroundColor: '#d4edda', color: '#155724' }}
+      >
         Online {latency ? `(${latency}ms)` : ''}
       </Text>
     );
@@ -190,7 +202,7 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress, isActive = t
     await removePeer(host);
   };
 
-  const renderItem = ({item}: {item: PeerInfo}) => (
+  const renderItem = ({ item }: { item: PeerInfo }) => (
     <TouchableOpacity
       className="bg-white rounded p-4"
       style={{ borderWidth: 1, borderColor: '#e9ecef', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 }}
@@ -283,164 +295,5 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress, isActive = t
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
-  header: {
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-    padding: 16,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  logo: {
-    fontSize: 24,
-    marginRight: 8,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  addPeerForm: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  peerInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-  },
-  addButton: {
-    backgroundColor: '#28a745',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    justifyContent: 'center',
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  listContainer: {
-    padding: 16,
-    gap: 12,
-  },
-  peerItem: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  peerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  peerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  hostText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    flex: 1,
-  },
-  probingIndicator: {
-    marginLeft: 8,
-  },
-  peerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  statusText: {
-    fontSize: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    fontWeight: '500',
-    textAlign: 'center',
-    minWidth: 60,
-  },
-  statusOffline: {
-    backgroundColor: '#f8d7da',
-    color: '#721c24',
-  },
-  statusOnline: {
-    backgroundColor: '#d4edda',
-    color: '#155724',
-  },
-  removeButton: {
-    padding: 4,
-  },
-  removeButtonText: {
-    fontSize: 16,
-    color: '#dc3545',
-    fontWeight: 'bold',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    marginBottom: 8,
-    alignItems: 'flex-start',
-  },
-  infoLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginRight: 8,
-    minWidth: 70,
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#333',
-    flex: 1,
-  },
-  openButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  openButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-  },
-});
 
 export default PeersViewComponent;

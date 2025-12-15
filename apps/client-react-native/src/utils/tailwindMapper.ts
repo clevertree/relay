@@ -65,7 +65,7 @@ export function registerThemeStyles(themeName: string, definitions?: ThemeDefini
 // Toggle verbose tailwind logging at runtime (useful for debugging, default: off)
 export function setTailwindDebug(enabled: boolean) {
     try {
-        ;(global as any).__TAILWIND_DEBUG__ = !!enabled
+        ; (global as any).__TAILWIND_DEBUG__ = !!enabled
     } catch (e) {
         // ignore
     }

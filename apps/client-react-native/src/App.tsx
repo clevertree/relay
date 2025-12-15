@@ -189,8 +189,10 @@ const DebugScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   );
 };
 
-class ErrorBoundary extends React.Component<{}, { error: Error | null; info?: React.ErrorInfo | null }> {
-  constructor(props: {}) {
+type ErrorBoundaryProps = { children?: React.ReactNode }
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, { error: Error | null; info?: React.ErrorInfo | null }> {
+  constructor(props: Record<string, never>) {
     super(props);
     this.state = { error: null, info: null };
   }
@@ -230,8 +232,7 @@ class ErrorBoundary extends React.Component<{}, { error: Error | null; info?: Re
         </SafeAreaView>
       );
     }
-    // @ts-ignore allow children
-    return this.props.children;
+    return this.props.children as React.ReactElement | null;
   }
 }
 

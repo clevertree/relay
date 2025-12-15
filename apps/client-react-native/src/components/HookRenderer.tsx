@@ -357,26 +357,26 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
         >
-            <HookErrorBoundary
-              scriptPath={activeHookPath || ''}
-              onError={(err, info) => {
-                try {
-                  console.error('[HookRenderer] Child render error', err, info?.componentStack)
-                  // Pause automatic retries when a child render throws, to avoid repeated auto-refresh loops
-                  errorRef.current = err?.message || String(err)
-                  setError(err?.message || 'Child render error')
-                  setDetails({ phase: 'render', message: err?.message || String(err), hookPath: activeHookPath || undefined, host: normalizedHost })
-                  // mark that we've hit the retry cap so auto retries stop until manual retry
-                  errorRetriesRef.current = MAX_ERROR_RETRIES
-                  setRetryAttempts(MAX_ERROR_RETRIES)
-                } catch (e) {
-                  // best-effort only
-                  console.error('[HookRenderer] onError handler failed', e)
-                }
-              }}
-            >
-              {element}
-            </HookErrorBoundary>
+          <HookErrorBoundary
+            scriptPath={activeHookPath || ''}
+            onError={(err, info) => {
+              try {
+                console.error('[HookRenderer] Child render error', err, info?.componentStack)
+                // Pause automatic retries when a child render throws, to avoid repeated auto-refresh loops
+                errorRef.current = err?.message || String(err)
+                setError(err?.message || 'Child render error')
+                setDetails({ phase: 'render', message: err?.message || String(err), hookPath: activeHookPath || undefined, host: normalizedHost })
+                // mark that we've hit the retry cap so auto retries stop until manual retry
+                errorRetriesRef.current = MAX_ERROR_RETRIES
+                setRetryAttempts(MAX_ERROR_RETRIES)
+              } catch (e) {
+                // best-effort only
+                console.error('[HookRenderer] onError handler failed', e)
+              }
+            }}
+          >
+            {element}
+          </HookErrorBoundary>
         </TWScroll>
       )}
     </TWView>

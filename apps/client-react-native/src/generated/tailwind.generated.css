@@ -1219,6 +1219,9 @@ video {
   font-size: 20px;
   line-height: 28px;
 }
+.text-\[10px\] {
+  font-size: 10px;
+}
 .text-\[11px\] {
   font-size: 11px;
 }

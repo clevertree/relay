@@ -1,14 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
-import {
-  View,
-  Text,
-  ActivityIndicator,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  Dimensions,
-  Platform,
-} from 'react-native'
+import { ActivityIndicator, Dimensions, Platform } from 'react-native'
+import { View, Text, TouchableOpacity, ScrollView } from '../tailwindPrimitives'
 import { DistributedFileLoader, type LoadingStatus, type FileLoadResult } from './DistributedFileLoader'
 
 /**
@@ -35,104 +27,7 @@ interface VideoPlayerProps {
 const { width: screenWidth } = Dimensions.get('window')
 const videoHeight = Math.round(screenWidth * (9 / 16)) // 16:9 aspect ratio
 
-const styles = StyleSheet.create({
-  container: {
-    width: '100%',
-    backgroundColor: '#000',
-  },
-  videoContainer: {
-    width: '100%',
-    height: videoHeight,
-    backgroundColor: '#1a1a1a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  statusContainer: {
-    padding: 12,
-    backgroundColor: '#0f0f0f',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  statusIcon: {
-    fontSize: 18,
-    marginRight: 8,
-    minWidth: 24,
-  },
-  statusLabel: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-    flex: 1,
-  },
-  statusMessage: {
-    color: '#aaa',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  progressBar: {
-    height: 3,
-    backgroundColor: '#333',
-    marginTop: 8,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#3b82f6',
-  },
-  errorContainer: {
-    padding: 12,
-    backgroundColor: '#7f1d1d',
-    borderBottomWidth: 1,
-    borderBottomColor: '#991b1b',
-  },
-  errorTitle: {
-    color: '#fee2e2',
-    fontWeight: '600',
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  errorMessage: {
-    color: '#fecaca',
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  expandButton: {
-    color: '#f87171',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  errorDetails: {
-    backgroundColor: '#450a0a',
-    padding: 8,
-    marginTop: 8,
-    borderRadius: 4,
-    maxHeight: 200,
-  },
-  errorDetailsText: {
-    color: '#fca5a5',
-    fontSize: 10,
-    fontFamily: 'Courier New',
-  },
-  placeholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    color: '#999',
-    fontSize: 14,
-    marginTop: 12,
-  },
-  loadingSpinner: {
-    marginBottom: 16,
-  },
-})
+// Tailwind-based styles applied inline/className below; precise colors kept inline where needed
 
 /**
  * StatusDisplay - Shows detailed loading status with progress indicator (React Native)
@@ -172,18 +67,18 @@ function StatusDisplay({
   const statusLabel = status.replace('-', ' ').toUpperCase()
 
   return (
-    <View style={styles.statusContainer}>
-      <View style={styles.statusRow}>
-        <Text style={styles.statusIcon}>{getStatusIcon(status)}</Text>
-        <Text style={styles.statusLabel}>{statusLabel}</Text>
+    <View className="p-3" style={{ backgroundColor: '#0f0f0f', borderBottomWidth: 1, borderBottomColor: '#333' }}>
+      <View className="flex-row items-center mb-2">
+        <Text style={{ fontSize: 18, marginRight: 8, minWidth: 24 }}>{getStatusIcon(status)}</Text>
+        <Text className="text-white font-semibold text-sm flex-1">{statusLabel}</Text>
         {progress !== undefined && progress < 100 && (
           <Text style={{ color: '#999', fontSize: 12 }}>({progress}%)</Text>
         )}
       </View>
-      <Text style={styles.statusMessage}>{message}</Text>
+      <Text style={{ color: '#aaa', fontSize: 12, marginTop: 4 }}>{message}</Text>
       {progress !== undefined && progress < 100 && (
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${progress}%` }]} />
+        <View style={{ height: 3, backgroundColor: '#333', marginTop: 8, borderRadius: 2, overflow: 'hidden' }}>
+          <View style={{ height: '100%', backgroundColor: '#3b82f6', width: `${progress}%` }} />
         </View>
       )}
     </View>
@@ -197,19 +92,19 @@ function ErrorDisplay({ error, message }: { error: string; message: string }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <View style={styles.errorContainer}>
-      <Text style={styles.errorTitle}>Error loading media</Text>
-      <Text style={styles.errorMessage}>{error}</Text>
+    <View className="p-3" style={{ backgroundColor: '#7f1d1d', borderBottomWidth: 1, borderBottomColor: '#991b1b' }}>
+      <Text className="font-semibold text-sm mb-2" style={{ color: '#fee2e2' }}>Error loading media</Text>
+      <Text className="text-xs mb-2" style={{ color: '#fecaca' }}>{error}</Text>
       {message && (
         <>
           <TouchableOpacity onPress={() => setExpanded(!expanded)}>
-            <Text style={styles.expandButton}>
+            <Text className="text-xs font-semibold" style={{ color: '#f87171' }}>
               {expanded ? '▼ Hide details' : '▶ Show details'}
             </Text>
           </TouchableOpacity>
           {expanded && (
-            <ScrollView style={styles.errorDetails}>
-              <Text style={styles.errorDetailsText}>{message}</Text>
+            <ScrollView style={{ backgroundColor: '#450a0a', padding: 8, marginTop: 8, borderRadius: 4, maxHeight: 200 }}>
+              <Text className="text-[10px] font-mono" style={{ color: '#fca5a5' }}>{message}</Text>
             </ScrollView>
           )}
         </>
@@ -284,9 +179,9 @@ export function VideoPlayer({
   // Temporarily disable native video playback on Android to avoid crashes
   if (Platform.OS === 'android') {
     return (
-      <View style={[styles.container, style]}>
-        <View style={styles.videoContainer}>
-          <Text style={styles.placeholderText}>Video playback disabled on Android</Text>
+      <View className="w-full bg-black" style={style}>
+        <View className="w-full items-center justify-center" style={{ height: videoHeight, backgroundColor: '#1a1a1a' }}>
+          <Text className="text-sm mt-3" style={{ color: '#999' }}>Video playback disabled on Android</Text>
         </View>
       </View>
     )
@@ -326,7 +221,7 @@ export function VideoPlayer({
   const isReady = loadingStatus === 'ready'
 
   return (
-    <View style={[styles.container, style]}>
+    <View className="w-full bg-black" style={style}>
       {/* Use DistributedFileLoader to manage all media loading */}
       <DistributedFileLoader
         src={src}
@@ -347,7 +242,7 @@ export function VideoPlayer({
       )}
 
       {/* Video element - shown when ready */}
-      <View style={styles.videoContainer}>
+      <View className="w-full items-center justify-center" style={{ height: videoHeight, backgroundColor: '#1a1a1a' }}>
         {isReady && resolvedSrc ? (
           <>
             {/* TODO: Replace with actual react-native-video component */}
@@ -365,24 +260,24 @@ export function VideoPlayer({
             */}
 
             {/* Placeholder - remove when Video component is integrated */}
-            <View style={styles.placeholder}>
+            <View className="flex-1 items-center justify-center">
               <ActivityIndicator size="small" color="#3b82f6" />
-              <Text style={styles.placeholderText}>Ready to play</Text>
+              <Text className="text-sm mt-3" style={{ color: '#999' }}>Ready to play</Text>
               <Text style={{ color: '#666', fontSize: 10, marginTop: 8 }}>
                 (Video URL: {resolvedSrc.substring(0, 40)}...)
               </Text>
             </View>
           </>
         ) : (
-          <View style={styles.placeholder}>
+          <View className="flex-1 items-center justify-center">
             {!isError && (
               <>
-                <ActivityIndicator size="large" color="#3b82f6" style={styles.loadingSpinner} />
-                <Text style={styles.placeholderText}>Loading media...</Text>
+                <ActivityIndicator size="large" color="#3b82f6" style={{ marginBottom: 16 }} />
+                <Text className="text-sm mt-3" style={{ color: '#999' }}>Loading media...</Text>
               </>
             )}
             {isError && (
-              <Text style={[styles.placeholderText, { color: '#ef4444' }]}>
+              <Text className="text-sm mt-3" style={{ color: '#ef4444' }}>
                 Unable to load media
               </Text>
             )}

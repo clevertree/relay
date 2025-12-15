@@ -1585,6 +1585,11 @@ export const tailwindClassMap = {
         "display": "table"
       }
     },
+    "text-\\[10px\\]": {
+      "native": {
+        "fontSize": 10
+      }
+    },
     "text-\\[11px\\]": {
       "native": {
         "fontSize": 11
