@@ -33,12 +33,14 @@ export function tailwindToStyle(className?: string, themeOverride?: string) {
     }
     if (!fragments.length) return undefined
     const result = Object.assign({}, ...fragments)
-    // Debug: log the mapping for visibility when running Metro / device logs
-    try {
-        // eslint-disable-next-line no-console
-        console.debug('[tailwindToStyle] tokens=', tokens, '=>', result)
-    } catch (e) {
-        // ignore logging issues in environments that block console
+    // Debug logging can be enabled during development if needed.
+    if ((global as any).__TAILWIND_DEBUG__) {
+        try {
+            // eslint-disable-next-line no-console
+            console.debug('[tailwindToStyle] tokens=', tokens, '=>', result)
+        } catch (e) {
+            // ignore logging issues in environments that block console
+        }
     }
     return result
 }
@@ -57,5 +59,14 @@ export function registerThemeStyles(themeName: string, definitions?: ThemeDefini
     runtimeThemeOverrides[themeName] = {
         ...(runtimeThemeOverrides[themeName] || {}),
         ...normalized,
+    }
+}
+
+// Toggle verbose tailwind logging at runtime (useful for debugging, default: off)
+export function setTailwindDebug(enabled: boolean) {
+    try {
+        ;(global as any).__TAILWIND_DEBUG__ = !!enabled
+    } catch (e) {
+        // ignore
     }
 }

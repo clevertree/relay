@@ -191,9 +191,7 @@ export function createHookReact(reactModule: typeof React) {
       // hook-rendered elements receive styles from our tailwind runtime.
       if (props && props.className) {
         try {
-          try { console.debug('[HookDomAdapter] className ->', props.className) } catch (e) { }
-          const tw = tailwindToStyle(props.className)
-          try { console.debug('[HookDomAdapter] tailwindToStyle ->', tw) } catch (e) { }
+              const tw = tailwindToStyle(props.className)
           if (tw) {
             const mergedStyle = [tw, props.style]
             const nextProps = { ...props, style: mergedStyle }

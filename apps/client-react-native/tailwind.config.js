@@ -7,6 +7,16 @@ module.exports = {
   ],
 
   theme: {
+    // Responsive breakpoints for tablet/desktop support.
+    // NOTE: These are defaults. They can be overridden by a client repo by
+    // providing its own tailwind.config.js with different `theme.screens` values.
+    // Our RN class map generator will pick up the client config when run there.
+    screens: {
+      md: '768px',
+      lg: '1024px',
+      xl: '1280px',
+      '2xl': '1536px',
+    },
     extend: {
       colors: {
         // Surface colors

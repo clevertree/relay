@@ -14,6 +14,7 @@ const AUTO_REFRESH_INTERVAL_MS = 10000; // 10 seconds
 
 interface PeersViewProps {
   onPeerPress?: (host: string) => void;
+  isActive?: boolean;
 }
 
 /**
@@ -41,7 +42,7 @@ function renderArrayField(items: any[]): string {
     .join(', ');
 }
 
-const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
+const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress, isActive = true}) => {
   const peers = useAppState((s) => s.peers);
   const setPeers = useAppState((s) => s.setPeers);
   const updatePeer = useAppState((s) => s.updatePeer);
@@ -51,10 +52,15 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
   const removePeer = useAppState((s) => s.removePeer);
   const [newPeerInput, setNewPeerInput] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isActiveRef = useRef(isActive);
 
   // Probe a single peer
   const probePeer = useCallback(
     async (host: string) => {
+      if (!isActiveRef.current) {
+        console.log(`[PeersView] Skipping probe for ${host} while inactive`);
+        return;
+      }
       setPeerProbing(host, true);
       try {
         const result = await fullProbePeer(host);
@@ -73,11 +79,15 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
         }));
       }
     },
-    [setPeerProbing, updatePeer],
-  );
+      [setPeerProbing, updatePeer],
+    );
 
   // Probe all peers
   const probeAllPeers = useCallback(async () => {
+    if (!isActiveRef.current) {
+      console.log('[PeersView] Skipping probeAll while inactive');
+      return;
+    }
     const currentPeers = useAppState.getState().peers;
     await Promise.all(currentPeers.map((p) => probePeer(p.host)));
     setLastRefreshTs(Date.now());
@@ -85,6 +95,10 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
 
   // Load peers from RelayCore (simulate fetching from tracker)
   const loadAndProbePeers = useCallback(async () => {
+    if (!isActiveRef.current) {
+      console.log('[PeersView] Skipping load while inactive');
+      return;
+    }
     console.log('[PeersView] Loading peers from RelayCore');
     try {
       const envPeers = await RelayCore.getMasterPeerList();
@@ -104,6 +118,14 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
 
   // Setup auto-refresh interval
   useEffect(() => {
+    if (!isActive) {
+      return () => {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      };
+    }
     if (false) { // Disabled for now
       intervalRef.current = setInterval(() => {
         probeAllPeers();
@@ -115,12 +137,19 @@ const PeersViewComponent: React.FC<PeersViewProps> = ({onPeerPress}) => {
         intervalRef.current = null;
       }
     };
-  }, [probeAllPeers]);
+  }, [probeAllPeers, isActive]);
 
   // Initial load
   useEffect(() => {
+    if (!isActive) {
+      return;
+    }
     loadAndProbePeers();
-  }, []);
+  }, [isActive, loadAndProbePeers]);
+
+  useEffect(() => {
+    isActiveRef.current = isActive;
+  }, [isActive]);
 
   // Get status and probe info
   const renderProbeStatus = (peer: PeerInfo) => {

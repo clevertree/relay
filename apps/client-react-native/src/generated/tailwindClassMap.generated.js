@@ -229,7 +229,7 @@ const tailwindClassMap = {
     },
     "container": {
       "native": {
-        "width": "100%"
+        "maxWidth": 1536
       }
     },
     "content-around": {

@@ -1,7 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StatusBar, useWindowDimensions } from 'react-native';
 import { SafeAreaView, ScrollView, Text, TouchableOpacity, View } from './tailwindPrimitives';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useIsFocused } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import PeersView from './components/PeersView';
 import RepoTab from './components/RepoTab';
@@ -91,6 +91,20 @@ const MainScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const { showUpdateModal, setShowUpdateModal, checkForUpdate } = useAppUpdate();
+  const isScreenFocused = useIsFocused();
+  const lastViewRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const mode = isScreenFocused && (!activeTabId || activeTabId === homeTabId)
+      ? 'home'
+      : activeTabId === 'debug'
+        ? 'debug'
+        : 'repo';
+    if (lastViewRef.current !== mode) {
+      console.log('[MainScreen] Rendering', mode === 'home' ? 'PeersView' : mode === 'debug' ? 'DebugTab' : 'RepoTab', 'activeTabId:', activeTabId, 'homeTabId:', homeTabId, 'focused:', isScreenFocused);
+      lastViewRef.current = mode;
+    }
+  }, [activeTabId, homeTabId, isScreenFocused]);
 
   // Check for updates on component mount
   useEffect(() => {
@@ -118,21 +132,12 @@ const MainScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       <TabBar navigation={navigation} />
       <View className={isTablet ? 'flex-1 flex-row' : 'flex-1'}>
         <View className={isTablet ? 'flex-1' : 'flex-1'} style={isTablet ? { borderRightWidth: 1, borderRightColor: '#eee' } : undefined}>
-          {!activeTabId || activeTabId === homeTabId ? (
-            <>
-              {console.log('[MainScreen] Rendering PeersView, activeTabId:', activeTabId, 'homeTabId:', homeTabId)}
-              <PeersView onPeerPress={handlePeerPress} />
-            </>
+          {isScreenFocused && (!activeTabId || activeTabId === homeTabId) ? (
+            <PeersView onPeerPress={handlePeerPress} isActive={isScreenFocused} />
           ) : activeTabId === 'debug' ? (
-            <>
-              {console.log('[MainScreen] Rendering DebugTab, activeTabId:', activeTabId)}
-              <DebugTab />
-            </>
+            <DebugTab />
           ) : (
-            <>
-              {console.log('[MainScreen] Rendering RepoTab, activeTabId:', activeTabId)}
-              <RepoTab tabId={activeTabId} />
-            </>
+            <RepoTab tabId={activeTabId} />
           )}
         </View>
       </View>
@@ -244,14 +249,11 @@ const App: React.FC = () => {
     })()
   }, [])
 
-  // Debug: log component availability to help diagnose undefined SceneView errors
-  // (SceneView will throw if a screen's component is undefined)
-  // eslint-disable-next-line no-console
-  console.log('MainScreen type:', typeof MainScreen);
-  // eslint-disable-next-line no-console
-  console.log('RepoTabScreen type:', typeof RepoTabScreen);
-  // eslint-disable-next-line no-console
-  console.log('PeersView type:', typeof PeersView, 'RepoTab import type:', typeof RepoTab);
+  useEffect(() => {
+    console.log('MainScreen type:', typeof MainScreen)
+    console.log('RepoTabScreen type:', typeof RepoTabScreen)
+    console.log('PeersView type:', typeof PeersView, 'RepoTab import type:', typeof RepoTab)
+  }, [])
 
   return (
     <ErrorBoundary>
@@ -261,11 +263,8 @@ const App: React.FC = () => {
             name="Main">
             {(props) => {
               try {
-                // eslint-disable-next-line no-console
-                console.log('Rendering MainScreen, PeersView type:', typeof PeersView);
                 return <MainScreen {...props} />;
               } catch (err) {
-                // eslint-disable-next-line no-console
                 console.error('MainScreen render failed', err);
                 return (
                   <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -295,11 +294,8 @@ const App: React.FC = () => {
             name="RepoTab">
             {(props) => {
               try {
-                // eslint-disable-next-line no-console
-                console.log('Rendering RepoTabScreen, RepoTab type:', typeof RepoTab);
                 return <RepoTabScreen {...props} />;
               } catch (err) {
-                // eslint-disable-next-line no-console
                 console.error('RepoTabScreen render failed', err);
                 return (
                   <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>

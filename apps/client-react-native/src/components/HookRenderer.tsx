@@ -3,7 +3,7 @@
  * Ensures identical wiring across RepoBrowser and DebugTab preview.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Text, View, ScrollView } from 'react-native'
+import { ActivityIndicator, Text, View, ScrollView, TouchableOpacity } from 'react-native'
 import { createHookReact } from './HookDomAdapter'
 import { HookErrorBoundary } from './HookErrorBoundary'
 import MarkdownRenderer from './MarkdownRenderer'
@@ -39,6 +39,8 @@ type ErrorDetails = {
 const TWView = styled(View)
 const TWScroll = styled(ScrollView)
 const TWText = styled(Text)
+const TWButton = styled(TouchableOpacity)
+const MAX_ERROR_RETRIES = 3
 
 export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hookPathProp }) => {
   const [element, setElement] = useState<React.ReactNode | null>(null)
@@ -46,10 +48,24 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
   const [error, setError] = useState<string | null>(null)
   const [details, setDetails] = useState<ErrorDetails>(null)
   const [activeHookPath, setActiveHookPath] = useState<string | null>(null)
+  const [retryAttempts, setRetryAttempts] = useState(0)
   const optionsRef = useRef<OptionsInfo | null>(null)
   const hookLoaderRef = useRef<HookLoader | null>(null)
   const importHandlerRef = useRef<ES6ImportHandler | null>(null)
+  const inFlightRef = useRef(false)
+  const inFlightKeyRef = useRef<string | null>(null)
+  const lastKeyRef = useRef<string | null>(null)
+  const lastAttemptRef = useRef<number>(0)
+  const elementRef = useRef<React.ReactNode | null>(null)
+  const errorRef = useRef<string | null>(null)
+  const errorRetriesRef = useRef(0)
+  const manualRetryRef = useRef(false)
   const normalizedHost = normalizeHostUrl(host)
+
+  useEffect(() => {
+    console.debug('[HookRenderer] mounted', { host: normalizedHost, hookPathProp })
+    return () => console.debug('[HookRenderer] unmounted', { host: normalizedHost, hookPathProp })
+  }, [normalizedHost, hookPathProp])
 
   useEffect(() => {
     const jsxRuntimeShim = {
@@ -207,11 +223,46 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
   }, [createHookContext])
 
   const tryRender = useCallback(async () => {
+    const basePath = hookPathProp || '/hooks/client/get-client.jsx'
+    const key = `${normalizedHost}|${basePath}`
+    const now = Date.now()
+    console.debug('[HookRenderer.tryRender] start key=', key, 'inFlight=', inFlightRef.current, 'inFlightKey=', inFlightKeyRef.current, 'lastKey=', lastKeyRef.current, 'lastError=', errorRef.current, 'lastAttemptMsAgo=', now - lastAttemptRef.current)
+
+    // If we're already loading the same key, don't start another request
+    if (inFlightRef.current && inFlightKeyRef.current === key) {
+      console.debug('[HookRenderer.tryRender] Skipping start — already in flight for key', key)
+      return
+    }
+
+    if (errorRetriesRef.current >= MAX_ERROR_RETRIES && !manualRetryRef.current) {
+      console.debug('[HookRenderer.tryRender] Skipping auto retry after repeated failures', { key, retries: errorRetriesRef.current })
+      setLoading(false)
+      return
+    }
+
+    // Avoid redundant re-renders if we already have content for the same key and no error
+    if (lastKeyRef.current === key && elementRef.current && !errorRef.current) {
+      console.debug('[HookRenderer.tryRender] Skipping start — have cached element for key', key)
+      return
+    }
+
+    // Throttle retries on error for the same key (5s)
+    if (lastKeyRef.current === key && errorRef.current) {
+      if (now - lastAttemptRef.current < 5000) {
+        console.debug('[HookRenderer.tryRender] Skipping retry — recent failed attempt for key', key)
+        return
+      }
+    }
+
+    console.debug('[HookRenderer.tryRender] claiming inFlight for key', key)
+    inFlightRef.current = true
+    inFlightKeyRef.current = key
+    lastAttemptRef.current = now
     setLoading(true)
     setError(null)
     setDetails(null)
     try {
-      let path = hookPathProp || '/hooks/client/get-client.jsx'
+      let path = basePath
       let options = optionsRef.current
       if (!options) options = await loadOptions()
       const hookUrl = buildPeerUrl(normalizedHost, path)
@@ -219,10 +270,22 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
       if (!hookLoaderRef.current) throw new Error('Hook loader not initialized')
       const ctx = createHookContext(path)
       const el = await hookLoaderRef.current.loadAndExecuteHook(path, ctx)
+      console.debug('[HookRenderer.tryRender] loaded element for key', key, 'elementType=', typeof el)
       setElement(el)
+      elementRef.current = el
+      errorRetriesRef.current = 0
+      setRetryAttempts(0)
+      errorRef.current = null
+      // mark success for this key
+      lastKeyRef.current = key
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e)
+      console.debug('[HookRenderer.tryRender] caught error for key', key, message)
       setError(message)
+      errorRef.current = message
+      const nextAttempts = Math.min(errorRetriesRef.current + 1, MAX_ERROR_RETRIES)
+      errorRetriesRef.current = nextAttempts
+      setRetryAttempts(nextAttempts)
       setElement(null)
       setDetails({
         message,
@@ -231,12 +294,32 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
       })
     } finally {
       setLoading(false)
+      inFlightRef.current = false
+      inFlightKeyRef.current = null
+      manualRetryRef.current = false
+      console.debug('[HookRenderer.tryRender] finished for key', key, 'success=', !!elementRef.current, 'error=', errorRef.current)
     }
   }, [createHookContext, hookPathProp, normalizedHost])
 
-  useEffect(() => {
+  const handleRetry = useCallback(() => {
+    manualRetryRef.current = true
+    errorRef.current = null
+    elementRef.current = null
+    lastKeyRef.current = null
+    lastAttemptRef.current = 0
+    errorRetriesRef.current = 0
+    setRetryAttempts(0)
+    setDetails(null)
+    setError(null)
     void tryRender()
   }, [tryRender])
+
+  useEffect(() => {
+    // Trigger render when host or hookPath change
+    console.debug('[HookRenderer] effect trigger — normalizedHost/hookPathProp changed', { normalizedHost, hookPathProp })
+    void tryRender()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [normalizedHost, hookPathProp])
 
   return (
     <TWView className="flex-1 min-h-0 bg-white">
@@ -251,11 +334,19 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
         <TWView className="flex-1 justify-center p-5">
           <TWText className="text-lg font-bold text-red-600 mb-3">Error</TWText>
           <TWText className="text-gray-800">{error}</TWText>
+          {retryAttempts >= MAX_ERROR_RETRIES && (
+            <TWText className="text-xs text-gray-500 mt-2">
+              Automatic retries paused after {MAX_ERROR_RETRIES} failed attempts. Tap Retry to try again.
+            </TWText>
+          )}
           {details && (
             <TWView className="mt-2 rounded-md bg-gray-100 p-2">
               <TWText className="font-mono text-xs text-gray-600">{JSON.stringify(details, null, 2)}</TWText>
             </TWView>
           )}
+          <TWButton className="mt-3 bg-primary px-4 py-2 rounded" onPress={handleRetry}>
+            <TWText className="text-white text-center font-semibold">Retry</TWText>
+          </TWButton>
         </TWView>
       )}
 
@@ -266,12 +357,26 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
         >
-          <HookErrorBoundary
-            scriptPath={activeHookPath || ''}
-            onError={(err) => console.error('[HookRenderer] Child render error', err)}
-          >
-            {element}
-          </HookErrorBoundary>
+            <HookErrorBoundary
+              scriptPath={activeHookPath || ''}
+              onError={(err, info) => {
+                try {
+                  console.error('[HookRenderer] Child render error', err, info?.componentStack)
+                  // Pause automatic retries when a child render throws, to avoid repeated auto-refresh loops
+                  errorRef.current = err?.message || String(err)
+                  setError(err?.message || 'Child render error')
+                  setDetails({ phase: 'render', message: err?.message || String(err), hookPath: activeHookPath || undefined, host: normalizedHost })
+                  // mark that we've hit the retry cap so auto retries stop until manual retry
+                  errorRetriesRef.current = MAX_ERROR_RETRIES
+                  setRetryAttempts(MAX_ERROR_RETRIES)
+                } catch (e) {
+                  // best-effort only
+                  console.error('[HookRenderer] onError handler failed', e)
+                }
+              }}
+            >
+              {element}
+            </HookErrorBoundary>
         </TWScroll>
       )}
     </TWView>
