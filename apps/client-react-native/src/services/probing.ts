@@ -3,7 +3,7 @@
  * Probes HTTPS, Git, IPFS API, IPFS Gateway, and IPFS Swarm endpoints.
  */
 
-import {PeerProbe, PeerProtocol} from '../state/store';
+import type {PeerProbe, PeerProtocol} from '../state/store';
 
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_SAMPLES = 3;

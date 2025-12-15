@@ -79,7 +79,7 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
       // Map any styling runtime imports to our internal tailwind runtime.
       // We intentionally removed the nativewind shim and rely on our own implementation.
       if (spec === 'nativewind' || spec.startsWith('nativewind/') || spec === 'tailwindRuntime') {
-        // eslint-disable-next-line global-require
+         
         return require('../tailwindRuntime')
       }
       return {}
@@ -262,7 +262,7 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
     setError(null)
     setDetails(null)
     try {
-      let path = basePath
+      const path = basePath
       let options = optionsRef.current
       if (!options) options = await loadOptions()
       const hookUrl = buildPeerUrl(normalizedHost, path)

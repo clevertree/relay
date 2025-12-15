@@ -1,16 +1,18 @@
-import React, { ComponentPropsWithoutRef, FC } from 'react'
-import {
-  Image,
+import type { ComponentPropsWithoutRef, FC } from 'react';
+import React from 'react'
+import type {
   ImageProps,
   StyleProp,
-  Text,
-  TextInput,
   TextInputProps,
   TextProps,
-  TouchableOpacity,
   TouchableOpacityProps,
-  View,
-  ViewProps,
+  ViewProps} from 'react-native';
+import {
+  Image,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native'
 import VideoPlayer from './VideoPlayer'
 import { tailwindToStyle } from '../tailwindRuntime'

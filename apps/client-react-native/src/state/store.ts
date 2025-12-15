@@ -138,7 +138,7 @@ export const useAppState = create<AppState>((set, get) => ({
         })),
     addPeer: async (host) => {
         // Sanitize the host input - remove protocol prefixes
-        let cleanHost = host.trim();
+        const cleanHost = host.trim();
 
         // Avoid adding duplicates
         const currentPeers = get().peers;

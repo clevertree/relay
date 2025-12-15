@@ -1,5 +1,6 @@
 import React from 'react';
-import { Text, View, Image, TouchableOpacity, ViewProps, TextProps, StyleSheet, TextInput } from 'react-native';
+import type { ViewProps, TextProps} from 'react-native';
+import { Text, View, Image, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
 import { styled, tailwindToStyle } from '../tailwindRuntime';
 // @ts-ignore - markdown-to-jsx types not available
 import Markdown from 'markdown-to-jsx';

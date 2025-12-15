@@ -198,7 +198,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, { error: Error |
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // eslint-disable-next-line no-console
+     
     console.error('ErrorBoundary caught:', error, info.componentStack);
     this.setState({ error, info });
   }
@@ -281,7 +281,7 @@ const App: React.FC = () => {
               try {
                 return <DebugScreen {...props} />;
               } catch (err) {
-                // eslint-disable-next-line no-console
+                 
                 console.error('DebugScreen render failed', err);
                 return (
                   <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>

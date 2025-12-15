@@ -36,7 +36,7 @@ export function tailwindToStyle(className?: string, themeOverride?: string) {
     // Debug logging can be enabled during development if needed.
     if ((global as any).__TAILWIND_DEBUG__) {
         try {
-            // eslint-disable-next-line no-console
+             
             console.debug('[tailwindToStyle] tokens=', tokens, '=>', result)
         } catch (e) {
             // ignore logging issues in environments that block console
