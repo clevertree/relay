@@ -16,7 +16,7 @@
     "android:release": "npm run android:assembleRelease && npm run android:installRelease",
     "ios": "react-native run-ios",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
+    "test": "jest"
   },
   "dependencies": {
     "@babel/runtime": "^7.24.0",

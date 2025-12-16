@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Dimensions, Platform } from 'react-native'
-import { View, Text, TouchableOpacity, ScrollView } from '../tailwindPrimitives'
+import { View, Text, TouchableOpacity, ScrollView } from '../themedPrimitives'
 import { DistributedFileLoader, type LoadingStatus, type FileLoadResult } from './DistributedFileLoader'
 
 /**
@@ -27,7 +27,7 @@ interface VideoPlayerProps {
 const { width: screenWidth } = Dimensions.get('window')
 const videoHeight = Math.round(screenWidth * (9 / 16)) // 16:9 aspect ratio
 
-// Tailwind-based styles applied inline/className below; precise colors kept inline where needed
+// Themed-styler classes applied inline/className below; precise colors kept inline where needed
 
 /**
  * StatusDisplay - Shows detailed loading status with progress indicator (React Native)

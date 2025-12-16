@@ -3,15 +3,12 @@
  * Reuses the shared HookRenderer so wiring matches DebugTab preview.
  */
 import React, { useEffect } from 'react'
-import { View } from 'react-native'
 import HookRenderer from './HookRenderer'
-import { styled } from '../tailwindRuntime'
+import { TSDiv } from './TSDiv'
 
 interface RepoBrowserProps {
   host: string
 }
-
-const TWView = styled(View)
 
 const RepoBrowser: React.FC<RepoBrowserProps> = ({ host }) => {
   useEffect(() => {
@@ -20,9 +17,9 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({ host }) => {
   }, [host])
 
   return (
-    <TWView className="flex-1 bg-white min-h-0">
+    <TSDiv className="flex-1 bg-white min-h-0">
       <HookRenderer host={host} />
-    </TWView>
+    </ThemedElement>
   )
 }
 

@@ -104,7 +104,12 @@ export class WebModuleLoader implements ModuleLoader {
           const url = URL.createObjectURL(blob)
           // Ensure context is available to module (transpiler may read window.__ctx__)
           // Dynamic import will evaluate as a proper ES module.
-          const ns = await import(/* @vite-ignore */ url)
+          // Use an indirect dynamic import constructed via Function so Metro
+          // transformer does not parse a static `import(...)` call during
+          // transform. Wrapping the import in a string avoids Metro's syntax
+          // checking while still performing a proper dynamic import at runtime.
+          const dynImport = new Function('u', 'return import(u)')
+          const ns = await dynImport(url)
           // Clean up blob URL
           setTimeout(() => URL.revokeObjectURL(url), 1000)
           // If module has default export, normalize to CommonJS-like shape

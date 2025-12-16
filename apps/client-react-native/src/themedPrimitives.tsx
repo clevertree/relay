@@ -1,6 +1,6 @@
-import { styled } from './tailwindRuntime'
+import { styled } from './themedRuntime'
 if (typeof styled !== 'function') {
-  console.warn('[tailwindPrimitives] styled export is not a function:', styled)
+  console.warn('[themedPrimitives] styled export is not a function:', styled)
 }
 import {
   SafeAreaView as RNSafeAreaView,

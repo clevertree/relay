@@ -238,16 +238,48 @@ If the entire Relay network collapses except for **one** peer:
 - All data and edits sync when others return
 
 **This is true resilience.**
+---
+
+# SECTION 10 — Unified Themed Styling Engine
+
+### The Styling Problem
+There is no widely used styling system that works reliably across:
+- Web (CSS)
+- React Native (style objects)
+- Desktop environments
+- Light/Dark system themes
+
+All existing solutions require framework adoption, precompilation, or duplicated logic.
+
+### Relay’s Solution
+Relay includes **`themed-styler`**, a Rust-based runtime styling engine embedded in clients.
+
+Key features:
+- Unified styling for web and React Native
+- Theme registry with light/dark and custom themes
+- Tailwind-style utility classes defined by themes
+- Runtime style generation (no precompile)
+- Emits only styles actually used in the DOM
+- Outputs:
+  - Web CSS strings
+  - React Native style objects with unit conversion
+
+### Performance Benefits
+Unlike traditional CSS frameworks:
+- No global stylesheet bloat
+- No unused class emission
+- Lower memory usage
+- Faster startup and rendering
+
+This completes the Web 3.0 stack.
 
 ---
 
-# SECTION 10 — Investor Section: Why Relay Is a Once-in-a-Generation Opportunity
+# SECTION 11 — Investor Section: Why Relay Is a Once-in-a-Generation Opportunity
 
 Relay is more than a technology platform — it is positioned to become the backbone of Web 3.0.
 
 Early investors gain access to multiple new revenue streams:
-
----
 
 ## 1. Web 3.0 App Fulfillment Services
 

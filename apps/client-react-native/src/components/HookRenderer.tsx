@@ -3,12 +3,13 @@
  * Ensures identical wiring across RepoBrowser and DebugTab preview.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Text, View, ScrollView, TouchableOpacity } from 'react-native'
+import { ActivityIndicator, Text, View, ScrollView, TouchableOpacity, ViewProps, ScrollViewProps, TextProps, TouchableOpacityProps } from 'react-native'
 import { createHookReact } from './HookDomAdapter'
 import { HookErrorBoundary } from './HookErrorBoundary'
 import MarkdownRenderer from './MarkdownRenderer'
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl } from '../../../shared/src'
-import { registerThemeStyles, styled, tailwindToStyle } from '../tailwindRuntime'
+import { registerThemeStyles } from '../themedRuntime'
+import { ThemedElement, resolveThemedStyle } from './ThemedElement'
 
 type OptionsInfo = {
   client?: { hooks?: { get?: { path: string }; query?: { path: string } } }
@@ -36,10 +37,19 @@ type ErrorDetails = {
   host?: string
 } | null
 
-const TWView = styled(View)
-const TWScroll = styled(ScrollView)
-const TWText = styled(Text)
-const TWButton = styled(TouchableOpacity)
+type WithClassNameProps<P> = P & { className?: string }
+const TWView: React.FC<WithClassNameProps<ViewProps>> = (props) => (
+  <ThemedElement component={View} tag="div" {...props} />
+)
+const TWScroll: React.FC<WithClassNameProps<ScrollViewProps>> = (props) => (
+  <ThemedElement component={ScrollView} tag="div" {...props} />
+)
+const TWText: React.FC<WithClassNameProps<TextProps>> = (props) => (
+  <ThemedElement component={Text} tag="span" {...props} />
+)
+const TWButton: React.FC<WithClassNameProps<TouchableOpacityProps>> = (props) => (
+  <ThemedElement component={TouchableOpacity} tag="button" {...props} />
+)
 const MAX_ERROR_RETRIES = 3
 
 export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hookPathProp }) => {
@@ -73,17 +83,16 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
       jsxs: HookReact.createElement,
       jsxDEV: HookReact.createElement,
     }
-    const requireShim = (spec: string) => {
-      if (spec === 'react') return HookReact
-      if (spec === 'react/jsx-runtime' || spec === 'react/jsx-dev-runtime') return jsxRuntimeShim
-      // Map any styling runtime imports to our internal tailwind runtime.
-      // We intentionally removed the nativewind shim and rely on our own implementation.
-      if (spec === 'nativewind' || spec.startsWith('nativewind/') || spec === 'tailwindRuntime') {
-         
-        return require('../tailwindRuntime')
+      const requireShim = (spec: string) => {
+        if (spec === 'react') return HookReact
+        if (spec === 'react/jsx-runtime' || spec === 'react/jsx-dev-runtime') return jsxRuntimeShim
+        // Map any styling runtime imports to our internal themed-styler runtime.
+        // We intentionally removed the nativewind shim and rely on our own implementation.
+        if (spec === 'nativewind' || spec.startsWith('nativewind/') || spec === 'tailwindRuntime' || spec === 'themedRuntime') {
+          return require('../themedRuntime')
+        }
+        return {}
       }
-      return {}
-    }
 
     const urlMatch = normalizedHost.match(/^(https?):\/\/(.+)$/)
     const protocol: 'https' | 'http' = (urlMatch ? urlMatch[1] : 'https') as 'https' | 'http'
@@ -353,7 +362,7 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
       {!loading && !error && element && (
         <TWScroll
           className="flex-1 min-h-0 w-full"
-          contentContainerStyle={tailwindToStyle('flex-grow min-h-0 pb-8')}
+          contentContainerStyle={resolveThemedStyle('div', 'flex-grow min-h-0 pb-8')}
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
         >

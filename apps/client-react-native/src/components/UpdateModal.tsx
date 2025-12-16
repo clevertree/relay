@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, ActivityIndicator, ProgressBarAndroid, Platform } from 'react-native';
-import { View, Text, TouchableOpacity, ScrollView } from '../tailwindPrimitives'
+import { View, Text, TouchableOpacity, ScrollView } from '../themedPrimitives'
 import * as UpdateManager from '../services/UpdateManager';
 
 interface UpdateModalProps {

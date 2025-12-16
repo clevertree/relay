@@ -1,6 +1,6 @@
 import React from 'react'
 import { Text, View } from 'react-native'
-import { styled } from '../tailwindRuntime'
+import { styled } from '../themedRuntime'
 
 type Props = {
   children: React.ReactNode

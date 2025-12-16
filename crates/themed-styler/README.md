@@ -49,7 +49,7 @@ st.set_breakpoints(IndexMap::from([
 ]));
 ```
 
-## Tailwind utilities
+## Themed-styler utilities
 
 - There is no runtime whitelist or generator anymore. Classes used at runtime are matched directly against the active theme’s selectors (for example, the class "p-2" is looked up as ".p-2" in the theme; "hover:p-2" is looked up as ".p-2:hover").
 - The crate bundles a default YAML theme that includes a small subset of utilities as examples; apps can extend it by adding selectors to their own theme(s).

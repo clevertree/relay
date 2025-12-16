@@ -2,7 +2,7 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { useAppState } from '../state/store';
 import HookRenderer from './HookRenderer';
-import { styled } from '../tailwindRuntime';
+import { styled } from '../themedRuntime';
 
 interface RepoTabProps {
   tabId: string;

@@ -1,7 +1,8 @@
 import React from 'react';
 import type { ViewProps, TextProps} from 'react-native';
 import { Text, View, Image, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
-import { styled, tailwindToStyle } from '../tailwindRuntime';
+import { ThemedElement, resolveThemedStyle } from './ThemedElement';
+import { TSDiv } from './TSDiv'
 // @ts-ignore - markdown-to-jsx types not available
 import Markdown from 'markdown-to-jsx';
 import { ThemeManager } from '../utils/themeManager';
@@ -31,7 +32,7 @@ function mergeStyle(a?: any, b?: any) {
   return [a, b]
 }
 
-// Extend component props to allow className (our mapper applies tailwind via `styled`)
+// Extend component props to allow className (our mapper applies themed-styler classes via `styled`)
 interface StyledViewProps extends ViewProps {
   className?: string;
 }
@@ -52,13 +53,25 @@ interface StyledImageProps {
   style?: any;
 }
 
-// Wrapper components that apply tailwind classes via the mapper
-const StyledView = styled(View);
-const StyledText = styled(Text);
-const StyledTouchable = styled(TouchableOpacity);
-const StyledImage = styled(Image);
-const StyledTextInput = styled(TextInput);
-const StyledPicker = styled(Picker);
+// Wrapper components that apply themed-styler classes via the mapper
+const StyledView: React.FC<StyledViewProps> = (props) => (
+  <TSDiv {...props} />
+)
+const StyledText: React.FC<StyledTextProps> = (props) => (
+  <ThemedElement component={Text} tag="span" {...props} />
+)
+const StyledTouchable: React.FC<StyledTouchableProps> = (props) => (
+  <ThemedElement component={TouchableOpacity} tag="button" {...props} />
+)
+const StyledImage: React.FC<StyledImageProps> = ({ style, ...rest }) => (
+  <ThemedElement component={Image} tag="img" style={style} {...rest} />
+)
+const StyledTextInput: React.FC<StyledTextProps> = (props) => (
+  <ThemedElement component={TextInput} tag="input" {...props} />
+)
+const StyledPicker: React.FC<any> = (props) => (
+  <ThemedElement component={Picker} tag="select" {...props} />
+)
 
 type MarkdownErrorBoundaryProps = {
   children: React.ReactNode
@@ -113,7 +126,7 @@ class MarkdownErrorBoundary extends React.Component<MarkdownErrorBoundaryProps, 
   }
 }
 
-// Basic Native components with NativeWind className support
+// Basic Native components with themed-styler className support
 const P: React.FC<React.PropsWithChildren<{}>> = ({ children }) => {
   const colors = ThemeManager.getColors();
   return (
@@ -406,8 +419,8 @@ export const MarkdownRenderer: React.FC<Props> = ({ content, onLinkPress }) => {
   const createElement = React.useCallback((type: any, props: any, ...children: any[]) => {
     const mapped = remapTag(type)
     const { dangerouslySetInnerHTML, className, style, ...rest } = props || {}
-    const twStyle = tailwindToStyle(className)
-    const mergedStyle = mergeStyle(twStyle, style)
+    const themedStyle = resolveThemedStyle(type && typeof type === 'string' ? type : 'div', className)
+    const mergedStyle = mergeStyle(themedStyle, style)
     return React.createElement(mapped as any, { ...rest, style: mergedStyle }, ...children)
   }, [onLinkPress])
   return (

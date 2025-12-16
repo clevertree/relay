@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { StatusBar, useWindowDimensions } from 'react-native';
-import { SafeAreaView, ScrollView, Text, TouchableOpacity, View } from './tailwindPrimitives';
+import { SafeAreaView, ScrollView, Text, TouchableOpacity, View } from './themedPrimitives';
 import { NavigationContainer, useIsFocused } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import PeersView from './components/PeersView';

@@ -15,30 +15,27 @@ import {
   View
 } from 'react-native'
 import VideoPlayer from './VideoPlayer'
-import { tailwindToStyle } from '../tailwindRuntime'
+import { ThemedElement, resolveThemedStyle } from './ThemedElement'
 import { unifiedBridge } from '@relay/shared'
 
 type WithClassName<P> = P & { className?: string }
 
 const TextWrapper = React.forwardRef<Text, WithClassName<TextProps>>(function TextWrapper({ className, style, ...rest }, ref) {
-  const tw = className ? tailwindToStyle(className) : undefined
-  return <Text ref={ref} style={[tw, style]} {...rest} />
+  return <ThemedElement component={Text} tag="span" className={className} style={style} ref={ref} {...rest} />
 })
 
 const ViewWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function ViewWrapper({ className, style, ...rest }, ref) {
-  const tw = className ? tailwindToStyle(className) : undefined
-  return <View ref={ref} style={[tw, style]} {...rest} />
+  return <ThemedElement component={View} tag="div" className={className} style={style} ref={ref} {...rest} />
 })
 
 const ButtonWrapper = React.forwardRef<View, WithClassName<TouchableOpacityProps>>(function ButtonWrapper(
   { className, style, children, ...rest },
   ref,
 ) {
-  const tw = className ? tailwindToStyle(className) : undefined
   return (
-    <TouchableOpacity ref={ref} style={[tw, style]} {...rest}>
+    <ThemedElement component={TouchableOpacity} tag="button" className={className} style={style} ref={ref} {...rest}>
       {typeof children === 'string' ? <Text>{children}</Text> : children}
-    </TouchableOpacity>
+    </ThemedElement>
   )
 })
 
@@ -49,30 +46,29 @@ const InputWrapper = React.forwardRef<TextInput, WithClassName<TextInputProps>>(
   if (runtimeType === 'number' || runtimeType === 'tel') {
     extraProps.keyboardType = 'numeric'
   }
-  const tw = className ? tailwindToStyle(className) : undefined
-  return <TextInput ref={ref} style={[tw, style]} {...rest} {...extraProps} />
+  return <ThemedElement component={TextInput} tag="input" className={className} style={style} ref={ref} {...rest} {...extraProps} />
 })
 
 const TextAreaWrapper = React.forwardRef<TextInput, WithClassName<TextInputProps>>(function TextAreaWrapper({ className, style, ...rest }, ref) {
-  const tw = className ? tailwindToStyle(className) : undefined
-  return <TextInput ref={ref} multiline style={[tw, style]} {...rest} />
+  return <ThemedElement component={TextInput} tag="textarea" className={className} style={style} ref={ref} multiline {...rest} />
 })
 
 const ImgWrapper: FC<WithClassName<ImageProps & { src?: string; alt?: string }>> = ({ src, alt, style, className, ...rest }) => {
-  const imageProps: ComponentPropsWithoutRef<typeof Image> = {
-    source: src ? { uri: src } : undefined,
-    accessibilityLabel: alt,
-    style: [className ? tailwindToStyle(className) : undefined, style],
-    resizeMode: 'contain',
-    ...rest,
-  }
-  return <Image {...imageProps} />
+  return (
+    <Image
+      source={src ? { uri: src } : undefined}
+      accessibilityLabel={alt}
+      style={[resolveThemedStyle('img', className), style]}
+      resizeMode="contain"
+      {...rest}
+    />
+  )
 }
 
 const AnchorWrapper: FC<WithClassName<TextProps & { href?: string }>> = ({ className, style, children, ...rest }) => (
-  <TouchableOpacity {...rest} style={[className ? tailwindToStyle(className) : undefined, style]} activeOpacity={0.7}>
+  <ThemedElement component={TouchableOpacity} tag="a" className={className} style={style} activeOpacity={0.7} {...rest}>
     <Text>{children}</Text>
-  </TouchableOpacity>
+  </ThemedElement>
 )
 
 const UnknownElement: FC<WithClassName<ViewProps> & { tagName: string }> = ({ tagName, className, style, children, ...rest }) => (
@@ -80,7 +76,7 @@ const UnknownElement: FC<WithClassName<ViewProps> & { tagName: string }> = ({ ta
     {...rest}
     style={([
       { borderWidth: 1, borderStyle: 'dashed', borderColor: '#d97706', padding: 6, borderRadius: 6 },
-      className ? (tailwindToStyle(className) as any) : undefined,
+      resolveThemedStyle(tagName, className) as any,
       style,
     ] as StyleProp<ViewProps>)}
   >
@@ -93,49 +89,56 @@ const UnknownElement: FC<WithClassName<ViewProps> & { tagName: string }> = ({ ta
 
 const ListItemWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function ListItemWrapper({ className, style, children, ...rest }, ref) {
   return (
-    <View ref={ref} style={[{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }, className ? (tailwindToStyle(className) as any) : undefined, style]} {...rest}>
+    <ThemedElement component={View} tag="li" className={className} style={[{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }, style]} ref={ref} {...rest}>
       <Text style={{ marginRight: 6 }}>•</Text>
       <View style={{ flex: 1 }}>{children}</View>
-    </View>
+    </ThemedElement>
   )
 })
 
 const TableWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function TableWrapper({ className, style, ...rest }, ref) {
-  return <View ref={ref} style={[{ flexDirection: 'column', borderWidth: 1, borderColor: '#d1d5db' }, className ? (tailwindToStyle(className) as any) : undefined, style]} {...rest} />
+  return (
+    <ThemedElement component={View} tag="table" className={className} style={[{ flexDirection: 'column', borderWidth: 1, borderColor: '#d1d5db' }, style]} ref={ref} {...rest} />
+  )
 })
 
 const TableRowWrapper = React.forwardRef<View, WithClassName<ViewProps>>(function TableRowWrapper({ className, style, children, ...rest }, ref) {
   return (
-    <View ref={ref} style={[{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#e5e7eb' }, className ? (tailwindToStyle(className) as any) : undefined, style]} {...rest}>
+    <ThemedElement component={View} tag="tr" className={className} style={[{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#e5e7eb' }, style]} ref={ref} {...rest}>
       {children}
-    </View>
+    </ThemedElement>
   )
 })
 
 const TableCellWrapper = React.forwardRef<Text, WithClassName<TextProps>>(function TableCellWrapper({ className, style, children, ...rest }, ref) {
   return (
-    <Text
+    <ThemedElement
+      component={Text}
+      tag="td"
+      className={className}
+      style={[{ flex: 1, padding: 8, borderRightWidth: 1, borderColor: '#e5e7eb' }, style]}
       ref={ref}
-      style={[{ flex: 1, padding: 8, borderRightWidth: 1, borderColor: '#e5e7eb' }, className ? (tailwindToStyle(className) as any) : undefined, style]}
       {...rest}
     >
       {children}
-    </Text>
+    </ThemedElement>
   )
 })
 
 const TableHeaderCell = React.forwardRef<Text, WithClassName<TextProps>>(function TableHeaderCell({ style, children, ...rest }, ref) {
   return (
-    <Text
-      ref={ref}
+    <ThemedElement
+      component={Text}
+      tag="th"
       style={[
         { flex: 1, padding: 10, borderRightWidth: 1, borderColor: '#e5e7eb', fontWeight: '700' },
         style,
       ]}
+      ref={ref}
       {...rest}
     >
       {children}
-    </Text>
+    </ThemedElement>
   )
 })
 
@@ -191,15 +194,12 @@ export function createHookReact(reactModule: typeof React) {
     if (typeof type === 'string') {
       const resolved = resolveComponent(type)
       // Convert any incoming `className` into RN `style` at runtime so
-      // hook-rendered elements receive styles from our tailwind runtime.
+      // hook-rendered elements receive styles from the themed-styler runtime.
       if (props && props.className) {
         try {
-          const tw = tailwindToStyle(props.className)
-          // Query bridge for any runtime RN styles for this element
-          const bridgeStyles = unifiedBridge.getRnStyles(props.tagName || type, (props.className || '').split(/\s+/).filter(Boolean))
-          const mergedStyle = [tw, bridgeStyles || {}, props.style]
+          const themedStyle = resolveThemedStyle(props.tagName || type, props.className)
+          const mergedStyle = [themedStyle, props.style]
           const nextProps = { ...props, style: mergedStyle }
-          // remove className to avoid cluttering downstream components
           delete nextProps.className
           return baseCreateElement(resolved, nextProps, ...children)
         } catch (e) {

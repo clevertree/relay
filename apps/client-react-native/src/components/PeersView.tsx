@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl } from 'react-native';
-import { Text, TextInput, TouchableOpacity, View } from '../tailwindPrimitives';
+import { Text, TextInput, TouchableOpacity, View } from '../themedPrimitives';
 import { useAppState, type PeerInfo, type PeerProbe } from '../state/store';
 import { RelayCore } from '../../native/RelayCoreModule';
 import { fullProbePeer } from '../services/probing';
