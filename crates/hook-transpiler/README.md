@@ -96,25 +96,21 @@ cargo test -p hook-transpiler
 ```
 
 ## Build (Web/WASM)
-Artifacts are generated into the web app’s public folder so Vite can serve them:
+Artifacts are generated into the web app’s source folder so Vite can bundle them. Run the cross-platform helper from the repo root:
 
 ```bash
-# From repo root
-# Windows PowerShell
-npm run build:hook-wasm
-
-# Linux/macOS
-npm run build:hook-wasm:sh
+# From repo root (cross-platform)
+npm run build:wasm
 
 # Dev cycle (build then start web dev server)
 npm run web:dev:wasm
 ```
 
-Expected outputs:
-- `apps/client-web/public/wasm/hook_transpiler.js`
-- `apps/client-web/public/wasm/hook_transpiler_bg.wasm`
+Expected outputs (canonical location under the web app source):
+- `apps/client-web/src/wasm/hook_transpiler.js`
+- `apps/client-web/src/wasm/hook_transpiler_bg.wasm`
 
-Client‑web loads these at startup via `apps/client-web/src/hookTranspilerWasm.ts` and exposes:
+Client‑web loads these at startup via `apps/client-web/src/wasmEntry.ts` (shim) and exposes:
 ```
 globalThis.__hook_transpile_jsx(source: string, filename: string) => string | { code: string }
 ```

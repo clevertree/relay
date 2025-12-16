@@ -50,7 +50,7 @@ export function TabBar({ onTabChange }: TabBarProps) {
                 >
                   {tab.title}
                 </span>
-                {!tab.isHome && (
+                {!tab.isHome && tab.id !== 'settings' && (
                   <button
                     className="border-none bg-transparent text-xl cursor-pointer text-gray-500 dark:text-gray-400 p-0 w-6 h-6 flex items-center justify-center rounded transition-all flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-300"
                     onClick={(event) => handleCloseTab(event, tab.id)}
@@ -63,19 +63,8 @@ export function TabBar({ onTabChange }: TabBarProps) {
             )
           })}
         </div>
-        <div className="ml-auto flex items-center pr-2">
-          <button
-            type="button"
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition border ${
-              activeTabId === 'settings'
-                ? 'border-blue-500 bg-blue-50 text-blue-700'
-                : 'border-transparent text-gray-600 hover:border-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-            }`}
-            onClick={handleSettingsClick}
-          >
-            Settings
-          </button>
-        </div>
+        {/* Settings now exists as a persistent tab; button removed */}
+        <div className="ml-auto flex items-center pr-2" />
       </div>
     </div>
   )

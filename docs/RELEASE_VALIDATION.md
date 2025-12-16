@@ -53,14 +53,11 @@ Expect: `{ ok: false, diagnostics: "Parse error ..." }` and 400 status.
 
 ## 3) Client‑Web validation
 
-Build the WASM for the web app (choose the script for your OS):
+Build the WASM for the web app (cross-platform helper):
 
 ```
-# Windows PowerShell
-npm run build:hook-wasm
-
-# Linux/macOS
-npm run build:hook-wasm:sh
+# From the repo root
+npm run build:wasm
 ```
 
 Start the dev server:
@@ -101,8 +98,8 @@ In the RN app Debug tab:
 ## 5) Troubleshooting
 
 WASM not loading in web:
-- Ensure files exist: `apps/client-web/public/wasm/hook_transpiler.js` and `hook_transpiler_bg.wasm`.
-- Use the correct build script for your OS (`build:hook-wasm` on Windows, `build:hook-wasm:sh` on Linux/macOS).
+- Ensure files exist in the canonical location: `apps/client-web/src/wasm/hook_transpiler.js` and `hook_transpiler_bg.wasm`.
+- Run the cross-platform helper: `npm run build:wasm` from the repo root.
 
 Server 404 for /api/transpile:
 - Make sure the server is running (`npm run dev:server`) and reachable at the same origin (or update the client to point to the server hostname).

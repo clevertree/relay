@@ -16,6 +16,7 @@ import {
 } from 'react-native'
 import VideoPlayer from './VideoPlayer'
 import { tailwindToStyle } from '../tailwindRuntime'
+import { unifiedBridge } from '@relay/shared'
 
 type WithClassName<P> = P & { className?: string }
 
@@ -194,13 +195,13 @@ export function createHookReact(reactModule: typeof React) {
       if (props && props.className) {
         try {
           const tw = tailwindToStyle(props.className)
-          if (tw) {
-            const mergedStyle = [tw, props.style]
-            const nextProps = { ...props, style: mergedStyle }
-            // remove className to avoid cluttering downstream components
-            delete nextProps.className
-            return baseCreateElement(resolved, nextProps, ...children)
-          }
+          // Query bridge for any runtime RN styles for this element
+          const bridgeStyles = unifiedBridge.getRnStyles(props.tagName || type, (props.className || '').split(/\s+/).filter(Boolean))
+          const mergedStyle = [tw, bridgeStyles || {}, props.style]
+          const nextProps = { ...props, style: mergedStyle }
+          // remove className to avoid cluttering downstream components
+          delete nextProps.className
+          return baseCreateElement(resolved, nextProps, ...children)
         } catch (e) {
           // ignore conversion errors and fall back to original props
         }

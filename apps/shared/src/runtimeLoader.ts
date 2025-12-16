@@ -93,6 +93,30 @@ export class WebModuleLoader implements ModuleLoader {
       // Set global context for JSX transpiled code
       ; (window as any).__ctx__ = context
 
+      // If the transpiled code contains ESM export syntax, evaluate it as an ES module
+      // by creating a blob and dynamic-importing it. This allows transpilers that emit
+      // `export`/`export default` to run in the browser while keeping the Function
+      // execution path for legacy CommonJS-style code (metro compatibility).
+      const looksLikeESM = /\bexport\b/.test(code)
+      if (looksLikeESM) {
+        try {
+          const blob = new Blob([code], { type: 'text/javascript' })
+          const url = URL.createObjectURL(blob)
+          // Ensure context is available to module (transpiler may read window.__ctx__)
+          // Dynamic import will evaluate as a proper ES module.
+          const ns = await import(/* @vite-ignore */ url)
+          // Clean up blob URL
+          setTimeout(() => URL.revokeObjectURL(url), 1000)
+          // If module has default export, normalize to CommonJS-like shape
+          const normalized = ns && ns.default ? { ...ns, default: ns.default } : ns
+          // Return module-like object
+          return normalized
+        } catch (e) {
+          console.error('[WebModuleLoader] Dynamic import of ES module failed', e)
+          throw e
+        }
+      }
+
       // Use Function constructor instead of dynamic import for Metro compatibility
       // eslint-disable-next-line no-new-func
       const fn = new Function(

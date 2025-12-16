@@ -21,3 +21,9 @@ export {
 export { ES6ImportHandler, type ImportHandlerOptions } from './es6ImportHandler'
 
 export { buildPeerUrl, buildRepoHeaders } from './urlBuilder'
+
+export { default as themedStylerBridge, ensureDefaultsLoaded } from './themedStylerBridge'
+export { default as styleManager } from './styleManager'
+export { default as unifiedBridge } from './unifiedBridge'
+export { default as themedStylerWasm } from './themedStylerWasm'
+export { initAllWasms, default as wasmLoader } from './wasmLoader'

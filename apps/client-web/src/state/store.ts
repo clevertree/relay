@@ -69,22 +69,37 @@ const STORAGE_KEY_ACTIVE_TAB = 'relay_active_tab'
 const STORAGE_KEY_PEERS = 'relay_peers'
 
 // Load persisted state from localStorage
+function ensureCoreTabs(tabs: TabInfo[]): TabInfo[] {
+    // Always ensure Home and Settings tabs exist
+    const hasHome = tabs.some((t) => t.id === 'home')
+    const hasSettings = tabs.some((t) => t.id === 'settings')
+    const result = [...tabs]
+    if (!hasHome) {
+        result.unshift({ id: 'home', title: 'Home', isHome: true })
+    }
+    if (!hasSettings) {
+        result.push({ id: 'settings', title: 'Settings' })
+    }
+    return result
+}
+
 function loadPersistedTabs() {
     try {
         const stored = localStorage.getItem(STORAGE_KEY_TABS)
         if (stored) {
-            return JSON.parse(stored) as TabInfo[]
+            const parsed = JSON.parse(stored) as TabInfo[]
+            return ensureCoreTabs(parsed)
         }
     } catch (e) {
         console.error('Failed to load persisted tabs:', e)
     }
-    return [
+    return ensureCoreTabs([
         {
             id: 'home',
             title: 'Home',
             isHome: true,
         } as TabInfo,
-    ]
+    ])
 }
 
 function loadPersistedActiveTab() {
@@ -193,7 +208,7 @@ export const useAppState = create<AppState>((set, get) => ({
     closeTab: (tabId) =>
         set((s) => {
             // Don't close home tab
-            if (tabId === 'home') return s
+            if (tabId === 'home' || tabId === 'settings') return s
             const tabs = s.tabs.filter((t) => t.id !== tabId)
             const activeTabId = s.activeTabId === tabId ? (tabs.find((t) => t.id === 'home') ?? tabs[0])?.id || 'home' : s.activeTabId
             persistTabs(tabs, activeTabId || 'home')

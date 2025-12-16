@@ -7,5 +7,6 @@ members = [
     "apps/client-react-native/rust",
     "crates/hook-transpiler",
     "crates/hook-transpiler-cli",
+    "crates/themed-styler",
 ]
 resolver = "2"

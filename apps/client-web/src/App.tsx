@@ -3,9 +3,10 @@ import { useAppState } from './state/store'
 import { PeersView } from './components/PeersView'
 import { TabBar } from './components/TabBar'
 import { RepoBrowser } from './components/RepoBrowser'
-import { DebugMenu } from './components/DebugMenu'
+import { SettingsTab } from './components/SettingsTab'
 import { PluginProvider } from './plugins/PluginContext'
 import { webPlugin } from './plugins/web'
+import { TSDiv } from './components/TSDiv.tsx'
 
 function App() {
   const activeTabId = useAppState((s) => s.activeTabId)
@@ -23,26 +24,27 @@ function App() {
 
   return (
     <PluginProvider plugin={webPlugin}>
-      <div className="flex flex-col w-screen h-screen">
-        <DebugMenu />
+      <TSDiv className="flex flex-col w-screen h-screen">
         <TabBar />
-        <div className="flex flex-1 overflow-hidden">
-          <main className="flex-1 flex flex-col overflow-hidden">
+        <TSDiv className="flex flex-1 overflow-hidden">
+          <TSDiv tag='main' className="flex-1 flex flex-col overflow-hidden">
             {activeTabId === 'home' ? (
               <PeersView onPeerPress={handlePeerPress} />
+            ) : activeTabId === 'settings' ? (
+              <SettingsTab />
             ) : activeTabId ? (
               <RepoBrowser tabId={activeTabId} />
             ) : (
-              <div className="flex items-center justify-center h-full w-full">
-                <div className="text-center text-gray-600">
-                  <h2 className="mb-2 text-2xl font-semibold">No repositories open</h2>
-                  <p className="text-base">Select a peer from the home tab to browse its repositories.</p>
-                </div>
-              </div>
+              <TSDiv className="flex items-center justify-center h-full w-full">
+                <TSDiv className="text-center text-gray-600">
+                  <TSDiv tag='h2' className="mb-2 text-2xl font-semibold">No repositories open</TSDiv>
+                  <TSDiv tag='p' className="text-base">Select a peer from the home tab to browse its repositories.</TSDiv>
+                </TSDiv>
+              </TSDiv>
             )}
-          </main>
-        </div>
-      </div>
+          </TSDiv>
+        </TSDiv>
+      </TSDiv>
     </PluginProvider>
   )
 }
