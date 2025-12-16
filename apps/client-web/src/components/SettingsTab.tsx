@@ -92,7 +92,7 @@ export function SettingsTab() {
         <p className="text-sm text-gray-500 mt-1">Control how hooks are transpiled.</p>
       </div>
 
-      <section className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-6 space-y-4">
+      <section className="bg-white dark:bg-gray-800 border rounded-lg shadow-sm p-6 space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Transpiler</h2>
@@ -100,7 +100,7 @@ export function SettingsTab() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        <div className="flex items-center justify-between rounded-lg border p-4">
           <div>
             <p className="text-base font-medium text-gray-900">{isServer ? 'Server-side transpiler' : 'Client-side hook transpiler'}</p>
             <p className="text-sm text-gray-500 mt-1">{selectedDescription}</p>
@@ -121,7 +121,7 @@ export function SettingsTab() {
         </div>
       </section>
 
-      <section className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-6 space-y-4">
+      <section className="bg-white dark:bg-gray-800 border rounded-lg shadow-sm p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Active Tailwind classes</h2>
@@ -131,20 +131,20 @@ export function SettingsTab() {
             <input
               type="text"
               placeholder="Search classes..."
-              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-900"
+              className="px-3 py-2 border dark:rounded-lg text-sm bg-white dark:bg-gray-900"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <button
               type="button"
               onClick={refreshClasses}
-              className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="px-3 py-2 text-sm border dark:rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
             >
               Refresh
             </button>
           </div>
         </div>
-        <div className="max-h-64 overflow-auto border border-gray-200 dark:border-gray-700 rounded-md">
+        <div className="max-h-64 overflow-auto border rounded-md">
           <ul className="divide-y divide-gray-200 dark:divide-gray-700">
             {filtered.map((c) => (
               <li key={c} className="px-3 py-2 font-mono text-xs text-gray-800 dark:text-gray-100">{c}</li>
@@ -157,7 +157,7 @@ export function SettingsTab() {
         <div className="text-xs text-gray-500">Showing {filtered.length} of {classes.length}</div>
       </section>
 
-      <section className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-6 space-y-4">
+      <section className="bg-white dark:bg-gray-800 border rounded-lg shadow-sm p-6 space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Themed Styler status</h2>
@@ -169,7 +169,7 @@ export function SettingsTab() {
               styleManager.requestRender()
               refreshStylerStatus()
             }}
-            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="px-3 py-2 text-sm border dark:rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
           >
             Ensure CSS
           </button>

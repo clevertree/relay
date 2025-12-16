@@ -137,8 +137,8 @@ export function PeersView({onPeerPress}: PeersViewProps) {
     }
 
     return (
-        <div className="flex flex-col h-full bg-gray-50 border-r border-gray-200">
-            <div className="p-4 border-b border-gray-200">
+        <div className="flex flex-col h-full bg-gray-50 border-r">
+            <div className="p-4 border-b">
                 <div className="flex items-center gap-3 mb-4">
                     <img src="/icon.png" alt="Relay" width="24" height="24" className="flex-shrink-0"/>
                     <h2 className="m-0 text-xl font-semibold">Relay</h2>
@@ -151,7 +151,7 @@ export function PeersView({onPeerPress}: PeersViewProps) {
                         placeholder="https://example.com"
                         value={newPeerInput}
                         onChange={(e) => setNewPeerInput(e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500"
+                        className="flex-1 px-3 py-2 border rounded text-sm focus:outline-none focus:border-blue-500"
                     />
                     <button
                         type="submit"
@@ -172,7 +172,7 @@ export function PeersView({onPeerPress}: PeersViewProps) {
                     peers.map((peer) => (
                         <div
                             key={peer.host}
-                            className="p-4 bg-white border border-gray-300 rounded-lg cursor-pointer transition-all hover:bg-gray-50 hover:border-blue-500 hover:shadow-lg group"
+                            className="p-4 bg-white border rounded-lg cursor-pointer transition-all hover:bg-gray-50 hover:border-blue-500 hover:shadow-lg group"
                             onClick={() => handlePeerPress(peer.host)}
                         >
                             <div className="flex justify-between items-center gap-4 mb-2">

@@ -180,7 +180,7 @@ export function VideoPlayer({
     // Render a disabled placeholder UI but keep all internal state/hooks available so
     // re-enabling the feature is non-destructive and fast.
     return (
-      <div className={`w-full max-w-4xl rounded-lg border border-dashed border-gray-600 bg-black/60 text-gray-300 p-6 ${className || ''}`} style={style}>
+      <div className={`w-full max-w-4xl rounded-lg border border-dashed bg-black/60 text-gray-300 p-6 ${className || ''}`} style={style}>
         <div className="text-center space-y-2">
           <div className="text-lg font-semibold">Video playback temporarily disabled</div>
           <div className="text-sm text-gray-400">The VideoPlayer UI is currently disabled while we stabilize streaming. The underlying loader and playback code remain present and will be used when re-enabled.</div>

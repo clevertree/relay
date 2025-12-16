@@ -211,7 +211,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
 
     // Client no longer owns search or direct content rendering; repo hook must render everything.
 
-    
+
 
     /**
      * Resolves paths within /template context
@@ -220,7 +220,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
      */
     // Module path resolution and hook helpers are provided inside HookRenderer now.
 
-    
+
 
     if (!tab) {
         return <div className="repo-browser">Tab not found</div>
@@ -288,7 +288,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
 
                         {error && (
                             <div
-                                className="p-8 bg-red-500/20 dark:bg-red-900/30 border border-red-400 dark:border-red-700 rounded-lg text-red-700 dark:text-red-300">
+                                className="p-8 bg-red-500/20 dark:bg-red-900/30 border dark:border-red-700 rounded-lg text-red-700 dark:text-red-300">
                                 <h3 className="mt-0">Error</h3>
                                 <p className="font-semibold">{error}</p>
 
@@ -296,7 +296,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                                     <div className="mt-4 space-y-3 text-sm">
                                         {/* Show hook path and HTTP request info */}
                                         {errorDetails.kind && (
-                                            <div className="bg-red-600/10 p-3 rounded border border-red-400/50">
+                                            <div className="bg-red-600/10 p-3 rounded border/50">
                                                 <div className="font-mono text-xs space-y-1">
                                                     <div><strong>Hook Type:</strong> {errorDetails.kind}</div>
                                                     {errorDetails.hookUrl && (
@@ -324,13 +324,13 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
 
                                         {/* Show JSX transpilation errors (from transpileCode failure) */}
                                         {(errorDetails.reason === 'transpile-failed' || errorDetails.jsxError) && (
-                                            <div className="bg-red-600/10 p-3 rounded border border-red-400/50 space-y-2">
+                                            <div className="bg-red-600/10 p-3 rounded border/50 space-y-2">
                                                 <div className="font-semibold text-xs">
                                                     {errorDetails.isWasmNotLoaded ? '🔌 WASM Transpiler Not Available' : '❌ JSX Transpilation Failed'}
                                                 </div>
-                                                
+
                                                 {errorDetails.isWasmNotLoaded && (
-                                                    <div className="text-xs bg-red-900/20 border border-red-400/30 rounded p-2 space-y-1">
+                                                    <div className="text-xs bg-red-900/20 border/30 rounded p-2 space-y-1">
                                                         <p className="font-semibold">The JSX transpiler (WASM) is not available</p>
                                                         <p>This usually means:</p>
                                                         <ul className="list-disc list-inside ml-2 space-y-1">
@@ -341,9 +341,9 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                                                         <p className="mt-2"><strong>Fix:</strong> Refresh the page and try again. Check browser console (F12) for errors.</p>
                                                     </div>
                                                 )}
-                                                
+
                                                 {!errorDetails.isWasmNotLoaded && (
-                                                    <div className="text-xs bg-red-900/20 border border-red-400/30 rounded p-2 space-y-1">
+                                                    <div className="text-xs bg-red-900/20 border/30 rounded p-2 space-y-1">
                                                         <p className="font-semibold">Invalid JSX syntax detected</p>
                                                         <p>The transpiler encountered syntax it couldn't convert. Check:</p>
                                                         <ul className="list-disc list-inside ml-2 space-y-1">
@@ -353,7 +353,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                                                         </ul>
                                                     </div>
                                                 )}
-                                                
+
                                                 <div className="font-mono text-xs bg-black/20 p-2 rounded overflow-auto max-h-32 whitespace-pre-wrap">
                                                     {typeof errorDetails.jsxError === 'string' ? errorDetails.jsxError : (errorDetails.jsxError?.message || JSON.stringify(errorDetails.jsxError, null, 2))}
                                                 </div>
@@ -362,11 +362,11 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
 
                                         {/* Show execution errors */}
                                         {errorDetails.reason === 'execution-failed' && errorDetails.error && (
-                                            <div className={`p-3 rounded border ${errorDetails.isJsxSyntaxError ? 'bg-orange-600/10 border-orange-400/50' : 'bg-red-600/10 border-red-400/50'}`}>
+                                            <div className={`p-3 rounded border ${errorDetails.isJsxSyntaxError ? 'bg-orange-600/10 border-orange-400/50' : 'bg-red-600/10/50'}`}>
                                                 <div className="font-semibold text-xs mb-3">
                                                     {errorDetails.isJsxSyntaxError ? '⚠️ JSX Transpilation Issue' : '❌ Execution Error'}
                                                 </div>
-                                                
+
                                                 {/* For JSX syntax errors, provide detailed help */}
                                                 {errorDetails.isJsxSyntaxError && (
                                                     <div className="space-y-2 mb-3">
@@ -383,7 +383,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                                                                 <li><strong>Wrong file type:</strong> Use .jsx or .tsx extension, or add <code>// @use-jsx</code> comment at the top</li>
                                                             </ul>
                                                         </div>
-                                                        <div className="text-xs bg-green-900/20 border border-green-400/30 rounded p-2">
+                                                        <div className="text-xs bg-green-900/20 border rounded p-2">
                                                             <p className="font-semibold mb-2">How to fix:</p>
                                                             <ul className="list-disc list-inside space-y-1">
                                                                 <li>Verify the hook file has .jsx or .tsx extension</li>
@@ -394,7 +394,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                                                         </div>
                                                     </div>
                                                 )}
-                                                
+
                                                 <div className="font-mono text-xs mb-2">
                                                     <strong>Error Message:</strong> {errorDetails.error}
                                                 </div>
@@ -525,7 +525,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
 
                 {/* Footer with version and git pull button */}
                 <div
-                    className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between">
+                    className="border-t bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between">
                     <div className="text-sm text-gray-600 dark:text-gray-400">
                         {serverHeadCommit ? (
                             <span>

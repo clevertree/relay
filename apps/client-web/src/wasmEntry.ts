@@ -32,14 +32,40 @@ export async function initAllClientWasms(): Promise<void> {
 
   // themed-styler
   try {
+    // Import the wrapper (for API exposure) but use the public manifest URL to initialize
+    // so we avoid bundler-resolved src/wasm conflicts.
     // @ts-ignore
     const stylerMod = await import('./wasm/themed_styler.js')
-    // @ts-ignore
-    const { default: stylerWasmUrl } = await import('./wasm/themed_styler_bg.wasm?url')
     if (stylerMod) {
-      // wasm-bindgen generated file: default is an init function that can accept a URL/input
+      let stylerWasmUrl: string | undefined
+      try {
+        // Prefer bundler-resolved asset URL (Vite) which points into src/wasm
+        // and is the canonical location for wasm-bindgen outputs.
+  // @ts-ignore
+  const mod = await import('./wasm/themed_styler_bg.wasm?url')
+  stylerWasmUrl = String(mod && (mod as any).default ? (mod as any).default : mod)
+      } catch (e) {
+        // bundler import failed; fall back to manifest (if present in src/wasm)
+        try {
+          // @ts-ignore - import the manifest as JSON via bundler
+          const m = await import('./wasm/themed_styler.manifest.json')
+          if (m && m.default && m.default.wasm_path) {
+            const ts = m.default.generated_at ? encodeURIComponent(m.default.generated_at) : Date.now()
+            stylerWasmUrl = `${m.default.wasm_path}?t=${ts}`
+            if (m.default.version && typeof m.default.version === 'string') {
+              (globalThis as any).__themedStyler_version = m.default.version
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      // Initialize the wasm by calling the wrapper's default init with the resolved URL
       if (typeof (stylerMod as any).default === 'function') {
-        try { await (stylerMod as any).default(stylerWasmUrl) } catch (e) { /* ignore init failures */ }
+        try {
+          if (stylerWasmUrl) await (stylerMod as any).default(stylerWasmUrl)
+          else await (stylerMod as any).default()
+        } catch (e) { /* ignore init failures */ }
       }
       const renderCss = (stylerMod as any).render_css_for_web as ((s: string) => string) | undefined
       const getRn = (stylerMod as any).get_rn_styles as ((state_json: string, selector: string, classes_json: string) => string) | undefined
@@ -88,3 +114,48 @@ export async function initAllClientWasms(): Promise<void> {
 }
 
 export default { initAllClientWasms }
+
+// DEV helper: force initialize the themed-styler by fetching the public manifest and
+// calling the wasm-bindgen background init directly with the manifest URL. This bypasses
+// bundler-resolved auto-init and is useful for debugging stale/cached wasm binaries.
+export async function forceInitThemedStylerFromManifest(): Promise<string | null> {
+  try {
+    const resp = await fetch('/wasm/themed_styler.manifest.json', { cache: 'no-cache' })
+    if (!resp.ok) return null
+    const m = await resp.json()
+    if (!m || !m.wasm_path) return null
+    const ts = m.generated_at ? encodeURIComponent(m.generated_at) : Date.now()
+    const stylerWasmUrl = `${m.wasm_path}?t=${ts}`
+    // Import the bg glue directly and call its default init with the URL so it
+    // fetches the public wasm file instead of using the bundler-resolved module.
+    // @ts-ignore
+    const bg = await import('./wasm/themed_styler_bg.js')
+    if (bg && typeof (bg as any).default === 'function') {
+      try {
+        await (bg as any).default(stylerWasmUrl)
+      } catch (e) {
+        // init may throw if already initialized; ignore
+      }
+    }
+    // Re-import the wrapper so we can expose the same APIs and read version
+    // @ts-ignore
+    const styler = await import('./wasm/themed_styler.js')
+    if (styler && typeof (styler as any).get_version === 'function') {
+      try {
+        const v = (styler as any).get_version()
+        ;(globalThis as any).__themedStyler_version = v
+        return v
+      } catch (e) {
+        // fall-through
+      }
+    }
+    // fallback: manifest may include version
+    if (m.version && typeof m.version === 'string') {
+      ;(globalThis as any).__themedStyler_version = m.version
+      return m.version
+    }
+    return null
+  } catch (e) {
+    return null
+  }
+}

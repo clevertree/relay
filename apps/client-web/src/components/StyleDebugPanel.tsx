@@ -73,22 +73,25 @@ export default function StyleDebugPanel(){
   useEffect(()=>{
     // initial
     refresh()
-    // Try to import wasm module; if it fails, capture diagnostics so we can show an error UI
+    // Try to initialize wasm via the centralized initializer first so it can use the
+    // manifest-based cache-busted URL. Only after that do we import the generated
+    // module so we avoid premature auto-init using a bundler-resolved wasm.
     ;(async ()=>{
       try{
-        const styler = await import('../wasm/themed_styler')
-        setWasmApi(styler)
-        // Force the centralized wasm initializer to run (this ensures the correct wasm URL is used
-        // and the global version variable is populated). Fall back to the raw module API if needed.
         try {
           const wasmEntry = await import('../wasmEntry')
           if (wasmEntry && typeof (wasmEntry as any).initAllClientWasms === 'function') {
             await (wasmEntry as any).initAllClientWasms()
           }
         } catch (e:any) {
-          // Non-fatal: we'll still try to read the module-level get_version below.
           console.warn('[StyleDebugPanel] wasmEntry.initAllClientWasms failed', e)
         }
+
+        // Now import the wasm-bindgen-generated module (it may be already-initialized,
+        // but calling init above ensures the preferred manifest URL will be used when
+        // possible).
+        const styler = await import('../wasm/themed_styler')
+        setWasmApi(styler)
 
         const globalVersion = (globalThis as any).__themedStyler_version
         setThemedStylerGlobalVersion(globalVersion || null)
@@ -100,15 +103,40 @@ export default function StyleDebugPanel(){
         } else if (styler && typeof (styler as any).get_version === 'function') {
           try { setThemedStylerVersion((styler as any).get_version()) } catch (e:any) { setThemedStylerVersion(null) }
         }
-        // Also attempt to resolve the actual wasm URL and fetch headers for debugging cache/stale issues
+
+        // Also attempt to resolve the actual wasm URL via the public manifest and fetch
+        // headers for debugging cache/stale issues. This ensures we reflect the canonical
+        // served path (/wasm/...) rather than any bundler-resolved import.
         try {
-          const { default: wasmUrl } = await import('../wasm/themed_styler_bg.wasm?url')
-          setThemedStylerWasmInfo({ url: wasmUrl })
+          // Prefer bundler-resolved URL (Vite) which points at src/wasm
           try {
-            const resp = await fetch(wasmUrl, { method: 'HEAD', cache: 'no-cache' })
-            setThemedStylerWasmInfo({ url: wasmUrl, status: resp.status, headers: { 'content-length': resp.headers.get('content-length'), 'last-modified': resp.headers.get('last-modified'), etag: resp.headers.get('etag') } })
+            // @ts-ignore
+            const mod = await import('../wasm/themed_styler_bg.wasm?url')
+            const url = String((mod as any).default || mod)
+            setThemedStylerWasmInfo({ url })
+            try {
+              const head = await fetch(url, { method: 'HEAD', cache: 'no-cache' })
+              setThemedStylerWasmInfo({ url, status: head.status, headers: { 'content-length': head.headers.get('content-length'), 'last-modified': head.headers.get('last-modified'), etag: head.headers.get('etag') } })
+            } catch (e) {
+              // ignore
+            }
           } catch (e) {
-            // ignore fetch failures
+            // bundler import not available; fall back to local manifest
+            try {
+              // @ts-ignore
+              const m = await import('../wasm/themed_styler.manifest.json')
+              if (m && m.default && m.default.wasm_path) {
+                const ts = m.default.generated_at ? encodeURIComponent(m.default.generated_at) : Date.now()
+                const wasmUrl = `${m.default.wasm_path}?t=${ts}`
+                setThemedStylerWasmInfo({ url: wasmUrl })
+                try {
+                  const head = await fetch(wasmUrl, { method: 'HEAD', cache: 'no-cache' })
+                  setThemedStylerWasmInfo({ url: wasmUrl, status: head.status, headers: { 'content-length': head.headers.get('content-length'), 'last-modified': head.headers.get('last-modified'), etag: head.headers.get('etag') } })
+                } catch (e) {}
+              }
+            } catch (e) {
+              // ignore
+            }
           }
         } catch (e) {
           // ignore
@@ -125,6 +153,21 @@ export default function StyleDebugPanel(){
   const copyCss = useCallback(()=>{
     navigator.clipboard?.writeText(css)
   },[css])
+
+  const forceLoadFromManifest = useCallback(async ()=>{
+    try {
+      const wasmEntry = await import('../wasmEntry')
+      if (wasmEntry && typeof (wasmEntry as any).forceInitThemedStylerFromManifest === 'function') {
+        const v = await (wasmEntry as any).forceInitThemedStylerFromManifest()
+        // re-run refresh to update UI state
+        refresh()
+        return v
+      }
+    } catch (e:any) {
+      console.warn('[StyleDebugPanel] forceInit failed', e)
+    }
+    return null
+  },[refresh])
 
   return (
     <div className="p-3 mt-4 border rounded bg-white/80 dark:bg-black/60 text-sm">
@@ -144,19 +187,17 @@ export default function StyleDebugPanel(){
         <div className="font-semibold">Themed Styler — Debug</div>
         <div className="space-x-2">
           <button onClick={refresh} className="px-2 py-1 bg-blue-500 text-white rounded text-xs">Refresh</button>
+          <button onClick={forceLoadFromManifest} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Force manifest load</button>
           <button onClick={copyCss} className="px-2 py-1 bg-gray-200 dark:bg-gray-800 rounded text-xs">Copy CSS</button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className="font-semibold mb-1">Generated CSS</div>
-          <pre className="font-mono text-xs bg-black/5 p-2 rounded overflow-auto max-h-72 whitespace-pre-wrap">{css}</pre>
-        </div>
-
-        <div>
           <div className="font-semibold mt-3 mb-1">Themed-styler version</div>
           <JsonBlock value={themedStylerVersion} />
+            <div className="font-semibold mb-1">Generated CSS</div>
+            <pre className="font-mono text-xs bg-black/5 p-2 rounded overflow-auto max-h-72 whitespace-pre-wrap">{css}</pre>
           <div className="text-xs text-gray-600 mt-2">(Diagnostics)</div>
           <div className="text-xs mt-1">Global version: <span className="font-mono">{String(themedStylerGlobalVersion ?? 'null')}</span></div>
           <div className="text-xs mt-1">Module-reported: <span className="font-mono">{String(themedStylerModuleVersion ?? 'null')}</span></div>

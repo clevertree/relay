@@ -29,7 +29,7 @@ const RepoTabComponent: React.FC<RepoTabProps> = ({ tabId }) => {
 
   return (
     <TWView className="flex-1 min-h-0 bg-white">
-      <TWView className="flex-row items-center px-3 py-3 border-b border-gray-200 bg-gray-50">
+      <TWView className="flex-row items-center px-3 py-3 border-b bg-gray-50">
         <TWText className="text-base font-semibold flex-1">{tab.host}</TWText>
         {tab.currentBranch && (
           <TWView className="bg-blue-500 px-2 py-1 rounded mr-2">

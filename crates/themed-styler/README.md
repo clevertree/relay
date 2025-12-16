@@ -54,6 +54,23 @@ st.set_breakpoints(IndexMap::from([
 - There is no runtime whitelist or generator anymore. Classes used at runtime are matched directly against the active theme’s selectors (for example, the class "p-2" is looked up as ".p-2" in the theme; "hover:p-2" is looked up as ".p-2:hover").
 - The crate bundles a default YAML theme that includes a small subset of utilities as examples; apps can extend it by adding selectors to their own theme(s).
 
+Newly supported dynamic utilities (generated at runtime if not present in the theme):
+- rounded*: border radius utilities
+  - rounded, rounded-sm, rounded-md, rounded-lg, rounded-xl, rounded-2xl, rounded-3xl, rounded-full
+  - side variants: rounded-t, rounded-r, rounded-b, rounded-l (with optional size suffix, e.g., rounded-t-lg)
+- cursor-*: sets CSS cursor (pointer, default, text, move, wait, not-allowed, etc.)
+- transition*: transition shorthands
+  - transition / transition-all → transition-property: all; transition-duration: 150ms; ease-in-out
+  - transition-none → disables transitions
+  - transition-colors | transition-opacity | transition-transform | transition-shadow → limits transition-property with default duration/ease
+- Width utilities: w-*, min-w-*, max-w-*
+  - Numeric scale: w-2 ⇒ width: 8px (n×4px)
+  - Fractions: w-1/2 ⇒ width: 50%
+  - Tokens: w-full (100%), w-screen (100vw), w-px (1px); min/max variants mirror the same mapping
+
+Notes:
+- React Native output will camelCase properties and convert px values to numbers when applicable (e.g., border-radius → borderRadius, width: "8px" → 8). Properties without RN equivalents (e.g., cursor, transition) are harmless and may be ignored on RN.
+
 ## Theme format and inheritance
 
 - The default state is defined in YAML and bundled with the crate: crates/themed-styler/theme.yaml.

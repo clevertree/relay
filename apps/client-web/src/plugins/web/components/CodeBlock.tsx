@@ -33,7 +33,7 @@ export function CodeBlock({
       <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 dark:bg-gray-900 text-sm">
         {filename && <span className="font-mono text-gray-300">{filename}</span>}
         {language && <span className="ml-auto text-xs text-gray-500 uppercase">{language}</span>}
-        <button className="bg-none border border-gray-600 text-gray-500 px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-gray-700 hover:text-white" onClick={handleCopy} aria-label="Copy code">
+        <button className="bg-none border text-gray-500 px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-gray-700 hover:text-white" onClick={handleCopy} aria-label="Copy code">
           📋 Copy
         </button>
       </div>

@@ -429,6 +429,70 @@ fn dynamic_css_properties_for_class(class: &str, vars: &IndexMap<String, String>
             return Some(border_props(side, width, vars));
         }
     }
+    // rounded* (border-radius)
+    if class == "rounded" { return Some(rounded_props(None, Some("md"))); }
+    if let Some(sz) = class.strip_prefix("rounded-") {
+        return Some(rounded_props(None, Some(sz)));
+    }
+    for &(pref, side) in &[("rounded-t", "t"), ("rounded-b", "b"), ("rounded-l", "l"), ("rounded-r", "r")] {
+        if class == pref { return Some(rounded_props(Some(side), Some("md"))); }
+        if let Some(sz) = class.strip_prefix(&(pref.to_string() + "-")) {
+            return Some(rounded_props(Some(side), Some(sz)));
+        }
+    }
+    // cursor-*
+    if let Some(cur) = class.strip_prefix("cursor-") {
+        let mut props = CssProps::new();
+        props.insert("cursor".into(), json!(match cur {
+            "pointer" => "pointer",
+            "default" => "default",
+            "text" => "text",
+            "move" => "move",
+            "wait" => "wait",
+            "not-allowed" => "not-allowed",
+            other => other,
+        }));
+        return Some(props);
+    }
+    // transition*
+    if class == "transition" || class == "transition-all" {
+        let mut props = CssProps::new();
+        props.insert("transition-property".into(), json!("all"));
+        props.insert("transition-duration".into(), json!("150ms"));
+        props.insert("transition-timing-function".into(), json!("ease-in-out"));
+        return Some(props);
+    }
+    if class == "transition-none" {
+        let mut props = CssProps::new();
+        props.insert("transition-property".into(), json!("none"));
+        props.insert("transition-duration".into(), json!("0ms"));
+        return Some(props);
+    }
+    if let Some(rest) = class.strip_prefix("transition-") {
+        // e.g., transition-colors → limit property; keep default duration/ease
+        let mut props = CssProps::new();
+        let property = match rest {
+            "colors" => "color, background-color, border-color, fill, stroke",
+            "opacity" => "opacity",
+            "transform" => "transform",
+            "shadow" => "box-shadow",
+            other => other,
+        };
+        props.insert("transition-property".into(), json!(property));
+        props.insert("transition-duration".into(), json!("150ms"));
+        props.insert("transition-timing-function".into(), json!("ease-in-out"));
+        return Some(props);
+    }
+    // width utilities: w-*, w-full, w-screen, w-min, w-max (treat min/max as auto), w-px
+    if let Some(val) = class.strip_prefix("w-") {
+        return width_like_props("width", val);
+    }
+    if let Some(val) = class.strip_prefix("min-w-") {
+        return width_like_props("min-width", val);
+    }
+    if let Some(val) = class.strip_prefix("max-w-") {
+        return width_like_props("max-width", val);
+    }
     None
 }
 
@@ -486,6 +550,72 @@ fn border_props(side: Option<&str>, width: i32, _vars: &IndexMap<String, String>
     props.insert("border-color".into(), json!("var(border)"));
     props.insert("border-style".into(), json!("solid"));
     props
+}
+
+fn rounded_props(side: Option<&str>, size: Option<&str>) -> CssProps {
+    let mut props = CssProps::new();
+    let px = match size.unwrap_or("md") {
+        "none" => 0,
+        "sm" => 2,
+        "md" => 4,
+        "lg" => 8,
+        "xl" => 12,
+        "2xl" => 16,
+        "3xl" => 24,
+        "full" => 9999,
+        s => s.parse::<i32>().unwrap_or(4),
+    };
+    let v = json!(format!("{}px", px));
+    match side {
+        None => { props.insert("border-radius".into(), v); }
+        Some("t") => {
+            props.insert("border-top-left-radius".into(), v.clone());
+            props.insert("border-top-right-radius".into(), v);
+        }
+        Some("b") => {
+            props.insert("border-bottom-left-radius".into(), v.clone());
+            props.insert("border-bottom-right-radius".into(), v);
+        }
+        Some("l") => { props.insert("border-top-left-radius".into(), v.clone()); props.insert("border-bottom-left-radius".into(), v); }
+        Some("r") => { props.insert("border-top-right-radius".into(), v.clone()); props.insert("border-bottom-right-radius".into(), v); }
+        _ => { props.insert("border-radius".into(), v); }
+    }
+    props
+}
+
+fn width_like_props(prop: &str, token: &str) -> Option<CssProps> {
+    let mut props = CssProps::new();
+    let value = match token {
+        "full" => Some("100%".to_string()),
+        "screen" => Some(if prop == "width" { "100vw" } else { "100%" }.to_string()),
+        "min" => Some("min-content".to_string()),
+        "max" => Some("max-content".to_string()),
+        "fit" => Some("fit-content".to_string()),
+        "auto" => Some("auto".to_string()),
+        "px" => Some("1px".to_string()),
+        other => {
+            // numeric scale n => n*4px, fraction e.g., 1/2 => 50%
+            if let Some((a, b)) = other.split_once('/') {
+                if let (Ok(na), Ok(nb)) = (a.parse::<f64>(), b.parse::<f64>()) {
+                    let pct = (na / nb) * 100.0;
+                    Some(format!("{}%", trim_trailing_zeros(pct)))
+                } else { None }
+            } else if let Ok(n) = other.parse::<i32>() {
+                Some(format!("{}px", n * 4))
+            } else {
+                None
+            }
+        }
+    }?;
+    props.insert(prop.into(), json!(value));
+    Some(props)
+}
+
+fn trim_trailing_zeros(num: f64) -> String {
+    let mut s = format!("{:.6}", num);
+    while s.contains('.') && s.ends_with('0') { s.pop(); }
+    if s.ends_with('.') { s.pop(); }
+    s
 }
 
 // ---------------- Tailwind subset ----------------
@@ -572,6 +702,50 @@ mod tests {
         let st = State::new_default();
         let out = st.rn_styles_for("button", &[]);
         assert!(out.get("backgroundColor").is_some());
+    }
+
+    #[test]
+    fn tailwind_new_utilities_css_and_rn() {
+        let mut st = State::new_default();
+        // Register classes to emit CSS
+        st.register_tailwind_classes([
+            "rounded-lg".to_string(),
+            "rounded-t".to_string(),
+            "cursor-pointer".to_string(),
+            "transition".to_string(),
+            "transition-none".to_string(),
+            "transition-colors".to_string(),
+            "w-2".to_string(),
+            "w-full".to_string(),
+            "min-w-2".to_string(),
+            "max-w-full".to_string(),
+        ]);
+        let css = st.css_for_web();
+        assert!(css.contains(".rounded-lg{"));
+        assert!(css.contains("border-radius:"));
+        assert!(css.contains(".cursor-pointer{"));
+        assert!(css.contains("cursor:pointer"));
+        assert!(css.contains(".transition{"));
+        assert!(css.contains("transition-duration:150ms"));
+        assert!(css.contains(".transition-none{"));
+        assert!(css.contains("transition-property:none"));
+        assert!(css.contains(".transition-colors{"));
+        assert!(css.contains("transition-property:color, background-color"));
+        assert!(css.contains(".w-2{"));
+        assert!(css.contains("width:8px"));
+        assert!(css.contains(".w-full{"));
+        assert!(css.contains("width:100%"));
+        assert!(css.contains(".min-w-2{"));
+        assert!(css.contains("min-width:8px"));
+        assert!(css.contains(".max-w-full{"));
+        assert!(css.contains("max-width:100%"));
+
+        // RN: rounded-lg should become borderRadius number, w-2 -> width number
+        let rn = st.rn_styles_for("div", &["rounded-lg".into(), "w-2".into()]);
+        let br = rn.get("borderRadius").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        assert!(br > 0.0);
+        let w = rn.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        assert_eq!(w, 8.0);
     }
 
     #[test]

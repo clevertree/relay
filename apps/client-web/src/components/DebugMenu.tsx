@@ -40,7 +40,7 @@ export function DebugMenu() {
 
       {/* Menu */}
       {isOpen && (
-        <div className="absolute top-12 right-0 bg-gray-900 border border-gray-700 rounded shadow-xl p-3 w-64 text-white text-sm">
+        <div className="absolute top-12 right-0 bg-gray-900 border rounded shadow-xl p-3 w-64 text-white text-sm">
           <div className="space-y-2">
             <button
               onClick={copyHtmlToClipboard}
@@ -61,14 +61,14 @@ export function DebugMenu() {
       {/* Textarea Fallback Modal */}
       {showTextarea && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg shadow-2xl p-6 max-w-2xl max-h-96 w-full mx-4 flex flex-col border border-gray-600">
+          <div className="bg-gray-800 rounded-lg shadow-2xl p-6 max-w-2xl max-h-96 w-full mx-4 flex flex-col border">
             <h2 className="text-white font-bold text-lg mb-3">Copy HTML</h2>
             <p className="text-gray-300 text-xs mb-3">Clipboard API unavailable. Select and copy the HTML below:</p>
             
             <textarea
               value={document.documentElement.outerHTML}
               readOnly
-              className="flex-1 bg-gray-900 text-gray-100 border border-gray-600 rounded p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3 overflow-auto"
+              className="flex-1 bg-gray-900 text-gray-100 border rounded p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3 overflow-auto"
             />
             
             <div className="flex gap-2">

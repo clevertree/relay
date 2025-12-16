@@ -26,16 +26,16 @@ const TailwindRuntimeTest: React.FC = () => (
       <TailwindText className="text-xs text-gray-600">Styled helper present: {String(typeof styled === 'function')}</TailwindText>
     </TailwindView>
     <TailwindText className="font-semibold mb-2">Tailwind runtime className test</TailwindText>
-    <TailwindView className="p-2 rounded border border-gray-300">
+    <TailwindView className="p-2 rounded border">
       <TailwindText className="text-base font-bold">This should be styled via className</TailwindText>
     </TailwindView>
     <TailwindView className="h-2" />
-    <TailwindView className="p-2 rounded border border-gray-300">
+    <TailwindView className="p-2 rounded border">
       <TailwindText className="text-base font-semibold">Inline style counterpart</TailwindText>
     </TailwindView>
     <TailwindView className="h-3" />
     <TailwindText className="font-semibold mb-2">Flex row test</TailwindText>
-    <TailwindView className="rounded overflow-hidden border border-gray-200">
+    <TailwindView className="rounded overflow-hidden border">
       <TailwindView className="flex-row h-12">
         <TailwindView className="flex-1 p-2" style={{ backgroundColor: '#fde68a', borderRightWidth: 1, borderRightColor: '#fbbf24' }}>
           <TailwindText className="text-base">Left</TailwindText>
