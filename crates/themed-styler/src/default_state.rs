@@ -31,56 +31,6 @@ pub fn bundled_state() -> State {
         default_selectors.insert("button".into(), p);
     }
 
-    // simple selectors
-    default_selectors.insert("div".into(), {
-        let mut p = CssProps::new();
-        p.insert("padding".into(), json!("4px"));
-        p
-    });
-    default_selectors.insert(".p-2".into(), {
-        let mut p = CssProps::new();
-        p.insert("padding".into(), json!("8px"));
-        p
-    });
-    default_selectors.insert(".flex".into(), {
-        let mut p = CssProps::new();
-        p.insert("display".into(), json!("flex"));
-        p
-    });
-    default_selectors.insert(".flex-col".into(), {
-        let mut p = CssProps::new();
-        p.insert("display".into(), json!("flex"));
-        p.insert("flex-direction".into(), json!("column"));
-        p
-    });
-    default_selectors.insert(".w-screen".into(), {
-        let mut p = CssProps::new();
-        p.insert("width".into(), json!("100vw"));
-        p
-    });
-    default_selectors.insert(".h-screen".into(), {
-        let mut p = CssProps::new();
-        p.insert("height".into(), json!("100vh"));
-        p
-    });
-    default_selectors.insert(".w-full".into(), {
-        let mut p = CssProps::new();
-        p.insert("width".into(), json!("100%"));
-        p
-    });
-    default_selectors.insert(".h-full".into(), {
-        let mut p = CssProps::new();
-        p.insert("height".into(), json!("100%"));
-        p
-    });
-
-    // hover mx
-    {
-        let mut p = CssProps::new();
-        p.insert("margin-left".into(), json!("4px"));
-        p.insert("margin-right".into(), json!("4px"));
-        default_selectors.insert(".hover\\:mx-1:hover".into(), p);
-    }
 
     // border utility (color is derived from theme variable)
     {

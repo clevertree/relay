@@ -132,39 +132,40 @@ impl State {
     pub fn css_for_web(&self) -> String {
         // Compute CSS for used selectors + used classes resolved from the effective theme (with inheritance)
         let (eff, vars) = self.effective_theme_all();
-        let mut out = String::new();
+        let bps = self.effective_breakpoints();
+        let mut rules: Vec<(String, CssProps)> = Vec::new();
+
         for sel in &self.used_selectors {
             if let Some(props) = eff.get(sel) {
-                out.push_str(sel);
-                out.push_str("{");
-                out.push_str(&css_props_string(props, &vars));
-                out.push_str("}\n");
+                rules.push((sel.clone(), props.clone()));
             }
         }
+
         for class in &self.used_classes {
-            let selector = class_to_selector(class);
+            let (bp_key, hover, base) = parse_prefixed_class(class);
+            let selector = if hover { format!(".{}:hover", css_escape_class(&base)) } else { format!(".{}", css_escape_class(&base)) };
+
+            // 1) Exact selector in effective theme (e.g. ".x:hover")
             if let Some(props) = eff.get(&selector) {
-                out.push_str(&selector);
-                out.push_str("{");
-                out.push_str(&css_props_string(props, &vars));
-                out.push_str("}\n");
+                let final_sel = wrap_with_media(&selector, bp_key.as_deref(), &bps);
+                rules.push((final_sel, props.clone()));
                 continue;
             }
-            if let Some(dynamic_props) = dynamic_css_properties_for_class(class, &vars) {
-                out.push_str(&selector);
-                out.push_str("{");
-                out.push_str(&css_props_string(&dynamic_props, &vars));
-                out.push_str("}\n");
+            // 2) Dynamic generation for the base class (ignoring hover/breakpoint for props)
+            if let Some(dynamic_props) = dynamic_css_properties_for_class(&base, &vars) {
+                let sel = if hover { format!(".{}:hover", css_escape_class(&base)) } else { format!(".{}", css_escape_class(&base)) };
+                let final_sel = wrap_with_media(&sel, bp_key.as_deref(), &bps);
+                rules.push((final_sel, dynamic_props));
                 continue;
             }
-            if let Some(props) = eff.get(class) {
-                out.push_str(class);
-                out.push_str("{");
-                out.push_str(&css_props_string(props, &vars));
-                out.push_str("}\n");
+            // 3) Fallback: class key itself in theme (rare)
+            if let Some(props) = eff.get(&base) {
+                let final_sel = wrap_with_media(&selector, bp_key.as_deref(), &bps);
+                rules.push((final_sel, props.clone()));
             }
         }
-        out
+
+        post_process_css(&rules, &vars)
     }
 
     pub fn rn_styles_for(&self, selector: &str, classes: &[String]) -> IndexMap<String, serde_json::Value> {
@@ -174,16 +175,19 @@ impl State {
             merge_rn_props(&mut out, props, &vars);
         }
         for class in classes {
-            let sel = class_to_selector(class);
+            let (_bp, _hover, base) = parse_prefixed_class(class);
+            // Prefer base selector match from theme
+            let sel = class_to_selector(&base);
             if let Some(props) = eff.get(&sel) {
                 merge_rn_props(&mut out, props, &vars);
                 continue;
             }
-            if let Some(dynamic_props) = dynamic_css_properties_for_class(class, &vars) {
+            // Dynamic mapping for base class
+            if let Some(dynamic_props) = dynamic_css_properties_for_class(&base, &vars) {
                 merge_rn_props(&mut out, &dynamic_props, &vars);
                 continue;
             }
-            if let Some(props) = eff.get(class) {
+            if let Some(props) = eff.get(&base) {
                 merge_rn_props(&mut out, props, &vars);
             }
         }
@@ -401,6 +405,36 @@ fn merge_rn_props(
 }
 
 fn dynamic_css_properties_for_class(class: &str, vars: &IndexMap<String, String>) -> Option<CssProps> {
+    // Display utilities
+    match class {
+        "block" => { let mut p = CssProps::new(); p.insert("display".into(), json!("block")); return Some(p); }
+        "inline-block" => { let mut p = CssProps::new(); p.insert("display".into(), json!("inline-block")); return Some(p); }
+        "inline" => { let mut p = CssProps::new(); p.insert("display".into(), json!("inline")); return Some(p); }
+        "inline-flex" => { let mut p = CssProps::new(); p.insert("display".into(), json!("inline-flex")); return Some(p); }
+        "grid" => { let mut p = CssProps::new(); p.insert("display".into(), json!("grid")); return Some(p); }
+        "hidden" => { let mut p = CssProps::new(); p.insert("display".into(), json!("none")); return Some(p); }
+        _ => {}
+    }
+    // Flexbox shorthands
+    match class {
+        "flex" => { let mut p = CssProps::new(); p.insert("display".into(), json!("flex")); return Some(p); }
+        "flex-row" => { let mut p = CssProps::new(); p.insert("display".into(), json!("flex")); p.insert("flex-direction".into(), json!("row")); return Some(p); }
+        "flex-col" => { let mut p = CssProps::new(); p.insert("display".into(), json!("flex")); p.insert("flex-direction".into(), json!("column")); return Some(p); }
+        "flex-1" => { let mut p = CssProps::new(); p.insert("flex".into(), json!(1)); return Some(p); }
+        _ => {}
+    }
+    if let Some(rest) = class.strip_prefix("items-") {
+        let mut p = CssProps::new();
+        let v = match rest { "start" => "flex-start", "end" => "flex-end", "center" => "center", "stretch" => "stretch", other => other };
+        p.insert("align-items".into(), json!(v));
+        return Some(p);
+    }
+    if let Some(rest) = class.strip_prefix("justify-") {
+        let mut p = CssProps::new();
+        let v = match rest { "start" => "flex-start", "end" => "flex-end", "center" => "center", "between" => "space-between", "around" => "space-around", "evenly" => "space-evenly", other => other };
+        p.insert("justify-content".into(), json!(v));
+        return Some(p);
+    }
     if let Some(value) = class.strip_prefix("p-") {
         return parse_tailwind_spacing(value, &|px| padding_props(&["padding"], px));
     }
@@ -625,10 +659,11 @@ fn trim_trailing_zeros(num: f64) -> String {
 fn css_escape_class(class: &str) -> String { class.replace(':', "\\:") }
 
 fn class_to_selector(class: &str) -> String {
-    if let Some(rest) = class.strip_prefix("hover:") {
-        format!(".{}:hover", css_escape_class(rest))
+    let (_bp, hover, base) = parse_prefixed_class(class);
+    if hover {
+        format!(".{}:hover", css_escape_class(&base))
     } else {
-        format!(".{}", css_escape_class(class))
+        format!(".{}", css_escape_class(&base))
     }
 }
 
@@ -677,6 +712,36 @@ pub fn post_process_css(
         out.push_str("}\n");
     }
     out
+}
+
+// -------- Prefix parsing (hover:, breakpoint:) --------
+
+fn parse_prefixed_class(class: &str) -> (Option<String>, bool, String) {
+    // Split by ':' to find prefixes like md:hover:block
+    let parts: Vec<&str> = class.split(':').collect();
+    if parts.len() == 1 {
+        return (None, false, class.to_string());
+    }
+    let mut bp: Option<String> = None;
+    let mut hover = false;
+    for &p in &parts[..parts.len() - 1] {
+        match p {
+            "hover" => hover = true,
+            "xs" | "sm" | "md" | "lg" | "xl" => bp = Some(p.to_string()),
+            _ => {}
+        }
+    }
+    let base = parts.last().unwrap().to_string();
+    (bp, hover, base)
+}
+
+fn wrap_with_media(selector: &str, bp_key: Option<&str>, bps: &IndexMap<String, String>) -> String {
+    if let Some(k) = bp_key {
+        if let Some(val) = bps.get(k) {
+            return format!("@media (min-width: {}) {{{}}}", val, selector);
+        }
+    }
+    selector.to_string()
 }
 
 // re-export minimal API for CLI
@@ -759,5 +824,33 @@ mod tests {
         // Version should compile and be non-empty (env! evaluated at compile-time)
         let v = get_version();
         assert!(!v.trim().is_empty());
+    }
+
+    #[test]
+    fn display_flex_hover_breakpoint() {
+        let mut st = State::new_default();
+        st.register_tailwind_classes([
+            "block".into(),
+            "inline-flex".into(),
+            "hidden".into(),
+            "md:flex".into(),
+            "md:hover:block".into(),
+        ]);
+        let css = st.css_for_web();
+        assert!(css.contains(".block{"));
+        assert!(css.contains("display:block"));
+        assert!(css.contains(".inline-flex{"));
+        assert!(css.contains("display:inline-flex"));
+        assert!(css.contains(".hidden{"));
+        assert!(css.contains("display:none"));
+        // breakpoint rule
+        assert!(css.contains("@media (min-width: 768px)"));
+        assert!(css.contains(".flex{display:flex"));
+        // hover inside media (substring check)
+        assert!(css.contains(":hover{display:block"));
+
+        // RN resolves base class styles ignoring prefixes
+        let rn = st.rn_styles_for("div", &["md:flex".into()]);
+        assert_eq!(rn.get("display").and_then(|v| v.as_str()), Some("flex"));
     }
 }

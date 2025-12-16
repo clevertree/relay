@@ -68,8 +68,18 @@ Newly supported dynamic utilities (generated at runtime if not present in the th
   - Fractions: w-1/2 ⇒ width: 50%
   - Tokens: w-full (100%), w-screen (100vw), w-px (1px); min/max variants mirror the same mapping
 
+Display, flex, hover, and breakpoints (new)
+
+- Display: block, inline-block, inline, inline-flex, grid, hidden
+- Flex: flex, flex-row, flex-col, flex-1; alignment helpers items-*, justify-*
+- Pseudo/state: hover: prefix supported anywhere in the token chain (e.g., hover:block, md:hover:flex)
+- Breakpoints: xs:, sm:, md:, lg:, xl: prefixes wrap the rule in @media (min-width: <value>) using the active theme’s breakpoints
+  - Example: md:flex → @media (min-width: 768px) { .flex { display:flex } }
+  - Example: md:hover:block → @media (min-width: 768px) { .block:hover { display:block } }
+
 Notes:
 - React Native output will camelCase properties and convert px values to numbers when applicable (e.g., border-radius → borderRadius, width: "8px" → 8). Properties without RN equivalents (e.g., cursor, transition) are harmless and may be ignored on RN.
+- RN ignores hover and breakpoint prefixes at runtime and applies the base class styles (e.g., md:flex → display:flex in RN output).
 
 ## Theme format and inheritance
 
