@@ -288,7 +288,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
 
                         {error && (
                             <div
-                                className="p-8 bg-red-500/20 dark:bg-red-900/30 border dark:border-red-700 rounded-lg text-red-700 dark:text-red-300">
+                                className="p-8 bg-[var(--bg-error)] border border-[var(--border-error)] rounded-lg text-[var(--text-error)]">
                                 <h3 className="mt-0">Error</h3>
                                 <p className="font-semibold">{error}</p>
 
@@ -525,12 +525,12 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
 
                 {/* Footer with version and git pull button */}
                 <div
-                    className="border-t bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between">
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                    className="border-t bg-[var(--bg-secondary)] px-4 py-3 flex items-center justify-between">
+                    <div className="text-sm text-[var(--text-secondary)]">
                         {serverHeadCommit ? (
                             <span>
                             Version: <code
-                                className="bg-gray-200 dark:bg-gray-800 px-2 py-1 rounded text-xs">{serverHeadCommit}</code>
+                                className="bg-[var(--bg-code)] px-2 py-1 rounded text-xs">{serverHeadCommit}</code>
                         </span>
                         ) : (
                             <span>Version: loading...</span>
@@ -553,12 +553,12 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                 {/* Update modal */}
                 {showUpdateModal && (
                     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-                            <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">
+                        <div className="bg-[var(--bg-surface)] rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                            <h2 className="text-xl font-bold mb-4 text-[var(--text)]">
                                 Update Available
                             </h2>
                             {pullResult && (
-                                <div className="space-y-3 text-gray-700 dark:text-gray-300">
+                                <div className="space-y-3 text-[var(--text)]">
                                     <p>
                                         <strong>Status:</strong> {pullResult.success ? '✓ Success' : '✗ Failed'}
                                     </p>
@@ -568,7 +568,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                                     {pullResult.before_commit && (
                                         <p>
                                             <strong>Before:</strong>{' '}
-                                            <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
+                                            <code className="bg-[var(--bg-code)] px-2 py-1 rounded text-xs">
                                                 {pullResult.before_commit.substring(0, 7)}
                                             </code>
                                         </p>
@@ -576,7 +576,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                                     {pullResult.after_commit && (
                                         <p>
                                             <strong>After:</strong>{' '}
-                                            <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
+                                            <code className="bg-[var(--bg-code)] px-2 py-1 rounded text-xs">
                                                 {pullResult.after_commit.substring(0, 7)}
                                             </code>
                                         </p>
@@ -586,7 +586,7 @@ export function RepoBrowser({tabId}: RepoBrowserProps) {
                             <div className="flex gap-3 mt-6">
                                 <button
                                     onClick={() => setShowUpdateModal(false)}
-                                    className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                                    className="flex-1 px-4 py-2 bg-[var(--bg-secondary)] text-[var(--text)] rounded transition"
                                 >
                                     Close
                                 </button>

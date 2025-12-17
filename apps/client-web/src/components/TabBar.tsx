@@ -39,20 +39,20 @@ export function TabBar({ onTabChange }: TabBarProps) {
                 key={tab.id}
                 className={`flex items-center gap-2 px-4 py-2 border border-b-2 rounded-t-lg cursor-pointer transition-all flex-shrink-0 min-w-32 max-w-60 ${
                   isActive
-                    ? 'border-b-blue-500 font-semibold bg-white dark:bg-gray-900'
+                    ? 'border-b-blue-500 font-semibold bg-[var(--bg-surface)]'
                     : 'border-b-transparent'
                 }`}
                 onClick={() => handleTabClick(tab.id)}
               >
                 <span
-                  className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-gray-900 dark:text-gray-100"
+                  className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-[var(--text)]"
                   title={tab.title}
                 >
                   {tab.title}
                 </span>
                 {!tab.isHome && tab.id !== 'settings' && (
                   <button
-                    className="border-none bg-transparent text-xl cursor-pointer text-gray-500 dark:text-gray-400 p-0 w-6 h-6 flex items-center justify-center rounded transition-all flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-300"
+                    className="border-none bg-transparent text-xl cursor-pointer text-[var(--text-secondary)] p-0 w-6 h-6 flex items-center justify-center rounded transition-all flex-shrink-0"
                     onClick={(event) => handleCloseTab(event, tab.id)}
                     aria-label="Close tab"
                   >

@@ -92,7 +92,7 @@ export function SettingsTab() {
         <p className="text-sm text-gray-500 mt-1">Control how hooks are transpiled.</p>
       </div>
 
-      <section className="bg-white dark:bg-gray-800 border rounded-lg shadow-sm p-6 space-y-4">
+      <section className="bg-[var(--bg-surface)] border rounded-lg shadow-sm p-6 space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Transpiler</h2>
@@ -121,7 +121,7 @@ export function SettingsTab() {
         </div>
       </section>
 
-      <section className="bg-white dark:bg-gray-800 border rounded-lg shadow-sm p-6 space-y-4">
+      <section className="bg-[var(--bg-surface)] border rounded-lg shadow-sm p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Active classes</h2>
@@ -131,23 +131,23 @@ export function SettingsTab() {
             <input
               type="text"
               placeholder="Search classes..."
-              className="px-3 py-2 border dark:rounded-lg text-sm bg-white dark:bg-gray-900"
+              className="px-3 py-2 border rounded-lg text-sm bg-[var(--bg-surface)]"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <button
               type="button"
               onClick={refreshClasses}
-              className="px-3 py-2 text-sm border dark:rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="px-3 py-2 text-sm border rounded-lg"
             >
               Refresh
             </button>
           </div>
         </div>
         <div className="max-h-64 overflow-auto border rounded-md">
-          <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+          <ul className="divide-y divide-[var(--border)]">
             {filtered.map((c) => (
-              <li key={c} className="px-3 py-2 font-mono text-xs text-gray-800 dark:text-gray-100">{c}</li>
+              <li key={c} className="px-3 py-2 font-mono text-xs text-[var(--text)]">{c}</li>
             ))}
             {filtered.length === 0 && (
               <li className="px-3 py-2 text-sm text-gray-500">No classes match your search.</li>
@@ -157,7 +157,7 @@ export function SettingsTab() {
         <div className="text-xs text-gray-500">Showing {filtered.length} of {classes.length}</div>
       </section>
 
-      <section className="bg-white dark:bg-gray-800 border rounded-lg shadow-sm p-6 space-y-4">
+      <section className="bg-[var(--bg-surface)] border rounded-lg shadow-sm p-6 space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Themed Styler status</h2>
@@ -187,7 +187,7 @@ export function SettingsTab() {
             </div>
           </div>
           <div>
-            <div className="text-xs font-mono text-gray-700 dark:text-gray-200 bg-black/5 dark:bg-white/5 rounded p-2 overflow-auto max-h-40">
+            <div className="text-xs font-mono text-[var(--text-code)] bg-[var(--bg-code)] rounded p-2 overflow-auto max-h-40">
               {stylerStatus.cssPreview || 'No CSS generated yet.'}
             </div>
           </div>

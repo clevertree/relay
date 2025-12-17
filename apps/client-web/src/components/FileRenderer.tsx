@@ -29,7 +29,7 @@ export function FileRenderer({ content, contentType }: FileRendererProps) {
       pretty = JSON.stringify(JSON.parse(content), null, 2)
     } catch {}
     return (
-      <pre className="bg-gray-100 dark:bg-gray-800 border rounded p-4 overflow-auto text-sm text-gray-900 dark:text-gray-100">
+      <pre className="bg-[var(--bg-code)] border rounded p-4 overflow-auto text-sm text-[var(--text-code)]">
         {pretty}
       </pre>
     )
@@ -37,7 +37,7 @@ export function FileRenderer({ content, contentType }: FileRendererProps) {
 
   if (lower.startsWith('text/') || !lower) {
     return (
-      <pre className="bg-gray-100 dark:bg-gray-800 border rounded p-4 overflow-auto text-sm text-gray-900 dark:text-gray-100">
+      <pre className="bg-[var(--bg-code)] border rounded p-4 overflow-auto text-sm text-[var(--text-code)]">
         {content}
       </pre>
     )
@@ -45,7 +45,7 @@ export function FileRenderer({ content, contentType }: FileRendererProps) {
 
   // Fallback: show as plain text
   return (
-    <pre className="bg-gray-100 dark:bg-gray-800 border rounded p-4 overflow-auto text-sm text-gray-900 dark:text-gray-100">
+    <pre className="bg-[var(--bg-code)] border rounded p-4 overflow-auto text-sm text-[var(--text-code)]">
       {content}
     </pre>
   )

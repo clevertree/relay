@@ -170,16 +170,16 @@ export default function StyleDebugPanel(){
   },[refresh])
 
   return (
-    <div className="p-3 mt-4 border rounded bg-white/80 dark:bg-black/60 text-sm">
+    <div className="p-3 mt-4 border rounded bg-[var(--bg-surface)] text-sm">
       {wasmError ? (
-        <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/60 border border-red-200 dark:border-red-700 rounded">
-          <div className="font-semibold text-red-700 dark:text-red-300">Themed-styler WebAssembly failed to load</div>
-          <div className="text-xs text-red-600 dark:text-red-200 mt-1">Diagnostics:</div>
+        <div className="mb-3 p-3 bg-[var(--bg-error)] border border-[var(--border-error)] rounded">
+          <div className="font-semibold text-[var(--text-error)]">Themed-styler WebAssembly failed to load</div>
+          <div className="text-xs text-[var(--text-error)] mt-1">Diagnostics:</div>
           <div className="mt-2 text-xs">
             <div><strong>Message:</strong> {wasmError.message}</div>
             {wasmError.stack ? <pre className="font-mono text-xs bg-black/5 p-2 rounded mt-2 overflow-auto max-h-40 whitespace-pre-wrap">{wasmError.stack}</pre> : null}
             <div className="mt-2 text-xs text-gray-600">Captured at: {wasmError.time}</div>
-            <div className="mt-2 text-xs text-gray-700 dark:text-gray-300">Suggested actions: ensure the wasm build step ran and that the wasm file is served correctly; check browser console/network for errors.</div>
+            <div className="mt-2 text-xs text-[var(--text-secondary)]">Suggested actions: ensure the wasm build step ran and that the wasm file is served correctly; check browser console/network for errors.</div>
           </div>
         </div>
       ) : null}
@@ -188,7 +188,7 @@ export default function StyleDebugPanel(){
         <div className="space-x-2">
           <button onClick={refresh} className="px-2 py-1 bg-blue-500 text-white rounded text-xs">Refresh</button>
           <button onClick={forceLoadFromManifest} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Force manifest load</button>
-          <button onClick={copyCss} className="px-2 py-1 bg-gray-200 dark:bg-gray-800 rounded text-xs">Copy CSS</button>
+          <button onClick={copyCss} className="px-2 py-1 bg-[var(--bg-secondary)] rounded text-xs">Copy CSS</button>
         </div>
       </div>
 

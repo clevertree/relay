@@ -52,14 +52,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       const lineNum = lineMatch ? (lineMatch[1] || lineMatch[2]) : null
 
       return (
-        <div className="p-8 bg-red-500/20 dark:bg-red-900/30 border rounded-lg text-red-700 dark:text-red-300 max-w-4xl">
+        <div className="p-8 bg-[var(--bg-error)] border rounded-lg text-[var(--text-error)] max-w-4xl">
           <h3 className="mt-0 text-lg font-bold">{title}</h3>
           <p className="font-semibold text-base">{message}</p>
           <p className="text-sm leading-relaxed opacity-80">{severityHint}</p>
           <p className="text-sm opacity-80">Hook Transpiler v{version}</p>
 
           {lineNum && (
-            <div className="mt-2 text-sm bg-red-100 dark:bg-red-900 p-2 rounded">
+            <div className="mt-2 text-sm bg-[var(--bg-error-detail)] p-2 rounded">
               Error Location: Line {lineNum}
             </div>
           )}

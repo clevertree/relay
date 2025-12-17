@@ -616,6 +616,129 @@ fn dynamic_css_properties_for_class(class: &str, vars: &IndexMap<String, String>
             return parse_tailwind_spacing(value, &|px| padding_props(&[prop], px));
         }
     }
+    // Margin utilities
+    if let Some(value) = class.strip_prefix("m-") {
+        return parse_tailwind_spacing(value, &|px| margin_props(&["margin"], px));
+    }
+    if let Some(value) = class.strip_prefix("mx-") {
+        return parse_tailwind_spacing(value, &|px| margin_props(&["margin-left", "margin-right"], px));
+    }
+    if let Some(value) = class.strip_prefix("my-") {
+        return parse_tailwind_spacing(value, &|px| margin_props(&["margin-top", "margin-bottom"], px));
+    }
+    for &(prefix, prop) in &[("mt-", "margin-top"), ("mr-", "margin-right"), ("mb-", "margin-bottom"), ("ml-", "margin-left")] {
+        if let Some(value) = class.strip_prefix(prefix) {
+            return parse_tailwind_spacing(value, &|px| margin_props(&[prop], px));
+        }
+    }
+    // Gap utilities (works in RN 0.71+ with Flexbox)
+    if let Some(value) = class.strip_prefix("gap-") {
+        if !value.starts_with("x-") && !value.starts_with("y-") {
+            return parse_tailwind_spacing(value, &|px| {
+                let mut props = CssProps::new();
+                props.insert("gap".into(), json!(format!("{}px", px)));
+                props
+            });
+        }
+    }
+    if let Some(value) = class.strip_prefix("gap-x-") {
+        return parse_tailwind_spacing(value, &|px| {
+            let mut props = CssProps::new();
+            props.insert("column-gap".into(), json!(format!("{}px", px)));
+            props
+        });
+    }
+    if let Some(value) = class.strip_prefix("gap-y-") {
+        return parse_tailwind_spacing(value, &|px| {
+            let mut props = CssProps::new();
+            props.insert("row-gap".into(), json!(format!("{}px", px)));
+            props
+        });
+    }
+    // Space utilities (space-x-*, space-y-*)
+    if let Some(value) = class.strip_prefix("space-x-") {
+        return parse_tailwind_spacing(value, &|px| {
+            let mut props = CssProps::new();
+            // In CSS, this is typically done with :not(:last-child) selector
+            // For now, we'll set it as a custom property that can be used
+            props.insert("--space-x".into(), json!(format!("{}px", px)));
+            props
+        });
+    }
+    if let Some(value) = class.strip_prefix("space-y-") {
+        return parse_tailwind_spacing(value, &|px| {
+            let mut props = CssProps::new();
+            props.insert("--space-y".into(), json!(format!("{}px", px)));
+            props
+        });
+    }
+    // Font weight utilities
+    match class {
+        "font-thin" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("100")); return Some(p); }
+        "font-extralight" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("200")); return Some(p); }
+        "font-light" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("300")); return Some(p); }
+        "font-normal" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("400")); return Some(p); }
+        "font-medium" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("500")); return Some(p); }
+        "font-semibold" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("600")); return Some(p); }
+        "font-bold" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("700")); return Some(p); }
+        "font-extrabold" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("800")); return Some(p); }
+        "font-black" => { let mut p = CssProps::new(); p.insert("font-weight".into(), json!("900")); return Some(p); }
+        _ => {}
+    }
+    // Font family utilities
+    match class {
+        "font-sans" => { let mut p = CssProps::new(); p.insert("font-family".into(), json!("system-ui, -apple-system, sans-serif")); return Some(p); }
+        "font-serif" => { let mut p = CssProps::new(); p.insert("font-family".into(), json!("Georgia, serif")); return Some(p); }
+        "font-mono" => { let mut p = CssProps::new(); p.insert("font-family".into(), json!("ui-monospace, monospace")); return Some(p); }
+        _ => {}
+    }
+    // Text size utilities
+    match class {
+        "text-xs" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("12px")); p.insert("line-height".into(), json!("16px")); return Some(p); }
+        "text-sm" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("14px")); p.insert("line-height".into(), json!("20px")); return Some(p); }
+        "text-base" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("16px")); p.insert("line-height".into(), json!("24px")); return Some(p); }
+        "text-lg" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("18px")); p.insert("line-height".into(), json!("28px")); return Some(p); }
+        "text-xl" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("20px")); p.insert("line-height".into(), json!("28px")); return Some(p); }
+        "text-2xl" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("24px")); p.insert("line-height".into(), json!("32px")); return Some(p); }
+        "text-3xl" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("30px")); p.insert("line-height".into(), json!("36px")); return Some(p); }
+        "text-4xl" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("36px")); p.insert("line-height".into(), json!("40px")); return Some(p); }
+        "text-5xl" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("48px")); p.insert("line-height".into(), json!("1")); return Some(p); }
+        "text-6xl" => { let mut p = CssProps::new(); p.insert("font-size".into(), json!("60px")); p.insert("line-height".into(), json!("1")); return Some(p); }
+        _ => {}
+    }
+    // Text alignment
+    match class {
+        "text-left" => { let mut p = CssProps::new(); p.insert("text-align".into(), json!("left")); return Some(p); }
+        "text-center" => { let mut p = CssProps::new(); p.insert("text-align".into(), json!("center")); return Some(p); }
+        "text-right" => { let mut p = CssProps::new(); p.insert("text-align".into(), json!("right")); return Some(p); }
+        "text-justify" => { let mut p = CssProps::new(); p.insert("text-align".into(), json!("justify")); return Some(p); }
+        _ => {}
+    }
+    // Overflow utilities
+    match class {
+        "overflow-auto" => { let mut p = CssProps::new(); p.insert("overflow".into(), json!("auto")); return Some(p); }
+        "overflow-hidden" => { let mut p = CssProps::new(); p.insert("overflow".into(), json!("hidden")); return Some(p); }
+        "overflow-visible" => { let mut p = CssProps::new(); p.insert("overflow".into(), json!("visible")); return Some(p); }
+        "overflow-scroll" => { let mut p = CssProps::new(); p.insert("overflow".into(), json!("scroll")); return Some(p); }
+        "overflow-x-auto" => { let mut p = CssProps::new(); p.insert("overflow-x".into(), json!("auto")); return Some(p); }
+        "overflow-x-hidden" => { let mut p = CssProps::new(); p.insert("overflow-x".into(), json!("hidden")); return Some(p); }
+        "overflow-x-scroll" => { let mut p = CssProps::new(); p.insert("overflow-x".into(), json!("scroll")); return Some(p); }
+        "overflow-y-auto" => { let mut p = CssProps::new(); p.insert("overflow-y".into(), json!("auto")); return Some(p); }
+        "overflow-y-hidden" => { let mut p = CssProps::new(); p.insert("overflow-y".into(), json!("hidden")); return Some(p); }
+        "overflow-y-scroll" => { let mut p = CssProps::new(); p.insert("overflow-y".into(), json!("scroll")); return Some(p); }
+        _ => {}
+    }
+    // Shadow utilities (basic cross-platform support)
+    match class {
+        "shadow-sm" => { let mut p = CssProps::new(); p.insert("box-shadow".into(), json!("0 1px 2px 0 rgba(0, 0, 0, 0.05)")); return Some(p); }
+        "shadow" => { let mut p = CssProps::new(); p.insert("box-shadow".into(), json!("0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)")); return Some(p); }
+        "shadow-md" => { let mut p = CssProps::new(); p.insert("box-shadow".into(), json!("0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)")); return Some(p); }
+        "shadow-lg" => { let mut p = CssProps::new(); p.insert("box-shadow".into(), json!("0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)")); return Some(p); }
+        "shadow-xl" => { let mut p = CssProps::new(); p.insert("box-shadow".into(), json!("0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)")); return Some(p); }
+        "shadow-2xl" => { let mut p = CssProps::new(); p.insert("box-shadow".into(), json!("0 25px 50px -12px rgba(0, 0, 0, 0.25)")); return Some(p); }
+        "shadow-none" => { let mut p = CssProps::new(); p.insert("box-shadow".into(), json!("none")); return Some(p); }
+        _ => {}
+    }
     // Parse arbitrary values like bg-[var(--primary)], text-[#ff0000], etc.
     if let Some(arb_value) = parse_arbitrary_value(class) {
         return Some(arb_value);
@@ -729,6 +852,16 @@ fn dynamic_css_properties_for_class(class: &str, vars: &IndexMap<String, String>
     if let Some(val) = class.strip_prefix("max-w-") {
         return width_like_props("max-width", val);
     }
+    // Height utilities
+    if let Some(val) = class.strip_prefix("h-") {
+        return width_like_props("height", val);
+    }
+    if let Some(val) = class.strip_prefix("min-h-") {
+        return width_like_props("min-height", val);
+    }
+    if let Some(val) = class.strip_prefix("max-h-") {
+        return width_like_props("max-height", val);
+    }
     None
 }
 
@@ -744,6 +877,15 @@ where
 }
 
 fn padding_props(keys: &[&str], px_value: i32) -> CssProps {
+    let mut props = CssProps::new();
+    let val = format!("{}px", px_value);
+    for key in keys {
+        props.insert((*key).into(), json!(&val));
+    }
+    props
+}
+
+fn margin_props(keys: &[&str], px_value: i32) -> CssProps {
     let mut props = CssProps::new();
     let val = format!("{}px", px_value);
     for key in keys {

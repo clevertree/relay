@@ -29,8 +29,8 @@ export function CodeBlock({
   }
 
   return (
-    <div className={`my-4 rounded-lg overflow-hidden bg-gray-900 dark:bg-gray-950 ${className}`}>
-      <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 dark:bg-gray-900 text-sm">
+    <div className={`my-4 rounded-lg overflow-hidden bg-[var(--bg-code)] ${className}`}>
+      <div className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-code-header)] text-sm">
         {filename && <span className="font-mono text-gray-300">{filename}</span>}
         {language && <span className="ml-auto text-xs text-gray-500 uppercase">{language}</span>}
         <button className="bg-none border text-gray-500 px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-gray-700 hover:text-white" onClick={handleCopy} aria-label="Copy code">
