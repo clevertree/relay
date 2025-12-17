@@ -1,14 +1,14 @@
 import { styled } from './themedRuntime'
 if (typeof styled !== 'function') {
-  console.warn('[themedPrimitives] styled export is not a function:', styled)
+    console.warn('[themedPrimitives] styled export is not a function:', styled)
 }
 import {
-  SafeAreaView as RNSafeAreaView,
-  ScrollView as RNScrollView,
-  Text as RNText,
-  TouchableOpacity as RNTouchableOpacity,
-  View as RNView,
-  TextInput as RNTextInput,
+    SafeAreaView as RNSafeAreaView,
+    ScrollView as RNScrollView,
+    Text as RNText,
+    TouchableOpacity as RNTouchableOpacity,
+    View as RNView,
+    TextInput as RNTextInput,
 } from 'react-native'
 
 export const SafeAreaView = styled(RNSafeAreaView)

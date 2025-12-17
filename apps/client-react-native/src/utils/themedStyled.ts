@@ -1,5 +1,5 @@
 import React from 'react'
-import { resolveThemedStyle } from '../components/ThemedElement'
+import { resolveThemedStyle } from '../components/TSDiv'
 
 type StyledProps<T extends React.ComponentType<any>> = Omit<React.ComponentProps<T>, 'style'> & {
     className?: string

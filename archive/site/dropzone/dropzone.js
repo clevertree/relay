@@ -7,7 +7,7 @@ export class RelayDropzone extends HTMLElement {
     }
 
     connectedCallback() {
-        // Styling hint; use Tailwind globals
+        // Styling hint; use globals
         this.style.position ||= 'relative';
         this.classList.add('block');
         this.addEventListener('dragover', this._onDragOver);
@@ -27,7 +27,7 @@ export class RelayDropzone extends HTMLElement {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
         this.classList.add('relay-dragover');
-        // Tailwind-based highlight
+        // Class-based highlight
         this.classList.add('ring-4','ring-blue-500/30','outline-dashed','bg-blue-50','shadow-xl','scale-[1.01]','transition');
     }
 

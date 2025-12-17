@@ -258,7 +258,7 @@ function resolvePath(modulePath: string, fromHookPath?: string): string {
 4. **✅ Template System** - Dynamic JSX loading with runtime transpilation
 5. **✅ Mobile Support** - React Native client with shared architecture
 6. **✅ Plugin System** - TMDB, YTS, and custom integrations
-7. **✅ Cross-Platform Styling** - Tailwind CSS with responsive design
+7. **✅ Cross-Platform Styling** - Tailwind-style CSS with responsive design
 
 **Status**: All implemented, documented, and working in current dev environment
 **Docker Test**: Pending (will verify all work in containerized environment)

@@ -19,7 +19,7 @@ const RepoBrowser: React.FC<RepoBrowserProps> = ({ host }) => {
   return (
     <TSDiv className="flex-1 bg-white min-h-0">
       <HookRenderer host={host} />
-    </ThemedElement>
+    </TSDiv>
   )
 }
 

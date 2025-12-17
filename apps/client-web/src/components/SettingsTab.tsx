@@ -12,7 +12,7 @@ export function SettingsTab() {
     return 'Use the WASM hook transpiler that ships with the web app. Syntax errors are reported directly from the client.'
   }, [setting])
 
-  // Tailwind classes inspector
+  // classes inspector
   const [search, setSearch] = useState('')
   const [classes, setClasses] = useState<string[]>([])
   const [stylerStatus, setStylerStatus] = useState({
@@ -124,7 +124,7 @@ export function SettingsTab() {
       <section className="bg-white dark:bg-gray-800 border rounded-lg shadow-sm p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Active Tailwind classes</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Active classes</h2>
             <p className="text-sm text-gray-500">Currently applied classes in the UI. Total: {classes.length}</p>
           </div>
           <div className="flex items-center gap-2">

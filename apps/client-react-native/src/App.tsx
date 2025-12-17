@@ -1,137 +1,132 @@
-import React, { useEffect, useRef } from 'react';
-import { StatusBar, useWindowDimensions } from 'react-native';
-import { SafeAreaView, ScrollView, Text, TouchableOpacity, View } from './themedPrimitives';
-import { NavigationContainer, useIsFocused } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import PeersView from './components/PeersView';
-import RepoTab from './components/RepoTab';
-import DebugTab from './components/DebugTab';
-import { useAppState } from './state/store';
-import { useAppUpdate } from './hooks/useAppUpdate';
-import { UpdateModal } from './components/UpdateModal';
-import { initNativeRustTranspiler } from './nativeRustTranspiler';
-type RootStackParamList = {
-  Main: undefined;
-  RepoTab: { tabId: string };
-  Debug: undefined;
-};
+import React, { useEffect, useRef, type ComponentProps } from 'react'
+import { StatusBar, useWindowDimensions } from 'react-native'
+import { TSDiv } from './components/TSDiv'
+import { NavigationContainer, useIsFocused } from '@react-navigation/native'
+import { createNativeStackNavigator } from '@react-navigation/native-stack'
+import PeersView from './components/PeersView'
+import RepoTab from './components/RepoTab'
+import DebugTab from './components/DebugTab'
+import { useAppState } from './state/store'
+import { useAppUpdate } from './hooks/useAppUpdate'
+import { UpdateModal } from './components/UpdateModal'
+import { initNativeRustTranspiler } from './nativeRustTranspiler'
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+type RootStackParamList = {
+  Main: undefined
+  RepoTab: { tabId: string }
+  Debug: undefined
+}
+
+const Stack = createNativeStackNavigator<RootStackParamList>()
 
 const TabBar: React.FC<{ navigation: any }> = ({ navigation }) => {
-  const tabs = useAppState((s) => s.tabs);
-  const activeTabId = useAppState((s) => s.activeTabId);
-  const setActiveTab = useAppState((s) => s.setActiveTab);
-  const closeTab = useAppState((s) => s.closeTab);
-  const homeTabId = useAppState((s) => s.homeTabId);
+  const tabs = useAppState((s) => s.tabs)
+  const activeTabId = useAppState((s) => s.activeTabId)
+  const setActiveTab = useAppState((s) => s.setActiveTab)
+  const closeTab = useAppState((s) => s.closeTab)
+  const homeTabId = useAppState((s) => s.homeTabId)
 
-  // Include home tab and debug tab, ensure unique tab ids (home shouldn't appear twice)
-  const initialTabs = [
-    { id: homeTabId, title: 'Home', isHome: true },
-    ...tabs,
-    { id: 'debug', title: 'Debug', isDebug: true },
-  ];
-  const seen = new Set<string>();
-  const allTabs = [] as Array<{ id: string; title: string; isHome?: boolean; isDebug?: boolean }>;
+  const initialTabs = [{ id: homeTabId, title: 'Home', isHome: true }, ...tabs, { id: 'debug', title: 'Debug', isDebug: true }]
+  const seen = new Set<string>()
+  const allTabs: Array<{ id: string; title: string; isHome?: boolean; isDebug?: boolean }> = []
   for (const t of initialTabs) {
-    if (!t || !t.id) continue;
-    if (seen.has(String(t.id))) continue;
-    seen.add(String(t.id));
-    allTabs.push(t);
+    if (!t || !t.id) continue
+    if (seen.has(String(t.id))) continue
+    seen.add(String(t.id))
+    allTabs.push(t)
   }
 
   return (
-    <View className="bg-surface-secondary border-b" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+    <TSDiv tag="div" className="bg-surface-secondary border-b" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
+      <TSDiv tag="section" horizontal showsHorizontalScrollIndicator={false}>
         {allTabs.map((tab) => (
-          <View key={tab.id} className="flex-row items-center">
-            <TouchableOpacity
+          <TSDiv key={tab.id} tag="div" className="flex-row items-center">
+            <TSDiv
+              tag="button"
               className={`px-4 py-2 border-b-2 ${activeTabId === tab.id ? 'border-primary bg-surface' : 'border-transparent'}`}
               style={{ maxWidth: 150 }}
               onPress={() => {
-                setActiveTab(tab.id);
-                if (tab.id === homeTabId) {
-                  navigation.navigate('Main');
-                } else if (tab.id === 'debug') {
-                  navigation.navigate('Debug');
-                } else {
-                  navigation.navigate('RepoTab', { tabId: tab.id });
-                }
+                setActiveTab(tab.id)
+                if (tab.id === homeTabId) navigation.navigate('Main')
+                else if (tab.id === 'debug') navigation.navigate('Debug')
+                else navigation.navigate('RepoTab', { tabId: tab.id })
               }}>
-              <Text
-                className={`text-sm ${activeTabId === tab.id ? 'text-primary font-semibold' : 'text-text-secondary'}`}
-                numberOfLines={1}
-              >
+              <TSDiv tag="span" className={`text-sm ${activeTabId === tab.id ? 'text-primary font-semibold' : 'text-text-secondary'}`} numberOfLines={1}>
                 {tab.title}
-              </Text>
-            </TouchableOpacity>
+              </TSDiv>
+            </TSDiv>
             {!tab.isHome && !tab.isDebug && (
-              <TouchableOpacity
+              <TSDiv
+                tag="button"
                 className="p-2 mr-1"
                 onPress={() => {
-                  closeTab(tab.id);
-                  if (activeTabId === tab.id) {
-                    navigation.navigate('Main');
-                  }
+                  closeTab(tab.id)
+                  if (activeTabId === tab.id) navigation.navigate('Main')
                 }}>
-                <Text className="text-lg text-text-muted font-semibold">×</Text>
-              </TouchableOpacity>
+                <TSDiv tag="span" className="text-lg text-text-muted font-semibold">
+                  ×
+                </TSDiv>
+              </TSDiv>
             )}
-          </View>
+          </TSDiv>
         ))}
-      </ScrollView>
-    </View>
-  );
-};
+      </TSDiv>
+    </TSDiv>
+  )
+}
 
 const MainScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
-  const openTab = useAppState((s) => s.openTab);
-  const activeTabId = useAppState((s) => s.activeTabId);
-  const homeTabId = useAppState((s) => s.homeTabId);
-  const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const { showUpdateModal, setShowUpdateModal, checkForUpdate } = useAppUpdate();
-  const isScreenFocused = useIsFocused();
-  const lastViewRef = useRef<string | null>(null);
+  const openTab = useAppState((s) => s.openTab)
+  const activeTabId = useAppState((s) => s.activeTabId)
+  const homeTabId = useAppState((s) => s.homeTabId)
+  const { width } = useWindowDimensions()
+  const isTablet = width >= 768
+  const { showUpdateModal, setShowUpdateModal, checkForUpdate } = useAppUpdate()
+  const isScreenFocused = useIsFocused()
+  const lastViewRef = useRef<string | null>(null)
 
   useEffect(() => {
-    const mode = isScreenFocused && (!activeTabId || activeTabId === homeTabId)
-      ? 'home'
-      : activeTabId === 'debug'
-        ? 'debug'
-        : 'repo';
+    const mode = isScreenFocused && (!activeTabId || activeTabId === homeTabId) ? 'home' : activeTabId === 'debug' ? 'debug' : 'repo'
     if (lastViewRef.current !== mode) {
-      console.log('[MainScreen] Rendering', mode === 'home' ? 'PeersView' : mode === 'debug' ? 'DebugTab' : 'RepoTab', 'activeTabId:', activeTabId, 'homeTabId:', homeTabId, 'focused:', isScreenFocused);
-      lastViewRef.current = mode;
+      console.log(
+        '[MainScreen] Rendering',
+        mode === 'home' ? 'PeersView' : mode === 'debug' ? 'DebugTab' : 'RepoTab',
+        'activeTabId:',
+        activeTabId,
+        'homeTabId:',
+        homeTabId,
+        'focused:',
+        isScreenFocused,
+      )
+      lastViewRef.current = mode
     }
-  }, [activeTabId, homeTabId, isScreenFocused]);
+  }, [activeTabId, homeTabId, isScreenFocused])
 
-  // Check for updates on component mount
   useEffect(() => {
-    checkForUpdate();
-    console.log('[MainScreen] Mounted, activeTabId:', activeTabId);
-  }, [checkForUpdate]);
+    checkForUpdate()
+    console.log('[MainScreen] Mounted, activeTabId:', activeTabId)
+  }, [checkForUpdate])
 
   const handlePeerPress = (host: string) => {
-    openTab(host).then((tabId) => {
-      navigation.navigate('RepoTab', { tabId });
-    }).catch((err) => {
-      console.error('Failed to open tab:', err);
-    });
-  };
+    openTab(host)
+      .then((tabId) => navigation.navigate('RepoTab', { tabId }))
+      .catch((err) => console.error('Failed to open tab:', err))
+  }
 
   return (
-    <SafeAreaView className="flex-1 bg-surface">
+    <TSDiv tag="main" className="flex-1 bg-surface">
       <StatusBar barStyle="dark-content" />
-      <View className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
-        <Text className="text-lg font-bold flex-1 text-center">Relay Client</Text>
-        <TouchableOpacity className="p-2 ml-3" onPress={checkForUpdate}>
-          <Text className="text-lg">🔄</Text>
-        </TouchableOpacity>
-      </View>
+      <TSDiv tag="div" className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
+        <TSDiv tag="span" className="text-lg font-bold flex-1 text-center">
+          Relay Client
+        </TSDiv>
+        <TSDiv tag="button" className="p-2 ml-3" onPress={checkForUpdate}>
+          <TSDiv tag="span" className="text-lg">🔄</TSDiv>
+        </TSDiv>
+      </TSDiv>
       <TabBar navigation={navigation} />
-      <View className={isTablet ? 'flex-1 flex-row' : 'flex-1'}>
-        <View className={isTablet ? 'flex-1' : 'flex-1'} style={isTablet ? { borderRightWidth: 1, borderRightColor: '#eee' } : undefined}>
+      <TSDiv tag="div" className={isTablet ? 'flex-1 flex-row' : 'flex-1'}>
+        <TSDiv tag="div" className={isTablet ? 'flex-1' : 'flex-1'} style={isTablet ? { borderRightWidth: 1, borderRightColor: '#eee' } : undefined}>
           {isScreenFocused && (!activeTabId || activeTabId === homeTabId) ? (
             <PeersView onPeerPress={handlePeerPress} isActive={isScreenFocused} />
           ) : activeTabId === 'debug' ? (
@@ -139,105 +134,108 @@ const MainScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           ) : (
             <RepoTab tabId={activeTabId} />
           )}
-        </View>
-      </View>
-      <UpdateModal
-        visible={showUpdateModal}
-        onDismiss={() => setShowUpdateModal(false)}
-      />
-    </SafeAreaView>
-  );
-};
+        </TSDiv>
+      </TSDiv>
+      <UpdateModal visible={showUpdateModal} onDismiss={() => setShowUpdateModal(false)} />
+    </TSDiv>
+  )
+}
 
 const RepoTabScreen: React.FC<{ route: any; navigation: any }> = ({ route, navigation }) => {
-  const { tabId } = route.params;
+  const { tabId } = route.params
 
   return (
-    <SafeAreaView className="flex-1 bg-surface">
+    <TSDiv tag="main" className="flex-1 bg-surface">
       <StatusBar barStyle="dark-content" />
-      <View className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
-        <TouchableOpacity onPress={() => navigation.goBack()} className="p-1">
-          <Text className="text-primary text-base">← Peers</Text>
-        </TouchableOpacity>
-        <Text className="text-lg font-bold flex-1 text-center">Relay Client</Text>
-        <View style={{ width: 60 }} />
-      </View>
+      <TSDiv tag="div" className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
+        <TSDiv tag="button" onPress={() => navigation.goBack()} className="p-1">
+          <TSDiv tag="span" className="text-primary text-base">
+            ← Peers
+          </TSDiv>
+        </TSDiv>
+        <TSDiv tag="span" className="text-lg font-bold flex-1 text-center">
+          Relay Client
+        </TSDiv>
+        <TSDiv tag="div" style={{ width: 60 }} />
+      </TSDiv>
       <TabBar navigation={navigation} />
-      <View className="flex-1">
+      <TSDiv tag="div" className="flex-1">
         <RepoTab tabId={tabId} />
-      </View>
-    </SafeAreaView>
-  );
-};
+      </TSDiv>
+    </TSDiv>
+  )
+}
 
 const DebugScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   return (
-    <SafeAreaView className="flex-1 bg-surface">
+    <TSDiv tag="main" className="flex-1 bg-surface">
       <StatusBar barStyle="dark-content" />
-      <View className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
-        <TouchableOpacity onPress={() => navigation.goBack()} className="p-1">
-          <Text className="text-primary text-base">← Home</Text>
-        </TouchableOpacity>
-        <Text className="text-lg font-bold flex-1 text-center">Debug Tools</Text>
-        <View style={{ width: 60 }} />
-      </View>
+      <TSDiv tag="div" className="flex-row items-center justify-between p-3 border-b bg-surface" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
+        <TSDiv tag="button" onPress={() => navigation.goBack()} className="p-1">
+          <TSDiv tag="span" className="text-primary text-base">
+            ← Home
+          </TSDiv>
+        </TSDiv>
+        <TSDiv tag="span" className="text-lg font-bold flex-1 text-center">
+          Debug Tools
+        </TSDiv>
+        <TSDiv tag="div" style={{ width: 60 }} />
+      </TSDiv>
       <TabBar navigation={navigation} />
-      <View className="flex-1">
+      <TSDiv tag="div" className="flex-1">
         <DebugTab />
-      </View>
-    </SafeAreaView>
-  );
-};
+      </TSDiv>
+    </TSDiv>
+  )
+}
 
 type ErrorBoundaryProps = { children?: React.ReactNode }
 
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, { error: Error | null; info?: React.ErrorInfo | null }> {
   constructor(props: Record<string, never>) {
-    super(props);
-    this.state = { error: null, info: null };
+    super(props)
+    this.state = { error: null, info: null }
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-     
-    console.error('ErrorBoundary caught:', error, info.componentStack);
-    this.setState({ error, info });
+    console.error('ErrorBoundary caught:', error, info.componentStack)
+    this.setState({ error, info })
   }
 
   render() {
     if (this.state.error) {
-      const stack = this.state.info?.componentStack || this.state.error.stack || 'stack trace unavailable';
+      const stack = this.state.info?.componentStack || this.state.error.stack || 'stack trace unavailable'
       return (
-        <SafeAreaView style={{ flex: 1, padding: 16, backgroundColor: '#111' }}>
-          <View style={{ flex: 1, justifyContent: 'center' }}>
-            <Text style={{ color: '#f5f5f5', fontSize: 20, fontWeight: '700', marginBottom: 10 }}>
+        <TSDiv tag="main" style={{ flex: 1, padding: 16, backgroundColor: '#111' }}>
+          <TSDiv tag="div" style={{ flex: 1, justifyContent: 'center' }}>
+            <TSDiv tag="span" style={{ color: '#f5f5f5', fontSize: 20, fontWeight: '700', marginBottom: 10 }}>
               Rendering failure
-            </Text>
-            <Text style={{ color: '#dedede', fontSize: 16, marginBottom: 12 }}>
+            </TSDiv>
+            <TSDiv tag="span" style={{ color: '#dedede', fontSize: 16, marginBottom: 12 }}>
               We couldn’t render some UI. The log below shows what went wrong.
-            </Text>
-            <Text style={{ color: '#ff8c00', fontWeight: '600' }}>Error message</Text>
-            <Text style={{ color: '#fff', marginBottom: 12 }} selectable>
+            </TSDiv>
+            <TSDiv tag="span" style={{ color: '#ff8c00', fontWeight: '600' }}>Error message</TSDiv>
+            <TSDiv tag="span" style={{ color: '#fff', marginBottom: 12 }} selectable>
               {this.state.error.message}
-            </Text>
-            <Text style={{ color: '#ff8c00', fontWeight: '600' }}>Component stack</Text>
-            <ScrollView style={{ flex: 1, marginTop: 6, backgroundColor: '#222', borderRadius: 8, padding: 10 }} contentContainerStyle={{ flexGrow: 1 }}>
-              <Text style={{ color: '#d4d4d4', fontSize: 12, lineHeight: 20 }} selectable>
+            </TSDiv>
+            <TSDiv tag="span" style={{ color: '#ff8c00', fontWeight: '600' }}>Component stack</TSDiv>
+            <TSDiv tag="section" style={{ flex: 1, marginTop: 6, backgroundColor: '#222', borderRadius: 8, padding: 10 }} contentContainerStyle={{ flexGrow: 1 }}>
+              <TSDiv tag="span" style={{ color: '#d4d4d4', fontSize: 12, lineHeight: 20 }} selectable>
                 {stack}
-              </Text>
-            </ScrollView>
-            <Text style={{ color: '#9f9', fontSize: 13, marginTop: 10 }}>
+              </TSDiv>
+            </TSDiv>
+            <TSDiv tag="span" style={{ color: '#9f9', fontSize: 13, marginTop: 10 }}>
               Please capture your device logs and share them with the engineering team along with the actions you took before this screen appeared.
-            </Text>
-          </View>
-        </SafeAreaView>
-      );
+            </TSDiv>
+          </TSDiv>
+        </TSDiv>
+      )
     }
-    return this.props.children as React.ReactElement | null;
+    return this.props.children as React.ReactElement | null
   }
 }
 
 const App: React.FC = () => {
-  // Initialize native Rust hook transpiler bridge on app startup
   useEffect(() => {
     ; (async () => {
       try {
@@ -260,59 +258,52 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <NavigationContainer>
         <Stack.Navigator id="RootNavigator" screenOptions={{ headerShown: false }}>
-          <Stack.Screen
-            name="Main">
+          <Stack.Screen name="Main">
             {(props) => {
               try {
-                return <MainScreen {...props} />;
+                return <MainScreen {...props} />
               } catch (err) {
-                console.error('MainScreen render failed', err);
+                console.error('MainScreen render failed', err)
                 return (
-                  <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text>Main render error</Text>
-                  </SafeAreaView>
-                );
+                  <TSDiv tag="main" style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <TSDiv tag="span">Main render error</TSDiv>
+                  </TSDiv>
+                )
               }
             }}
           </Stack.Screen>
-          <Stack.Screen
-            name="Debug">
+
+          <Stack.Screen name="Debug">
             {(props) => {
               try {
-                return <DebugScreen {...props} />;
+                return <DebugScreen {...props} />
               } catch (err) {
-                 
-                console.error('DebugScreen render failed', err);
+                console.error('DebugScreen render failed', err)
                 return (
-                  <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text>Debug render error</Text>
-                  </SafeAreaView>
-                );
+                  <TSDiv tag="main" style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <TSDiv tag="span">Debug render error</TSDiv>
+                  </TSDiv>
+                )
               }
             }}
           </Stack.Screen>
-          <Stack.Screen
-            name="RepoTab">
+
+          <Stack.Screen name="RepoTab">
             {(props) => {
               try {
-                return <RepoTabScreen {...props} />;
+                return <RepoTabScreen {...props} />
               } catch (err) {
-                console.error('RepoTabScreen render failed', err);
+                console.error('RepoTabScreen render failed', err)
                 return (
-                  <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text>RepoTab render error</Text>
-                  </SafeAreaView>
-                );
+                  <TSDiv tag="main" style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <TSDiv tag="span">RepoTab render error</TSDiv>
+                  </TSDiv>
+                )
               }
             }}
           </Stack.Screen>
         </Stack.Navigator>
       </NavigationContainer>
     </ErrorBoundary>
-  );
-};
-
-// Styles converted to NativeWind classes where possible. Inline styles remain
-// for precise values not covered by the Tailwind scale (e.g., exact border colors, widths).
-
-export default App;
+  )
+}

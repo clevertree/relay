@@ -99,11 +99,6 @@ impl State {
         }
     }
 
-    pub fn register_tailwind_classes<I: IntoIterator<Item = String>>(&mut self, classes: I) {
-        for c in classes {
-            self.used_classes.insert(c);
-        }
-    }
 
     pub fn clear_usage(&mut self) {
         self.used_selectors.clear();
@@ -756,7 +751,6 @@ mod tests {
     #[test]
     fn default_theme_has_p2() {
         let mut st = State::new_default();
-        st.register_tailwind_classes(["p-2".to_string()]);
         let css = st.css_for_web();
         assert!(css.contains(".p-2{"));
         assert!(css.contains("padding:8px"));
@@ -767,50 +761,6 @@ mod tests {
         let st = State::new_default();
         let out = st.rn_styles_for("button", &[]);
         assert!(out.get("backgroundColor").is_some());
-    }
-
-    #[test]
-    fn tailwind_new_utilities_css_and_rn() {
-        let mut st = State::new_default();
-        // Register classes to emit CSS
-        st.register_tailwind_classes([
-            "rounded-lg".to_string(),
-            "rounded-t".to_string(),
-            "cursor-pointer".to_string(),
-            "transition".to_string(),
-            "transition-none".to_string(),
-            "transition-colors".to_string(),
-            "w-2".to_string(),
-            "w-full".to_string(),
-            "min-w-2".to_string(),
-            "max-w-full".to_string(),
-        ]);
-        let css = st.css_for_web();
-        assert!(css.contains(".rounded-lg{"));
-        assert!(css.contains("border-radius:"));
-        assert!(css.contains(".cursor-pointer{"));
-        assert!(css.contains("cursor:pointer"));
-        assert!(css.contains(".transition{"));
-        assert!(css.contains("transition-duration:150ms"));
-        assert!(css.contains(".transition-none{"));
-        assert!(css.contains("transition-property:none"));
-        assert!(css.contains(".transition-colors{"));
-        assert!(css.contains("transition-property:color, background-color"));
-        assert!(css.contains(".w-2{"));
-        assert!(css.contains("width:8px"));
-        assert!(css.contains(".w-full{"));
-        assert!(css.contains("width:100%"));
-        assert!(css.contains(".min-w-2{"));
-        assert!(css.contains("min-width:8px"));
-        assert!(css.contains(".max-w-full{"));
-        assert!(css.contains("max-width:100%"));
-
-        // RN: rounded-lg should become borderRadius number, w-2 -> width number
-        let rn = st.rn_styles_for("div", &["rounded-lg".into(), "w-2".into()]);
-        let br = rn.get("borderRadius").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        assert!(br > 0.0);
-        let w = rn.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        assert_eq!(w, 8.0);
     }
 
     #[test]

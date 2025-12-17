@@ -1,7 +1,7 @@
 /**
  * Simplified themed-styler DebugTab
  */
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ScrollView as ThemedScrollView,
   Text as ThemedText,
@@ -9,9 +9,49 @@ import {
   View as ThemedView,
   TextInput as ThemedTextInput,
 } from '../themedPrimitives'
+import { unifiedBridge } from '@relay/shared'
 import HookRenderer from './HookRenderer'
 import { useRNTranspilerSetting } from '../state/transpilerSettings'
 import { styled } from '../themedRuntime'
+
+type ThemesState = { themes?: Record<string, any>; currentTheme?: string } | null
+type UsageSnapshot = { selectors: string[]; classes: string[] }
+
+function buildFullState(usage: UsageSnapshot, themesState: ThemesState) {
+  const themesMap = themesState && typeof themesState.themes === 'object' ? themesState.themes : {}
+  const current = themesState && typeof themesState.currentTheme === 'string' ? themesState.currentTheme : null
+  const defaultTheme = current || Object.keys(themesMap)[0] || null
+  return {
+    themes: themesMap,
+    default_theme: defaultTheme,
+    current_theme: current,
+    variables: {},
+    breakpoints: {},
+    used_selectors: usage.selectors,
+    used_classes: usage.classes,
+  }
+}
+
+const JsonBlock: React.FC<{ label: string; value: unknown }> = ({ label, value }) => {
+  const text = useMemo(() => {
+    if (value === undefined) return 'undefined'
+    if (typeof value === 'string') return value.length ? value : '(empty string)'
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch (err) {
+      return String(err)
+    }
+  }, [value])
+
+  return (
+    <ThemedView className="rounded border border-slate-200 bg-slate-50/85 p-3" style={{ maxHeight: 220 }}>
+      <ThemedText className="text-[10px] uppercase tracking-[0.3em] text-slate-500 mb-2">{label}</ThemedText>
+      <ThemedText className="font-mono text-xs" style={{ lineHeight: 18 }} selectable>
+        {text}
+      </ThemedText>
+    </ThemedView>
+  )
+}
 
 const ThemedRuntimeTest: React.FC = () => (
   <ThemedView className="mb-3">
@@ -49,9 +89,63 @@ const DebugTab: React.FC = () => {
   const mode = useRNTranspilerSetting((s) => s.mode)
   const setMode = useRNTranspilerSetting((s) => s.setMode)
   const [host, setHost] = useState<string>('https://node-dfw1.relaynet.online')
+  const [usageSnapshot, setUsageSnapshot] = useState<UsageSnapshot>(() => unifiedBridge.getUsageSnapshot())
+  const [themesState, setThemesState] = useState<ThemesState>(() =>
+    typeof unifiedBridge.getThemes === 'function' ? unifiedBridge.getThemes() : null,
+  )
+  const [cssTrace, setCssTrace] = useState<string>('')
+
+  const refreshStats = useCallback(() => {
+    try {
+      setUsageSnapshot(unifiedBridge.getUsageSnapshot())
+    } catch (err) {
+      console.warn('[DebugTab] Failed to sample themed-styler usage', err)
+      setUsageSnapshot({ selectors: [], classes: [] })
+    }
+    try {
+      const themes = typeof unifiedBridge.getThemes === 'function' ? unifiedBridge.getThemes() : null
+      setThemesState(themes)
+    } catch (err) {
+      console.warn('[DebugTab] Failed to load themed-styler themes', err)
+      setThemesState(null)
+    }
+    try {
+      if (typeof unifiedBridge.getCssForWeb === 'function') {
+        const cssOutput = unifiedBridge.getCssForWeb()
+        setCssTrace(typeof cssOutput === 'string' ? cssOutput : JSON.stringify(cssOutput, null, 2))
+      } else {
+        setCssTrace('')
+      }
+    } catch (err) {
+      setCssTrace(String(err))
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshStats()
+  }, [refreshStats])
+
+  const fullState = useMemo(() => buildFullState(usageSnapshot, themesState), [usageSnapshot, themesState])
 
   return (
     <ThemedScrollView className="flex-1" style={{ backgroundColor: '#f5f5f5' }} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+      <ThemedView className="mb-6 bg-white rounded p-4" style={{ shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 }}>
+        <ThemedView className="flex-row items-center justify-between mb-3">
+          <ThemedText className="text-base font-bold" style={{ color: '#333' }}>
+            Themed-styler statistics
+          </ThemedText>
+          <ThemedTouchableOpacity className="px-3 py-1 rounded border border-primary" onPress={refreshStats}>
+            <ThemedText className="text-[11px] text-primary font-semibold">Refresh</ThemedText>
+          </ThemedTouchableOpacity>
+        </ThemedView>
+        <ThemedView className="space-y-3">
+          <JsonBlock label="Full state" value={fullState} />
+          <JsonBlock label="Usage snapshot" value={usageSnapshot} />
+          <JsonBlock label="Selectors processed" value={usageSnapshot.selectors} />
+          <JsonBlock label="Classes processed" value={usageSnapshot.classes} />
+          <JsonBlock label="CSS fallback" value={cssTrace} />
+        </ThemedView>
+      </ThemedView>
       {/* Settings: switch transpiler mode (client/server) */}
       <ThemedView className="mb-6 bg-white rounded p-4" style={{ shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 }}>
         <ThemedText className="text-base font-bold mb-3" style={{ color: '#333' }}>⚙️ Transpiler Settings</ThemedText>

@@ -13,7 +13,6 @@ const config = {
     "@storybook/addon-a11y"
   ],
   staticDirs: [
-    // Serve the template directory at the web root so /site/tailwind.css is available
     { from: "../template", to: "/" },
     // Serve story-specific mocks for the template repo
     { from: "../template/.storybook", to: "/.storybook" }

@@ -9,7 +9,7 @@ import { HookErrorBoundary } from './HookErrorBoundary'
 import MarkdownRenderer from './MarkdownRenderer'
 import { HookLoader, RNModuleLoader, transpileCode, type HookContext, ES6ImportHandler, buildPeerUrl } from '../../../shared/src'
 import { registerThemeStyles } from '../themedRuntime'
-import { ThemedElement, resolveThemedStyle } from './ThemedElement'
+import { ThemedElement, resolveThemedStyle } from './TSDiv'
 
 type OptionsInfo = {
   client?: { hooks?: { get?: { path: string }; query?: { path: string } } }
@@ -83,16 +83,12 @@ export const HookRenderer: React.FC<HookRendererProps> = ({ host, hookPath: hook
       jsxs: HookReact.createElement,
       jsxDEV: HookReact.createElement,
     }
-      const requireShim = (spec: string) => {
-        if (spec === 'react') return HookReact
-        if (spec === 'react/jsx-runtime' || spec === 'react/jsx-dev-runtime') return jsxRuntimeShim
-        // Map any styling runtime imports to our internal themed-styler runtime.
-        // We intentionally removed the nativewind shim and rely on our own implementation.
-        if (spec === 'nativewind' || spec.startsWith('nativewind/') || spec === 'tailwindRuntime' || spec === 'themedRuntime') {
-          return require('../themedRuntime')
-        }
-        return {}
-      }
+    const requireShim = (spec: string) => {
+      if (spec === 'react') return HookReact
+      if (spec === 'react/jsx-runtime' || spec === 'react/jsx-dev-runtime') return jsxRuntimeShim
+      // Map any styling runtime imports to our internal themed-styler runtime.
+      return {}
+    }
 
     const urlMatch = normalizedHost.match(/^(https?):\/\/(.+)$/)
     const protocol: 'https' | 'http' = (urlMatch ? urlMatch[1] : 'https') as 'https' | 'http'

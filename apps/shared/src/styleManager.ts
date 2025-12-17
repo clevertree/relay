@@ -2,12 +2,33 @@ import unifiedBridge from './unifiedBridge'
 import { useEffect } from 'react'
 
 let styleEl: HTMLStyleElement | null = null
-let syncInterval: number | null = null
+let syncInterval: any | null = null
 let lastSnapshotJson = ''
-let debounceTimer: number | null = null
+let debounceTimer: any | null = null
 let forceRenderNext = false
-const emitter = (typeof window !== 'undefined' ? new EventTarget() : null)
-const isDevMode = typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV
+function createEmitter() {
+  if (typeof window !== 'undefined' && typeof (globalThis as any).EventTarget !== 'undefined') {
+    return new (globalThis as any).EventTarget()
+  }
+  // minimal fallback emitter for non-browser environments (React Native)
+  const handlers: Array<(ev?: any) => void> = []
+  return {
+    addEventListener: (_: string, h: (ev?: any) => void) => { handlers.push(h) },
+    removeEventListener: (_: string, h: (ev?: any) => void) => { const i = handlers.indexOf(h); if (i >= 0) handlers.splice(i, 1) },
+    dispatchEvent: (ev?: any) => { handlers.slice().forEach(h => { try { h(ev) } catch (e) {} }); return true }
+  }
+}
+const emitter = createEmitter()
+const isDevMode = (() => {
+  try {
+    if (typeof (globalThis as any).__DEV__ !== 'undefined') return !!(globalThis as any).__DEV__
+  } catch (e) {}
+  try {
+    return (typeof process !== 'undefined' && (process.env && process.env.NODE_ENV === 'development')) || false
+  } catch (e) {
+    return false
+  }
+})()
 
 export function ensureStyleElement() {
   if (typeof document === 'undefined') return null
@@ -80,8 +101,8 @@ function checkAndRender() {
     lastSnapshotJson = j
     forceRenderNext = false
     // debounce actual DOM writes to avoid thrash
-    if (debounceTimer) window.clearTimeout(debounceTimer)
-    debounceTimer = window.setTimeout(() => {
+    if (debounceTimer) globalThis.clearTimeout(debounceTimer)
+    debounceTimer = globalThis.setTimeout(() => {
       try { renderCssIntoDom() } catch (e) {}
       debounceTimer = null
     }, 50)
@@ -91,20 +112,20 @@ function checkAndRender() {
 }
 
 export function startAutoSync(pollInterval = 250) {
-  if (typeof window === 'undefined') return
+  if (typeof globalThis === 'undefined') return
   stopAutoSync()
   // take initial snapshot
   try { lastSnapshotJson = JSON.stringify(unifiedBridge.getUsageSnapshot()) } catch (e) { lastSnapshotJson = '' }
-  syncInterval = window.setInterval(checkAndRender, pollInterval)
+  syncInterval = globalThis.setInterval(checkAndRender, pollInterval)
 }
 
 export function stopAutoSync() {
   if (syncInterval) {
-    window.clearInterval(syncInterval)
+    globalThis.clearInterval(syncInterval)
     syncInterval = null
   }
   if (debounceTimer) {
-    window.clearTimeout(debounceTimer)
+    globalThis.clearTimeout(debounceTimer)
     debounceTimer = null
   }
 }

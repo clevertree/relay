@@ -29,7 +29,6 @@ let mut st = State::new_default();
 
 // 2) Register what is currently used in your app
 st.register_selectors(["body".to_string(), "button".to_string()]);
-st.register_tailwind_classes(["p-2".to_string(), "hover:mx-1".to_string()]);
 
 // 3) Emit CSS for the web
 let css = st.css_for_web();
@@ -185,7 +184,7 @@ State can be serialized/deserialized for tooling. Internally the crate uses Serd
 
 ## Status & next steps
 
-- **Core theme storage & usage tracking:** `State` already captures selectors/styles per theme with `dark`/`light` defaults and allows `register_selectors`/`register_tailwind_classes`, but the runtime client/global-context wiring described in the requirements still needs the createElement wrapper/hooks to keep the state in sync with components that render and unmount.
+- **Core theme storage & usage tracking:** `State` already captures selectors/styles per theme with `dark`/`light` defaults and allows `register_selectors`, but the runtime client/global-context wiring described in the requirements still needs the createElement wrapper/hooks to keep the state in sync with components that render and unmount.
 - **Theme overrides, variables, and breakpoints:** CLI helpers (`add_theme`, `set_vars`, `set_bps`, `set_theme`) are in place, yet we still need a shared theme file that exposes the `default/dark/light` combinations and gives consumers a place to override selectors before the runtime or tooling reads them.
 - **Web CSS & RN output:** `css_for_web` and `rn_styles_for` (plus the CLI `style css`/`style rn` commands) already handle selected selectors and Tailwind utilities, but the RN conversion needs to be wired into the React Native runtime wrapper so selectors in the tree can query the instantiated styles directly.
 - **Runtime Tailwind support:** Tailwind utilities are theme-defined (no whitelist). The default YAML includes a minimal set (e.g., `.p-2`, `.hover\:mx-1:hover`) and apps can add more in their themes.
@@ -207,7 +206,7 @@ Notes about selectors and HTML tag usage
 Runtime integration (overview)
 - The next step is adding a small createElement wrapper / hooks in the template/client apps that:
   - preserve the original string tag used in JSX (e.g., `div`) so selectors like `div[type=primary]` or `div.myClass` can match in RN and web alike,
-  - call the runtime to `register_selectors`/`register_tailwind_classes` on mount and `unregister` on unmount (to keep `used_selectors` accurate), and
+  - call the runtime to `register_selectors` on mount and `unregister` on unmount (to keep `used_selectors` accurate), and
   - on the web, call the style manager to fetch `css_for_web()` and write it into a single global <style> tag when the used selectors/classes set changes.
 
 We'll implement these runtime helpers in `template-ui` as the next task and provide concrete JS/TS files and usage examples for both `client-web` and `client-react-native`.

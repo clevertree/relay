@@ -102,7 +102,7 @@ enum StyleCommands {
         /// Selectors (space-separated)
         selectors: Vec<String>,
     },
-    /// Register Tailwind classes that are currently in use
+    /// Register classes that are currently in use
     RegisterClasses {
         #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath)]
         file: Option<PathBuf>,
@@ -127,7 +127,7 @@ enum StyleCommands {
         file: Option<PathBuf>,
         /// The base selector (e.g., 'button' or 'View[type=primary]')
         selector: String,
-        /// Tailwind classes (space-separated)
+        /// Css classes (space-separated)
         classes: Vec<String>,
     },
 }

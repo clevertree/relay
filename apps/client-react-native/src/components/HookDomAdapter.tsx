@@ -6,7 +6,8 @@ import type {
   TextInputProps,
   TextProps,
   TouchableOpacityProps,
-  ViewProps} from 'react-native';
+  ViewProps
+} from 'react-native';
 import {
   Image,
   Text,
@@ -15,7 +16,7 @@ import {
   View
 } from 'react-native'
 import VideoPlayer from './VideoPlayer'
-import { ThemedElement, resolveThemedStyle } from './ThemedElement'
+import { ThemedElement, resolveThemedStyle } from './TSDiv'
 import { unifiedBridge } from '@relay/shared'
 
 type WithClassName<P> = P & { className?: string }

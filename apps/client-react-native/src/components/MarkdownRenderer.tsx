@@ -1,7 +1,7 @@
 import React from 'react';
-import type { ViewProps, TextProps} from 'react-native';
+import type { ViewProps, TextProps } from 'react-native';
 import { Text, View, Image, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
-import { ThemedElement, resolveThemedStyle } from './ThemedElement';
+import { ThemedElement, resolveThemedStyle } from './TSDiv';
 import { TSDiv } from './TSDiv'
 // @ts-ignore - markdown-to-jsx types not available
 import Markdown from 'markdown-to-jsx';
