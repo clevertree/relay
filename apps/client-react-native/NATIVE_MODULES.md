@@ -43,7 +43,7 @@ Bridge initializers register global hooks:
 
 ### iOS Layer
 
-**Swift Modules** (call Rust via C FFI):
+**Swift Modules** (call Rust via C FFI, codegen-wired for TurboModules via `FBReactNativeSpec`):
 - `ios/RustTranspiler.swift` + `ios/RustTranspiler.m`
 - `ios/ThemedStyler.swift` + `ios/ThemedStyler.m`
 

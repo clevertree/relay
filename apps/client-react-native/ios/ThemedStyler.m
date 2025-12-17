@@ -1,6 +1,11 @@
 #import <React/RCTBridgeModule.h>
+#if __has_include("FBReactNativeSpec/FBReactNativeSpec.h")
+#import "FBReactNativeSpec/FBReactNativeSpec.h"
+#else
+#import <FBReactNativeSpec/FBReactNativeSpec.h>
+#endif
 
-@interface RCT_EXTERN_MODULE(ThemedStyler, NSObject)
+@interface RCT_EXTERN_REMAP_MODULE(ThemedStyler, ThemedStyler, NSObject<NativeThemedStylerSpec>)
 
 RCT_EXTERN__BLOCKING_SYNCHRONOUS_METHOD(renderCss:(NSString *)usageJson themesJson:(NSString *)themesJson)
 
