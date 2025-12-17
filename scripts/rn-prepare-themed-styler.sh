@@ -29,7 +29,7 @@ NDK_ARGS=()
 for target in "${TARGETS[@]}"; do
   NDK_ARGS+=("-t" "$target")
 done
-NDK_ARGS+=(build --release)
+NDK_ARGS+=(build --release --features android)
 
 cargo ndk "${NDK_ARGS[@]}"
 popd >/dev/null

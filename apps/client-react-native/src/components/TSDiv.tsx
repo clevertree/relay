@@ -65,9 +65,10 @@ export function resolveThemedStyle(tag: string, className?: string) {
 }
 
 const overflowClassRegex = /\boverflow(?:-[xy])?-[a-z0-9-]+\b/i
+const buttonComponent = TouchableOpacity ?? View
 const tagComponentMap: Record<string, React.ComponentType<any>> = {
     span: Text,
-    button: TouchableOpacity,
+    button: buttonComponent,
     main: SafeAreaView,
     'safe-area': SafeAreaView,
     'safe-area-view': SafeAreaView,

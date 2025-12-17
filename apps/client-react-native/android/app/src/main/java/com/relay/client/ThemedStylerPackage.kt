@@ -7,11 +7,11 @@ import com.facebook.react.module.model.ReactModuleInfo
 import com.facebook.react.module.model.ReactModuleInfoProvider
 import com.facebook.react.turbomodule.core.interfaces.TurboModule
 
-class RustTranspilerPackage : TurboReactPackage() {
+class ThemedStylerPackage : TurboReactPackage() {
 
   override fun getModule(name: String, reactContext: ReactApplicationContext): NativeModule? {
-    return if (name == RustTranspilerModule.NAME) {
-      RustTranspilerModule(reactContext)
+    return if (name == ThemedStylerModule.NAME) {
+      ThemedStylerModule(reactContext)
     } else {
       null
     }
@@ -20,9 +20,9 @@ class RustTranspilerPackage : TurboReactPackage() {
   override fun getReactModuleInfoProvider(): ReactModuleInfoProvider {
     return ReactModuleInfoProvider {
       mapOf(
-        RustTranspilerModule.NAME to ReactModuleInfo(
-          RustTranspilerModule.NAME,
-          RustTranspilerModule::class.java.name,
+        ThemedStylerModule.NAME to ReactModuleInfo(
+          ThemedStylerModule.NAME,
+          ThemedStylerModule::class.java.name,
           false, // canOverrideExistingModule
           false, // needsEagerInit
           false, // isCxxModule

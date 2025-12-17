@@ -29,9 +29,10 @@ npm run rn:start
 # Build + install (requires adb)
 npm run rn:build:release
 
-# Alternatively:
-npm run rn:android:assembleRelease
-npm run rn:android:installRelease
+# Alternatively (manual):
+cd apps/client-react-native/android
+./gradlew assembleRelease
+./gradlew installRelease
 ```
 
 If installation fails due to signing, configure signing in `apps/client-react-native/android/app/build.gradle` and re-run the install command.

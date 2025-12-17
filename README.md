@@ -337,9 +337,10 @@ npm run rn:start
 # 2) Build and install the release APK to a connected device (requires adb)
 npm run rn:build:release
 
-# Alternatively, run steps manually:
-npm run rn:android:assembleRelease
-npm run rn:android:installRelease
+# Alternatively, run steps manually (inside the RN app):
+cd apps/client-react-native/android
+./gradlew assembleRelease
+./gradlew installRelease
 ```
 
 Notes:

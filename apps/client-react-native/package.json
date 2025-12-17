@@ -9,11 +9,6 @@
   "scripts": {
     "start": "react-native start",
     "android": "react-native run-android",
-    "android:assembleDebug": "cd android && ./gradlew assembleDebug",
-    "android:installDebug": "cd android && ./gradlew installDebug",
-    "android:assembleRelease": "cd android && ./gradlew assembleRelease",
-    "android:installRelease": "cd android && ./gradlew installRelease",
-    "android:release": "npm run android:assembleRelease && npm run android:installRelease",
     "ios": "react-native run-ios",
     "typecheck": "tsc --noEmit",
     "test": "jest"
@@ -52,6 +47,14 @@
     "postcss": "^8.4.49",
     "css-to-react-native": "^3.2.0",
     "typescript": "5.6.3"
+  },
+  "codegenConfig": {
+    "name": "RelayNativeSpecs",
+    "type": "modules",
+    "jsSrcsDir": "src/specs",
+    "android": {
+      "javaPackageName": "com.relay.client.specs"
+    }
   },
   "jest": {
     "preset": "react-native",

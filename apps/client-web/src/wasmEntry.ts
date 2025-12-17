@@ -22,8 +22,8 @@ export async function initAllClientWasms(): Promise<void> {
         // some builds may already auto-init; ignore
       }
       if (typeof (hookMod as any).transpile_jsx === 'function') {
-        ;(globalThis as any).__hook_transpile_jsx = (hookMod as any).transpile_jsx.bind(hookMod)
-        ;(globalThis as any).__hook_transpiler_version = (typeof (hookMod as any).get_version === 'function') ? (hookMod as any).get_version() : 'unknown'
+        ; (globalThis as any).__hook_transpile_jsx = (hookMod as any).transpile_jsx.bind(hookMod)
+          ; (globalThis as any).__hook_transpiler_version = (typeof (hookMod as any).get_version === 'function') ? (hookMod as any).get_version() : 'unknown'
       }
     }
   } catch (e) {
@@ -41,9 +41,9 @@ export async function initAllClientWasms(): Promise<void> {
       try {
         // Prefer bundler-resolved asset URL (Vite) which points into src/wasm
         // and is the canonical location for wasm-bindgen outputs.
-  // @ts-ignore
-  const mod = await import('./wasm/themed_styler_bg.wasm?url')
-  stylerWasmUrl = String(mod && (mod as any).default ? (mod as any).default : mod)
+        // @ts-ignore
+        const mod = await import('./wasm/themed_styler_bg.wasm?url')
+        stylerWasmUrl = String(mod && (mod as any).default ? (mod as any).default : mod)
       } catch (e) {
         // bundler import failed; fall back to manifest (if present in src/wasm)
         try {
@@ -77,7 +77,7 @@ export async function initAllClientWasms(): Promise<void> {
       }
 
       if (typeof renderCss === 'function') {
-        ;(globalThis as any).__themedStylerRenderCss = (usageSnapshot: any, themes: any) => {
+        ; (globalThis as any).__themedStylerRenderCss = (usageSnapshot: any, themes: any) => {
           try {
             const themeMap = themes?.themes || {}
             const currentTheme = themes?.currentTheme
@@ -97,10 +97,17 @@ export async function initAllClientWasms(): Promise<void> {
       }
 
       if (typeof getRn === 'function') {
-        ;(globalThis as any).__themedStylerGetRn = (selector: string, classes: string[]) => {
+        ; (globalThis as any).__themedStylerGetRn = (selector: string, classes: string[], themesState?: any) => {
           try {
             const classesJson = JSON.stringify(classes || [])
-            const stateJson = JSON.stringify({})
+            const themeMap = (themesState && themesState.themes) || {}
+            const currentTheme = themesState?.currentTheme || null
+            const defaultTheme = currentTheme || Object.keys(themeMap)[0] || 'default'
+            const stateJson = JSON.stringify({
+              themes: themeMap,
+              current_theme: currentTheme || defaultTheme,
+              default_theme: defaultTheme,
+            })
             return JSON.parse(String(getRn(stateJson, selector, classesJson)))
           } catch (e) {
             return {}
@@ -143,7 +150,7 @@ export async function forceInitThemedStylerFromManifest(): Promise<string | null
     if (styler && typeof (styler as any).get_version === 'function') {
       try {
         const v = (styler as any).get_version()
-        ;(globalThis as any).__themedStyler_version = v
+          ; (globalThis as any).__themedStyler_version = v
         return v
       } catch (e) {
         // fall-through
@@ -151,7 +158,7 @@ export async function forceInitThemedStylerFromManifest(): Promise<string | null
     }
     // fallback: manifest may include version
     if (m.version && typeof m.version === 'string') {
-      ;(globalThis as any).__themedStyler_version = m.version
+      ; (globalThis as any).__themedStyler_version = m.version
       return m.version
     }
     return null

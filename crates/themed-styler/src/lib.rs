@@ -286,6 +286,11 @@ pub fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+// Plain Rust accessor for crate version used by Android JNI glue
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 /// Return the embedded default state as a JSON string.
 #[wasm_bindgen]
 pub fn get_default_state_json() -> String {
@@ -804,3 +809,9 @@ mod tests {
         assert_eq!(rn.get("display").and_then(|v| v.as_str()), Some("flex"));
     }
 }
+
+#[cfg(all(target_os = "android", feature = "android"))]
+mod android_jni;
+
+#[cfg(target_vendor = "apple")]
+mod ios_ffi;

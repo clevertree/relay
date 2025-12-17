@@ -5,15 +5,18 @@ import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.module.model.ReactModuleInfo
 import com.facebook.react.module.model.ReactModuleInfoProvider
-import com.facebook.react.turbomodule.core.interfaces.TurboModule
 
-class RustTranspilerPackage : TurboReactPackage() {
+/**
+ * Combined TurboReactPackage for all Relay native modules.
+ * Registers both RustTranspiler and ThemedStyler TurboModules.
+ */
+class RelayTurboModulePackage : TurboReactPackage() {
 
   override fun getModule(name: String, reactContext: ReactApplicationContext): NativeModule? {
-    return if (name == RustTranspilerModule.NAME) {
-      RustTranspilerModule(reactContext)
-    } else {
-      null
+    return when (name) {
+      RustTranspilerModule.NAME -> RustTranspilerModule(reactContext)
+      ThemedStylerModule.NAME -> ThemedStylerModule(reactContext)
+      else -> null
     }
   }
 
@@ -23,6 +26,14 @@ class RustTranspilerPackage : TurboReactPackage() {
         RustTranspilerModule.NAME to ReactModuleInfo(
           RustTranspilerModule.NAME,
           RustTranspilerModule::class.java.name,
+          false, // canOverrideExistingModule
+          false, // needsEagerInit
+          false, // isCxxModule
+          true   // isTurboModule
+        ),
+        ThemedStylerModule.NAME to ReactModuleInfo(
+          ThemedStylerModule.NAME,
+          ThemedStylerModule::class.java.name,
           false, // canOverrideExistingModule
           false, // needsEagerInit
           false, // isCxxModule

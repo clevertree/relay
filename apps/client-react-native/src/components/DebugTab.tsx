@@ -9,13 +9,15 @@ import {
   View as ThemedView,
   TextInput as ThemedTextInput,
 } from '../themedPrimitives'
-import { unifiedBridge } from '@relay/shared'
+import { unifiedBridge, ensureDefaultsLoaded } from '@relay/shared'
 import HookRenderer from './HookRenderer'
 import { useRNTranspilerSetting } from '../state/transpilerSettings'
 import { styled } from '../themedRuntime'
 
 type ThemesState = { themes?: Record<string, any>; currentTheme?: string } | null
 type UsageSnapshot = { selectors: string[]; classes: string[] }
+const themedStylerCrateVersion = '0.1.4'
+const getGlobalRuntimeVersion = () => (typeof globalThis !== 'undefined' ? String((globalThis as any).__themedStyler_version ?? 'unavailable') : 'unavailable')
 
 function buildFullState(usage: UsageSnapshot, themesState: ThemesState) {
   const themesMap = themesState && typeof themesState.themes === 'object' ? themesState.themes : {}
@@ -122,13 +124,39 @@ const DebugTab: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    refreshStats()
+    let mounted = true
+    ;(async () => {
+      try {
+        await ensureDefaultsLoaded()
+      } catch (err) {
+        console.warn('[DebugTab] Failed to load themed-styler defaults', err)
+      }
+      if (mounted) {
+        refreshStats()
+      }
+    })()
+    return () => {
+      mounted = false
+    }
   }, [refreshStats])
 
+  const runtimeVersion = useMemo(() => getGlobalRuntimeVersion(), [])
   const fullState = useMemo(() => buildFullState(usageSnapshot, themesState), [usageSnapshot, themesState])
 
   return (
     <ThemedScrollView className="flex-1" style={{ backgroundColor: '#f5f5f5' }} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+      <ThemedView className="mb-4 bg-white rounded px-4 py-3 border border-slate-200" style={{ shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 1.5, shadowOffset: { width: 0, height: 1 }, elevation: 1 }}>
+        <ThemedText className="text-xs uppercase tracking-[0.4em] text-slate-400 mb-1">themed-styler crate</ThemedText>
+        <ThemedView className="flex-row items-center justify-between">
+          <ThemedText className="text-base font-semibold" style={{ color: '#111' }}>
+            v{themedStylerCrateVersion}
+          </ThemedText>
+          <ThemedText className="text-[11px] font-mono text-slate-500">
+            runtime:{' '}
+            {runtimeVersion}
+          </ThemedText>
+        </ThemedView>
+      </ThemedView>
       <ThemedView className="mb-6 bg-white rounded p-4" style={{ shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 }}>
         <ThemedView className="flex-row items-center justify-between mb-3">
           <ThemedText className="text-base font-bold" style={{ color: '#333' }}>

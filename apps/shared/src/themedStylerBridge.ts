@@ -132,24 +132,24 @@ export function getCssForWeb(): string {
   // If platform provides a hook, call it
   const g: any = typeof globalThis !== 'undefined' ? (globalThis as any) : {}
   if (typeof g.__themedStylerRenderCss === 'function') {
-    try { return g.__themedStylerRenderCss(getUsageSnapshot(), getThemes()) } catch (e) {}
+    try { return g.__themedStylerRenderCss(getUsageSnapshot(), getThemes()) } catch (e) { }
   }
   // If running under Node, attempt to call the hook-transpiler CLI to compute CSS
   if ((globalThis as any) && (globalThis as any).process && (globalThis as any).process.versions && (globalThis as any).process.versions.node) {
     try {
       // Use temp file for state JSON
-  const _req: any = (globalThis as any).require ? (globalThis as any).require : (eval('require') as any)
-  const fs = _req('fs')
-  const os = _req('os')
-  const cp = _req('child_process')
-  const path = _req('path')
+      const _req: any = (globalThis as any).require ? (globalThis as any).require : (eval('require') as any)
+      const fs = _req('fs')
+      const os = _req('os')
+      const cp = _req('child_process')
+      const path = _req('path')
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'themed-styler-'))
       const statePath = path.join(tmp, 'state.json')
       fs.writeFileSync(statePath, JSON.stringify({ themes: getThemes().themes, default_theme: getThemes().currentTheme, current_theme: getThemes().currentTheme, variables: {}, breakpoints: {}, used_selectors: getUsageSnapshot().selectors, used_classes: getUsageSnapshot().classes }, null, 2))
       // Run cargo run -p hook-transpiler -- style css --file <statePath>
       const repoRoot = path.resolve(((globalThis as any).process && (globalThis as any).process.cwd && (globalThis as any).process.cwd()) || '.')
       const out = cp.execFileSync('cargo', ['run', '--silent', '-p', 'hook-transpiler', '--', 'style', 'css', '--file', statePath], { cwd: repoRoot, encoding: 'utf8' })
-      try { fs.rmSync(tmp, { recursive: true, force: true }) } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }) } catch (e) { }
       return String(out || '')
     } catch (e) {
       // swallow and fallback to placeholder
@@ -166,7 +166,8 @@ export function getRnStyles(selector: string, classes: string[] = []) {
   // Attempt to call a provided hook if present
   const g: any = typeof globalThis !== 'undefined' ? (globalThis as any) : {}
   if (typeof g.__themedStylerGetRn === 'function') {
-    try { return g.__themedStylerGetRn(selector, classes) } catch (e) {}
+    const themesState = getThemes()
+    try { return g.__themedStylerGetRn(selector, classes, themesState) } catch (e) { }
   }
   return {}
 }

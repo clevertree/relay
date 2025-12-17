@@ -157,7 +157,7 @@ Verify:
 ```json
 {
   "rn:android": "react-native run-android",           // Debug build to emulator
-  "rn:android:release": "cd android && gradlew.bat installRelease" // Release APK
+  "rn:build:release": "bash ./scripts/rn-build-release.sh" // Release APK
 }
 ```
 

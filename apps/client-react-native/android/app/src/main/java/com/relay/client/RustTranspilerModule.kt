@@ -2,14 +2,16 @@ package com.relay.client
 
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.module.annotations.ReactModule
+import com.facebook.react.turbomodule.core.interfaces.TurboModule
+import com.relay.client.specs.NativeHookTranspilerSpec
 
 @ReactModule(name = "RustTranspiler")
-class RustTranspilerModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+class RustTranspilerModule(reactContext: ReactApplicationContext) : NativeHookTranspilerSpec(reactContext), TurboModule {
 
   companion object {
+    const val NAME = "RustTranspiler"
     private var nativeLoaded = false
 
     init {
@@ -27,10 +29,9 @@ class RustTranspilerModule(reactContext: ReactApplicationContext) : ReactContext
     }
   }
 
-  override fun getName(): String = "RustTranspiler"
+  override fun getName(): String = NAME
 
-  @ReactMethod
-  fun transpile(code: String, filename: String, promise: Promise) {
+  override fun transpile(code: String, filename: String, promise: Promise) {
     if (!nativeLoaded) {
       promise.reject("UNAVAILABLE", "Native Rust transpiler library not loaded")
       return
@@ -43,21 +44,18 @@ class RustTranspilerModule(reactContext: ReactApplicationContext) : ReactContext
     }
   }
 
-  @ReactMethod
-  fun getVersion(promise: Promise) {
+  override fun getVersion(): String {
     if (!nativeLoaded) {
-      promise.resolve("native-unavailable")
-      return
+      return "native-unavailable"
     }
-    try {
-      promise.resolve(nativeGetVersion())
+    return try {
+      nativeGetVersion()
     } catch (err: Throwable) {
-      promise.reject("VERSION_ERROR", err.message, err)
+      "unknown"
     }
   }
 
-  @ReactMethod
-  fun initialize(promise: Promise) {
+  override fun initialize(promise: Promise) {
     promise.resolve(nativeLoaded)
   }
 

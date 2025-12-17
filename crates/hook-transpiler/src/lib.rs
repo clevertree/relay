@@ -261,6 +261,9 @@ pub fn version() -> &'static str {
 #[cfg(all(target_os = "android", feature = "android"))]
 mod android_jni;
 
+#[cfg(target_vendor = "apple")]
+mod ios_ffi;
+
 // WASM bindings to use in client-web (feature = "wasm")
 #[cfg(feature = "wasm")]
 mod wasm_api {

@@ -10,6 +10,7 @@ import { useAppState } from './state/store'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import { UpdateModal } from './components/UpdateModal'
 import { initNativeRustTranspiler } from './nativeRustTranspiler'
+import { initNativeThemedStyler } from './nativeThemedStyler'
 
 type RootStackParamList = {
   Main: undefined
@@ -37,7 +38,7 @@ const TabBar: React.FC<{ navigation: any }> = ({ navigation }) => {
   }
 
   return (
-    <TSDiv tag="div" className="bg-surface-secondary border-b" style={{ borderBottomColor: '#eee', borderBottomWidth: 1 }}>
+    <TSDiv tag="div" className="p-4 border-b">
       <TSDiv tag="section" horizontal showsHorizontalScrollIndicator={false}>
         {allTabs.map((tab) => (
           <TSDiv key={tab.id} tag="div" className="flex-row items-center">
@@ -245,6 +246,13 @@ const App: React.FC = () => {
       } catch (e) {
         console.error('[App] Failed to initialize native hook-transpiler bridge:', e)
       }
+      try {
+        console.log('[App] Initializing native themed-styler bridge...')
+        await initNativeThemedStyler()
+        console.log('[App] Native themed-styler bridge initialized')
+      } catch (err) {
+        console.error('[App] Failed to initialize native themed-styler bridge:', err)
+      }
     })()
   }, [])
 
@@ -307,3 +315,5 @@ const App: React.FC = () => {
     </ErrorBoundary>
   )
 }
+
+export default App

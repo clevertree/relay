@@ -12,7 +12,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.soloader.SoLoader
 import com.relay.client.RelayCorePackage
 import com.relay.client.APKInstallerPackage
-import com.relay.client.RustTranspilerPackage
+import com.relay.client.RelayTurboModulePackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -21,12 +21,15 @@ class MainApplication : Application(), ReactApplication {
         override fun getPackages(): List<ReactPackage> =
             PackageList(this).packages.apply {
               // Add our custom RelayCorePackage
-              add(RelayCorePackage())
-              // Add native Rust transpiler bridge
-              add(RustTranspilerPackage())
-              // Add APKInstallerPackage for OTA updates
-              add(APKInstallerPackage())
+                add(RelayCorePackage())
+                // Add combined Relay TurboModule package (transpiler + themed-styler)
+                add(RelayTurboModulePackage())
+                // Add APKInstallerPackage for OTA updates
+                add(APKInstallerPackage())
             }
+
+        // Use default TurboModuleManagerDelegate builder provided by React Native defaults.
+        // Our TurboReactPackages are included via getPackages() above.
 
         override fun getJSMainModuleName(): String = "index"
 
