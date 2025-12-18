@@ -1,3 +1,12 @@
 [submodule "template"]
 	path = template
 	url = git@github.com:/clevertree/relay-template
+[submodule "clients"]
+	path = clients
+	url = git@github.com:/clevertree/relay-clients
+[submodule "hook-transpiler"]
+	path = hook-transpiler
+	url = git@github.com:/clevertree/hook-transpiler
+[submodule "themed-styler"]
+	path = themed-styler
+	url = git@github.com:/clevertree/themed-styler
