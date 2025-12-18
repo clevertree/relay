@@ -84,7 +84,7 @@ Notes:
 
 - The default state is defined in YAML and bundled with the crate: crates/themed-styler/theme.yaml.
 - Each theme entry contains selectors, variables, and breakpoints, plus an optional inherits pointing to a parent theme.
-- Inheritance merges child → parent(s) → default, with parent overriding child on conflicts. This means default can define the canonical utility classes and common selectors, while other themes only specify overrides.
+- Inheritance merges default → parent(s) → child, with the child overriding parent/default on conflicts. This lets the default define canonical utility classes and common selectors, while other themes only specify overrides.
 
 Example (YAML):
 
@@ -114,7 +114,7 @@ On load and theme switch, themed-styler computes effective selectors, variables,
 ### Variables and breakpoints (per-theme)
 
 - Variables and breakpoints live inside each theme under variables and breakpoints.
-- Resolution order for variables: legacy global variables (lowest) → current theme variables → parents (via inherits) → default theme variables (highest). Breakpoints follow the same order.
+- Resolution order for variables: legacy global variables (lowest) → default theme variables → parent theme variables (via inherits chain) → current theme variables (highest). Breakpoints follow the same order.
 - React Native output resolves var tokens too. Supported syntaxes: var(--name), var(name), and $name.
 
 Example YAML (variables and breakpoints):

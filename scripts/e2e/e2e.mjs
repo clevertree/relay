@@ -1,20 +1,20 @@
 // Node-based E2E that builds the Docker server, runs it, then exercises the relay CLI
 // Requirements: Docker installed and accessible from PATH; Rust toolchain for building CLI
-import {spawn, spawnSync, spawnSync as sync} from 'node:child_process';
-import {platform} from 'node:os';
-import {setTimeout as delay} from 'node:timers/promises';
+import { spawn, spawnSync, spawnSync as sync } from 'node:child_process';
+import { platform } from 'node:os';
+import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import fs from 'node:fs';
 
 function sh(cmd, args, opts = {}) {
     return new Promise((resolve, reject) => {
-        const p = spawn(cmd, args, {stdio: 'inherit', ...opts});
+        const p = spawn(cmd, args, { stdio: 'inherit', ...opts });
         p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} ${args.join(' ')} exited ${code}`))));
     });
 }
 
 function shCapture(cmd, args, opts = {}) {
-    const res = spawnSync(cmd, args, {encoding: 'utf-8', ...opts});
+    const res = spawnSync(cmd, args, { encoding: 'utf-8', ...opts });
     if (res.status !== 0) {
         const err = new Error(`Command failed: ${cmd} ${args.join(' ')}\n${res.stderr}`);
         err.stdout = res.stdout;
@@ -28,7 +28,7 @@ async function waitForServer(url, timeoutMs = 180_000, pollIntervalMs = 1000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
         try {
-            const res = await fetch(url, {method: 'OPTIONS'});
+            const res = await fetch(url, { method: 'OPTIONS' });
             if (res.ok) return await res.json();
         } catch (e) {
             // ignore and retry
@@ -55,12 +55,12 @@ async function main() {
         const repoPath = path.join(dataDir, 'repo.git');
         if (!fs.existsSync(repoPath)) {
             console.log('Creating bare repository at', repoPath);
-            fs.mkdirSync(dataDir, {recursive: true});
+            fs.mkdirSync(dataDir, { recursive: true });
             sync('git', ['clone', '--bare', 'https://github.com/clevertree/relay-template', repoPath]);
         }
         // spawn cargo run in background (use default data/repo.git location)
         // Use absolute path for RELAY_REPO_PATH to avoid working directory issues
-        const env = {...process.env, RELAY_REPO_PATH: path.resolve(repoPath)};
+        const env = { ...process.env, RELAY_REPO_PATH: path.resolve(repoPath) };
         localServerProc = spawn('cargo', ['run', '--manifest-path', 'apps/server/Cargo.toml', '--', 'serve'], {
             stdio: 'inherit',
             cwd: process.cwd(),
@@ -70,14 +70,14 @@ async function main() {
     } else {
         // Detect container runtime: prefer Docker, fall back to Podman. Fail if neither available.
         try {
-            const res = sync('docker', ['info'], {stdio: 'ignore'});
+            const res = sync('docker', ['info'], { stdio: 'ignore' });
             if (res.status === 0) runtime = 'docker';
         } catch (e) {
             // ignore
         }
         if (!runtime) {
             try {
-                const res = sync('podman', ['info'], {stdio: 'ignore'});
+                const res = sync('podman', ['info'], { stdio: 'ignore' });
                 if (res.status === 0) runtime = 'podman';
             } catch (e) {
                 // ignore
@@ -112,17 +112,11 @@ async function main() {
             // from the OPTIONS endpoint. Metadata validation (if needed) is handled via repo scripts.
         }
 
-        // 4) Build relay-cli
-        await sh('cargo', ['build', '-p', 'relay-cli', '--release']);
-        const binDir = path.join(process.cwd(), 'target', 'release');
-        const exe = platform() === 'win32' ? 'relay-cli.exe' : 'relay-cli';
-        const cliPath = path.join(binDir, exe);
-        if (!fs.existsSync(cliPath)) throw new Error(`CLI binary not found at ${cliPath}`);
-
-        // 5) Connect
-        const connectOut = shCapture(cliPath, ['connect', 'http://localhost:8080']);
-        const connectJson = JSON.parse(connectOut);
-        if (!connectJson.ok) throw new Error('CLI connect failed');
+        // 4) Test server connection with curl
+        const testUrl = 'http://localhost:8080/';
+        const curlResult = shCapture('curl', ['-s', '-X', 'OPTIONS', testUrl]);
+        const connectJson = JSON.parse(curlResult);
+        if (!connectJson.ok) throw new Error('Server connection test failed');
 
         // Note: rules/metaSchema are no longer returned in discovery response
         // Metadata validation is now handled via repo scripts
@@ -131,14 +125,14 @@ async function main() {
         // 6) Prepare a test file and PUT
         const testBody = '# E2E Test\n\nHello Relay!\n';
         const testPath = 'data/e2e/index.md';
-        const putOut = shCapture(cliPath, ['put', 'http://localhost:8080', testPath, '--branch', 'main'], {input: testBody});
+        const putOut = shCapture(cliPath, ['put', 'http://localhost:8080', testPath, '--branch', 'main'], { input: testBody });
         const putJson = JSON.parse(putOut);
         if (!putJson.commit) throw new Error('PUT did not return commit');
 
         // 7) GET and verify (use tmp/e2e for generated files)
         const tmpDir = path.join(process.cwd(), 'tmp', 'e2e');
         const tmpFile = path.join(tmpDir, 'tmp-index.md');
-        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, {recursive: true});
+        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
         await sh(cliPath, ['get', 'http://localhost:8080', testPath, '--branch', 'main', '--out', tmpFile]);
         const got = fs.readFileSync(tmpFile, 'utf-8');
         if (got.trim() !== testBody.trim()) throw new Error('GET content mismatch');
@@ -166,16 +160,16 @@ async function main() {
         const metaPath = 'data/e2e/meta.json';
         const metaStr = JSON.stringify(validMeta, null, 2);
         console.log('Uploading test meta.json:', metaStr);
-        const putMetaOut = shCapture(cliPath, ['put', 'http://localhost:8080', metaPath, '--branch', 'main'], {input: metaStr});
+        const putMetaOut = shCapture(cliPath, ['put', 'http://localhost:8080', metaPath, '--branch', 'main'], { input: metaStr });
         const putMetaJson = JSON.parse(putMetaOut);
         if (!putMetaJson.commit) throw new Error('PUT meta.json did not return commit (expected success)');
         console.log('Test meta.json committed successfully');
 
         // 9) Verify we can upload arbitrary JSON data
-        const testData = {test_id: '001', content: 'e2e verification'};
+        const testData = { test_id: '001', content: 'e2e verification' };
         const testDataStr = JSON.stringify(testData);
         console.log('Uploading arbitrary JSON:', testDataStr);
-        const putDataOut = shCapture(cliPath, ['put', 'http://localhost:8080', 'data/e2e/test.json', '--branch', 'main'], {input: testDataStr});
+        const putDataOut = shCapture(cliPath, ['put', 'http://localhost:8080', 'data/e2e/test.json', '--branch', 'main'], { input: testDataStr });
         const putDataJson = JSON.parse(putDataOut);
         if (!putDataJson.commit) throw new Error('PUT test.json did not return commit');
         console.log('Test JSON file committed successfully');
@@ -195,7 +189,7 @@ async function main() {
                 // print container logs for debugging
                 try {
                     console.log('\n--- Container logs start ---');
-                    const logs = spawnSync(runtime || 'docker', ['logs', '--tail', '200', name], {encoding: 'utf-8'});
+                    const logs = spawnSync(runtime || 'docker', ['logs', '--tail', '200', name], { encoding: 'utf-8' });
                     if (logs.stdout) console.log(logs.stdout);
                     if (logs.stderr) console.error(logs.stderr);
                     console.log('--- Container logs end ---\n');

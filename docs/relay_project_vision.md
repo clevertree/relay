@@ -242,38 +242,106 @@ If the entire Relay network collapses except for **one** peer:
 
 # SECTION 10 — Unified Themed Styling Engine
 
-### The Styling Problem
-There is no widely used styling system that works reliably across:
-- Web (CSS)
-- React Native (style objects)
-- Desktop environments
-- Light/Dark system themes
+### *The most advanced styling system ever built for a cross-platform runtime.*
 
-All existing solutions require framework adoption, precompilation, or duplicated logic.
+This corrects a long-standing flaw in CSS: **cascading**.
 
-### Relay’s Solution
-Relay includes **`themed-styler`**, a Rust-based runtime styling engine embedded in clients.
+## 10.1 The Real Problem With CSS Cascading  
+Developers and experts have criticized cascading for decades.
 
-Key features:
-- Unified styling for web and React Native
-- Theme registry with light/dark and custom themes
-- Tailwind-style utility classes defined by themes
-- Runtime style generation (no precompile)
-- Emits only styles actually used in the DOM
-- Outputs:
-  - Web CSS strings
-  - React Native style objects with unit conversion
+### Real-World Industry Problems:
+- **Unpredictable inheritance**  
+- **“Specificity wars”** (fighting `!important` vs deeply nested selectors)  
+- **Global namespace** — `.button` conflicts across modules  
+- **Hidden side effects** — one change breaks unrelated areas  
+- **Complexity accessible only to experts**  
 
-### Performance Benefits
-Unlike traditional CSS frameworks:
-- No global stylesheet bloat
-- No unused class emission
-- Lower memory usage
-- Faster startup and rendering
+### Entire frameworks exist to escape cascading:
+- TailwindCSS
+- BEM
+- CSS Modules
+- OOCSS, SMACSS
+- Shadow DOM in Web Components
 
-This completes the Web 3.0 stack.
+All these systems are *workarounds* for a broken model.
+
+**CSS cascading is an anti-pattern — and Relay eliminates it at the architecture level.**
 
 ---
+
+# 10.2 Relay’s Styling Revolution
+
+Relay’s `themed-styler` removes cascading entirely and introduces:
+
+### ✓ Deterministic, non-cascading styling  
+No inheritance surprises.  
+No global collisions.  
+No side effects.
+
+### ✓ Tailwind-Inspired Utility Classes (but smarter)  
+Relay takes Tailwind’s idea and evolves it:
+- Utility classes exist *inside themes*
+- No global whitelist
+- No precompiled bundles
+- No “purge” step
+
+### ✓ Runtime-Driven Styling  
+Relay dynamically tracks:
+- which components render  
+- which selectors/classes are used  
+
+It then **only emits the necessary styles**, boosting performance dramatically.
+
+### ✓ Cross-Platform Output  
+`themed-styler` produces:
+
+**Web:**
+- Flat CSS string (minimal, only what’s needed)
+
+**React Native:**
+- CamelCased style objects  
+- `"8px"` → `8` unit conversion  
+- Theme-based token resolution  
+
+### ✓ Theme System  
+Supports:
+- light/dark mode  
+- breakpoints (`xs`, `sm`, `md`, `lg`, `xl`)  
+- per-theme variables  
+- theme inheritance  
+
+Switching themes requires **zero reload**.
+
+---
+
+# 10.3 Why Eliminating Cascading Matters
+
+### For users:
+- Faster page loads  
+- Less memory consumed  
+- More consistent UI  
+
+### For beginners:
+- No confusing CSS rules  
+- No specificity issues  
+- No need to learn legacy behavior  
+
+### For experts:
+- Predictability  
+- Performance  
+- True cross-platform styling  
+- Auditable theme definitions  
+
+### For Web 3.0:
+- No build tools  
+- No preprocessing  
+- No dependency on Tailwind ecosystem or bundlers  
+- Deterministic, secure, portable styling  
+
+Relay provides the **first unified styling standard** for decentralized apps.
+
+This is the final missing piece of the Web 3.0 stack.
+
 
 # SECTION 11 — Investor Section: Why Relay Is a Once-in-a-Generation Opportunity
 

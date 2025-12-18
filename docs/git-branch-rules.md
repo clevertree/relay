@@ -114,6 +114,6 @@ git:
 
 #### Schema notes
 
-- The `git` section is optional and validated by `crates/relay-lib/assets/relay.schema.yaml`.
+- The `git` section is optional and validated by the relay.yaml schema.
 - Unknown fields under `git` are rejected by schema validation (`additionalProperties: false`) to ensure deterministic
   behavior.

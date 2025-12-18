@@ -1,8 +1,0 @@
-# Local Terraform state
-.terraform/
-.terraform.lock.hcl
-terraform.tfstate
-terraform.tfstate.*
-
-# Sensitive overrides
-terraform.tfvars

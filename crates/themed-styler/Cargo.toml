@@ -1,6 +1,6 @@
 [package]
 name = "themed-styler"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Client-side runtime styling engine for web and React Native with theme support and Tailwind subset"

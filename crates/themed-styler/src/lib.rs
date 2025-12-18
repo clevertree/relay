@@ -36,9 +36,14 @@ pub struct State {
     #[serde(default)]
     pub breakpoints: IndexMap<String, String>, // deprecated global
     #[serde(default)]
-    pub used_selectors: IndexSet<String>,
+    pub used_selectors: IndexSet<String>, // deprecated: exact selector strings (kept for back-compat)
     #[serde(default)]
-    pub used_classes: IndexSet<String>,
+    pub used_classes: IndexSet<String>,   // observed classes on elements
+    #[serde(default)]
+    pub used_tags: IndexSet<String>,      // observed tags on elements
+    /// Observed (tag, class) pairs. Encoded as "tag|class" for JSON simplicity.
+    #[serde(default)]
+    pub used_tag_classes: IndexSet<String>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -105,10 +110,23 @@ impl State {
         }
     }
 
+    pub fn register_tags<I: IntoIterator<Item = String>>(&mut self, tags: I) {
+        for t in tags {
+            self.used_tags.insert(t);
+        }
+    }
+
+    pub fn register_tag_class(&mut self, tag: impl Into<String>, class_: impl Into<String>) {
+        let key = format!("{}|{}", tag.into(), class_.into());
+        self.used_tag_classes.insert(key);
+    }
+
 
     pub fn clear_usage(&mut self) {
         self.used_selectors.clear();
         self.used_classes.clear();
+        self.used_tags.clear();
+        self.used_tag_classes.clear();
     }
 
     pub fn to_json(&self) -> serde_json::Value {
@@ -122,6 +140,8 @@ impl State {
             "breakpoints": self.breakpoints,
             "used_selectors": self.used_selectors,
             "used_classes": self.used_classes,
+            "used_tags": self.used_tags,
+            "used_tag_classes": self.used_tag_classes,
         })
     }
 
@@ -131,18 +151,34 @@ impl State {
     }
 
     pub fn css_for_web(&self) -> String {
-        // Compute CSS for used selectors + used classes resolved from the effective theme (with inheritance)
+        // Compute CSS resolved from the effective theme (with inheritance)
         let (eff, vars) = self.effective_theme_all();
         let bps = self.effective_breakpoints();
         let mut rules: Vec<(String, CssProps)> = Vec::new();
+        
+        // Build closure: if a (tag,class) pair is observed, consider both the tag and the class as used too
+        let mut used_tags: IndexSet<String> = self.used_tags.clone();
+        let mut used_classes: IndexSet<String> = self.used_classes.clone();
+        for key in &self.used_tag_classes {
+            if let Some((t, c)) = split_tag_class_key(key) {
+                used_tags.insert(t);
+                used_classes.insert(c);
+            }
+        }
 
-        for sel in &self.used_selectors {
-            if let Some(props) = eff.get(sel) {
+        // Helper to decide if a themed selector should be emitted based on observed usage.
+        // Supported selector forms:
+        //  - tag           (e.g., "h1")
+        //  - .class        (e.g., ".text-sm"), optional pseudo ":hover"
+        //  - tag.class     (e.g., "h1.text-sm"), optional pseudo ":hover"
+        for (sel, props) in eff.iter() {
+            if should_emit_selector(sel, &used_tags, &used_classes, &self.used_tag_classes) {
                 rules.push((sel.clone(), props.clone()));
             }
         }
 
-        for class in &self.used_classes {
+        // Also emit dynamic utility properties for used classes
+        for class in &used_classes {
             let (bp_key, hover, base) = parse_prefixed_class(class);
             let selector = if hover { format!(".{}:hover", css_escape_class(&base)) } else { format!(".{}", css_escape_class(&base)) };
 
@@ -226,17 +262,17 @@ impl State {
         chain
     }
 
-    // Compute effective selectors + variables + breakpoints with inheritance. Parent overrides child.
+    // Compute effective selectors + variables + breakpoints with inheritance. Child overrides parent/default.
     fn effective_theme_all(&self) -> (SelectorStyles, IndexMap<String, String>) {
         let mut selectors: SelectorStyles = SelectorStyles::new();
         let mut vars: IndexMap<String, String> = IndexMap::new();
         // Start with deprecated globals as the lowest base
         for (k, v) in self.variables.iter() { vars.insert(k.clone(), v.clone()); }
-        // Merge child first then parents, with later merges overriding
+        // Merge default -> parents -> child so child wins on conflicts
         let chain = self.theme_chain();
-        for name in chain.into_iter() {
+        for name in chain.into_iter().rev() {
             if let Some(entry) = self.themes.get(&name) {
-                // merge selectors: later (parent) overrides child
+                // merge selectors: later (child) overrides parent/default
                 for (sel, props) in entry.selectors.iter() {
                     let e = selectors.entry(sel.clone()).or_default();
                     merge_props(e, props);
@@ -250,13 +286,13 @@ impl State {
         (selectors, vars)
     }
 
-    // Effective breakpoints with inheritance; parent overrides child.
+    // Effective breakpoints with inheritance; child overrides parent/default.
     pub fn effective_breakpoints(&self) -> IndexMap<String, String> {
         let mut bps: IndexMap<String, String> = IndexMap::new();
         // Start with deprecated globals
         for (k, v) in self.breakpoints.iter() { bps.insert(k.clone(), v.clone()); }
         let chain = self.theme_chain();
-        for name in chain.into_iter() {
+        for name in chain.into_iter().rev() {
             if let Some(entry) = self.themes.get(&name) {
                 for (k, v) in entry.breakpoints.iter() {
                     bps.insert(k.clone(), v.clone());
@@ -265,6 +301,59 @@ impl State {
         }
         bps
     }
+}
+
+fn split_tag_class_key(key: &str) -> Option<(String, String)> {
+    let mut it = key.splitn(2, '|');
+    let t = it.next()?.to_string();
+    let c = it.next()?.to_string();
+    if t.is_empty() || c.is_empty() { return None; }
+    Some((t, c))
+}
+
+fn strip_hover_suffix(selector: &str) -> (&str, bool) {
+    if let Some(stripped) = selector.strip_suffix(":hover") { (stripped, true) } else { (selector, false) }
+}
+
+fn should_emit_selector(sel: &str, used_tags: &IndexSet<String>, used_classes: &IndexSet<String>, used_tag_classes: &IndexSet<String>) -> bool {
+    // Optionally handle :hover suffix
+    let (base, _hover) = strip_hover_suffix(sel);
+
+    // tag-only
+    if is_simple_tag(base) {
+        return used_tags.contains(base) || used_tag_classes.iter().any(|k| k.split('|').next() == Some(base));
+    }
+
+    // .class-only
+    if let Some(class_name) = base.strip_prefix('.') {
+        // Normalize potential escaped class names as-is
+        return used_classes.contains(class_name) || used_tag_classes.iter().any(|k| k.ends_with(&format!("|{}", class_name)));
+    }
+
+    // tag.class
+    if let Some((tag, class_name)) = split_tag_class_selector(base) {
+        let key = format!("{}|{}", tag, class_name);
+        return used_tag_classes.contains(&key) || (used_tags.contains(&tag) && used_classes.contains(&class_name));
+    }
+
+    // Other complex selectors are currently ignored
+    false
+}
+
+fn is_simple_tag(s: &str) -> bool {
+    // Match simple HTML tag-ish identifiers
+    let mut chars = s.chars();
+    match chars.next() { Some(c) if c.is_ascii_alphabetic() => {}, _ => return false }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn split_tag_class_selector(s: &str) -> Option<(String, String)> {
+    // "tag.class" -> (tag, class)
+    let mut parts = s.splitn(2, '.');
+    let tag = parts.next()?.to_string();
+    let class_name = parts.next()?.to_string();
+    if tag.is_empty() || class_name.is_empty() { return None; }
+    Some((tag, class_name))
 }
 
 // wasm-bindgen exports
@@ -304,6 +393,48 @@ pub fn get_default_state_json() -> String {
     match serde_json::to_string(&st.to_json()) {
         Ok(s) => s,
         Err(_) => "{}".to_string(),
+    }
+}
+
+/// Register a theme from JSON. On duplicate, replace the theme's selectors, inheritance, and variables.
+/// Expected JSON format: `{ "name": "theme-name", "theme": { "inherits": "parent", "selectors": {...}, "variables": {...}, "breakpoints": {...} } }`
+/// Returns the updated state as JSON, or "{}" on error.
+#[wasm_bindgen]
+pub fn register_theme_json(state_json: &str, theme_json: &str) -> String {
+    match (serde_json::from_str::<State>(state_json), serde_json::from_str::<serde_json::Value>(theme_json)) {
+        (Ok(mut state), Ok(theme_obj)) => {
+            if let (Some(name), Some(theme_entry)) = (theme_obj.get("name"), theme_obj.get("theme")) {
+                if let Ok(entry) = serde_json::from_value::<ThemeEntry>(theme_entry.clone()) {
+                    let theme_name = name.as_str().unwrap_or("").to_string();
+                    if !theme_name.is_empty() {
+                        state.themes.insert(theme_name, entry);
+                    }
+                }
+            }
+            match serde_json::to_string(&state.to_json()) {
+                Ok(s) => s,
+                Err(_) => "{}".to_string(),
+            }
+        }
+        _ => "{}".to_string(),
+    }
+}
+
+/// Set the default and current theme. Returns the updated state as JSON.
+#[wasm_bindgen]
+pub fn set_theme_json(state_json: &str, theme_name: &str) -> String {
+    match serde_json::from_str::<State>(state_json) {
+        Ok(mut state) => {
+            if state.themes.contains_key(theme_name) {
+                state.default_theme = theme_name.to_string();
+                state.current_theme = theme_name.to_string();
+            }
+            match serde_json::to_string(&state.to_json()) {
+                Ok(s) => s,
+                Err(_) => "{}".to_string(),
+            }
+        }
+        _ => "{}".to_string(),
     }
 }
 
@@ -397,12 +528,12 @@ static TAILWIND_COLORS: Lazy<IndexMap<&'static str, IndexMap<&'static str, &'sta
     amber.insert("900", "#78350f"); amber.insert("950", "#451a03");
     colors.insert("amber", amber);
     
-    let mut yellow = IndexMap::new();
-    yellow.insert("50", "#fefce8"); yellow.insert("100", "#fef9c3"); yellow.insert("200", "#fef08a");
-    yellow.insert("300", "#fde047"); yellow.insert("400", "#facc15"); yellow.insert("500", "#eab308");
-    yellow.insert("600", "#ca8a04"); yellow.insert("700", "#a16207"); yellow.insert("800", "#854d0e");
-    yellow.insert("900", "#713f12"); yellow.insert("950", "#422006");
-    colors.insert("yellow", yellow);
+    let mut blue = IndexMap::new();
+    blue.insert("50", "#eff6ff"); blue.insert("100", "#dbeafe"); blue.insert("200", "#bfdbfe");
+    blue.insert("300", "#93c5fd"); blue.insert("400", "#60a5fa"); blue.insert("500", "#3b82f6");
+    blue.insert("600", "#2563eb"); blue.insert("700", "#1d4ed8"); blue.insert("800", "#1e40af");
+    blue.insert("900", "#1e3a8a"); blue.insert("950", "#0b1c52");
+    colors.insert("blue", blue);
     
     let mut lime = IndexMap::new();
     lime.insert("50", "#f7fee7"); lime.insert("100", "#ecfccb"); lime.insert("200", "#d9f99d");
