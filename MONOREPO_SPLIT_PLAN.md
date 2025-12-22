@@ -412,7 +412,7 @@ hook-transpiler = { version = "0.2", path = "../hook-transpiler" }  # Dev only
 **packages/web/package.json:**
 ```json
 {
-  "name": "@relay/web-client",
+  "name": "@clevertree/web-client",
   "dependencies": {
     "@clevertree/hook-transpiler": "^0.2.0",
     "@clevertree/themed-styler": "^0.2.0",
@@ -430,7 +430,7 @@ hook-transpiler = { version = "0.2", path = "../hook-transpiler" }  # Dev only
 **packages/mobile/package.json:**
 ```json
 {
-  "name": "@relay/mobile-client",
+  "name": "@clevertree/mobile-client",
   "dependencies": {
     "@clevertree/hook-transpiler": "^0.2.0",
     "@clevertree/themed-styler": "^0.2.0",
